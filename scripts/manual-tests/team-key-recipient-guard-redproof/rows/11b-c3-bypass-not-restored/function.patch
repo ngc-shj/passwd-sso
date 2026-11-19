@@ -1,0 +1,12 @@
+--- a/function.sql
++++ b/function.sql
+@@ -33,9 +33,6 @@
+     EXCEPTION WHEN OTHERS THEN
+       RAISE;
+     END;
+-    PERFORM set_config('app.bypass_rls', COALESCE(v_prev_rls, ''), true);
+-    PERFORM set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true);
+-    PERFORM set_config('app.bypass_purpose', COALESCE(v_prev_purpose, ''), true);
+ 
+     IF NOT v_found THEN
+       v_refusal := 'recipient_row_unlocked';

@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -23,7 +23,7 @@
+       PERFORM set_config('app.bypass_tables', 'users,team_members,team_member_keys', true);
+       PERFORM set_config('app.bypass_purpose', 'users_ecdh_key_guard', true);
+ 
+-      PERFORM 1 FROM public.users u WHERE u.id = NEW.id FOR UPDATE;
++      PERFORM 1 FROM public.users u WHERE u.id = NEW.id;
+       v_found := FOUND;
+       IF v_found AND (
+            EXISTS (SELECT 1 FROM public.team_member_keys k WHERE k.user_id = NEW.id)

@@ -1,0 +1,2 @@
+unit src/app/api/vault/setup/route.test.ts
+integration src/__tests__/db-integration/team-key-recipient-binding.integration.test.ts

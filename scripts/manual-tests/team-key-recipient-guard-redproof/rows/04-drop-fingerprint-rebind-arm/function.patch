@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -32,7 +32,7 @@
+     v_refusal := 'fingerprint_missing';
+   ELSIF NOT v_wrap_changed THEN
+     -- A fingerprint attached to a wrap nobody rewrote asserts an unchecked binding.
+-    v_refusal := 'fingerprint_rebind';
++    NULL; -- arm removed
+   ELSE
+     BEGIN
+       PERFORM set_config('app.bypass_rls', 'on', true);

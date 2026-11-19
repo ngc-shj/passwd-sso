@@ -1,0 +1,10 @@
+--- a/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
++++ b/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
+@@ -209,7 +209,6 @@
+   n_flags integer;
+ BEGIN
+   PERFORM set_config('app.bypass_rls', 'on', true);
+-  PERFORM set_config('app.bypass_tables', 'users,team_members,team_member_keys', true);
+   PERFORM set_config('app.bypass_purpose', 'system_maintenance', true);
+   PERFORM set_config('app.tenant_id', '00000000-0000-0000-0000-000000000000', true);
+ 

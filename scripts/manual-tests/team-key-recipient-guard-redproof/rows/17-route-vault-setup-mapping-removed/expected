@@ -1,0 +1,2 @@
+TEAM_KEY_RECIPIENT_GUARD:ecdh_key_overwrite	team-key recipient binding — real-DB integration writer routes and serving endpoints vault setup racing a committed setup (key set, vault_setup_at NULL): 409 VAULT_ALREADY_SETUP, no users column changed
+databaseGuardError	POST /api/vault/setup returns 409 VAULT_ALREADY_SETUP when the database refuses overwriting the ECDH public key

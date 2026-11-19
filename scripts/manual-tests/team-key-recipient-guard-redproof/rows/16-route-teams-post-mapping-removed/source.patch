@@ -1,0 +1,10 @@
+--- a/src/app/api/teams/route.ts
++++ b/src/app/api/teams/route.ts
+@@ -166,7 +166,6 @@
+     if (e instanceof CreatorDepartedError) return forbidden();
+     if (isMembershipLockConflict(e)) return membershipConflictResponse(e);
+     // The creator's own vault was reset since their client read the key it wrapped to.
+-    if (isTeamKeyRecipientChanged(e)) return errorResponse(API_ERROR.TEAM_KEY_RECIPIENT_CHANGED);
+     if (
+       e instanceof Error &&
+       (e.message === "TENANT_NOT_RESOLVED" ||

@@ -1,6 +1,6 @@
 --- a/src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts
 +++ b/src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts
-@@ -214,7 +214,7 @@
+@@ -217,7 +217,7 @@
      );
    } catch (e) {
      // The member was deactivated, or received a key, since the check.
@@ -8,4 +8,4 @@
 +    if (e instanceof MemberChangedError) {
        return errorResponse(API_ERROR.MEMBER_NOT_FOUND);
      }
-     // A rotation or a tenant-row writer held a lock past the budget: not a
+     // The recipient's vault was reset (or reset and set up again) since the

@@ -1,0 +1,2 @@
+actual=committed	team-key recipient binding — real-DB integration C2: team_key_recipient_guard arms fingerprint_rebind: attaching a fingerprint to a legacy row whose wrap is unchanged is refused; it keeps NULL
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of recipient_key_fingerprint is judged and refused; the row is unchanged

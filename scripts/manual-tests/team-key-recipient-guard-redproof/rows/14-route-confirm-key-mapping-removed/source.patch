@@ -1,0 +1,10 @@
+--- a/src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts
++++ b/src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts
+@@ -222,7 +222,6 @@
+     }
+     // The recipient's vault was reset (or reset and set up again) since the
+     // client read the public key it wrapped to: the client refetches and re-wraps.
+-    if (isTeamKeyRecipientChanged(e)) return errorResponse(API_ERROR.TEAM_KEY_RECIPIENT_CHANGED);
+     // A rotation or a tenant-row writer held a lock past the budget: not a
+     // version comparison, so the client is told to retry rather than to refetch.
+     if (isMembershipLockConflict(e)) return membershipConflictResponse(e);

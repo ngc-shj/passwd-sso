@@ -1,0 +1,1 @@
+actual=committed	team-key recipient binding — real-DB integration races key change first: the guarded insert waits for the retirement, then is refused recipient_no_key

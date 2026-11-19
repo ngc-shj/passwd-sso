@@ -95,8 +95,8 @@ false refusal (fail closed). SQL: `encode(sha256(convert_to(ecdh_public_key, 'UT
   or SERIALIZABLE a `FOR KEY SHARE` that waited on a concurrently updated row fails with `40001`,
   which fails closed (FN8: #1060's guard checks the level only on its activation and AFTER branches,
   so that is not the argument).
-- **Probe** (`docs/archive/review/team-key-recipient-binding-probe.cjs`, run as
-  `NODE_PATH=$PWD/node_modules node docs/archive/review/team-key-recipient-binding-probe.cjs "$MIGRATION_DATABASE_URL"`,
+- **Probe** (`docs/archive/review/team-key-recipient-binding-probe.mjs`, run as
+  `node docs/archive/review/team-key-recipient-binding-probe.mjs "$MIGRATION_DATABASE_URL"`,
   scratch table; A holds `FOR KEY SHARE`, B changes the key):
 
   ```
@@ -503,3 +503,25 @@ paired allow case (RT10).
 | C7 | Member sets | locked |
 | C8 | Gates, grants, RLS | locked |
 | C9 | One-time residue repair | locked |
+
+## Implementation Checklist
+
+Production (done by the orchestrator, batch A):
+- `prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql` (C1–C3, C9); `prisma/schema.prisma` field.
+- `src/lib/prisma/database-guard-arm.ts` (new, one parser — R1); `src/lib/team/departed-member-guard.ts` (now a wrapper); `src/lib/team/team-key-recipient-guard.ts` (new: arm const-object, `teamKeyRecipientGuardArm`, `isTeamKeyRecipientChanged`).
+- `src/lib/http/api-error-codes.ts` (three maps), `messages/{en,ja}/ApiErrors.json`.
+- `src/lib/validations/team.ts` `teamMemberKeySchema.recipientKeyFingerprint`.
+- Routes: confirm-key (both upsert branches + mapping), rotate-key (`createMany` + mapping), teams POST (nested create + mapping), vault setup (`ecdh_key_overwrite` → `VAULT_ALREADY_SETUP`).
+- Client: `src/lib/crypto/crypto-team.ts` (`recipientKeyFingerprint`, escrow field); `team-vault-core.tsx`, `team-rotate-key-button.tsx`, `team-create-dialog.tsx` send it.
+
+Tests (batches U, I, N, R):
+- U — unit: escrow doubles computing from their JWK argument (`team-create-dialog.test.tsx`, `team-vault-core.test.tsx`, `team-rotate-key-button.test.tsx`), route tests of the four routes (bodies + mappings, nested adapter fixtures), validation, parser, fingerprint vector (non-ASCII).
+- I — integration adopters: one helper in `src/__tests__/db-integration/helpers.ts` (idempotent recipient key, production fingerprint); 17 key-row seeders / 13 route-body builders listed by the C7 derivations, `user-owned-rows-seed.ts`, `e2e/helpers/{team-rekey.ts,team-rekey.test.ts,db.ts}`, `scripts/rls-cross-tenant-seed.sql`, #1074 red-proof rows touching confirm-key/rotate-key sources.
+- N — new `team-key-recipient-binding.integration.test.ts` per Testing strategy.
+- R — red-proof rows (separate rows dir, #1074 runner mechanism).
+
+Gates (batch G): `scripts/rls-cross-tenant-verify.sql` (allowlist + exact tables + proconfig assertion), `check-bypass-rls.mjs` allowlist only for routines created outside migrations, `db-grants-manifest.json` regen/diff, CLAUDE.md member-key row.
+
+Shared utilities to reuse: `pgErrorCode`/`SQLSTATE_CHECK_VIOLATION` (prisma-error.ts), `writeRefusedState`, `readBackfillBlock`, `gucSentinels`/`setGucs`/`readGucs`, #1074 race witness helpers (`expectAdvisoryWait`-style) in `departed-member-db-invariants.integration.test.ts`, `hexEncode`/`textEncode` (crypto-utils.ts).
+
+CI parity (Step 2-1 item 7): CI-only gates relevant to this diff, run locally in 2-4 — `check:bypass-rls`, `check:crypto-domains`, `check:migration-drift`, `check:rls-grant-evidence`, `check:rls-nesting`, `db:check-drift`, `check-state-mutation-centralization.sh`. Not relevant (no dependency/terraform change): npm audit, licenses, terraform test counts.

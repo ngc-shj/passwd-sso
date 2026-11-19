@@ -1,2 +1,3 @@
 key_inactive	departed-member leaked authority — real-DB integration C4 recipient: a target whose tenant row departed after their admission receives nothing confirm-key against an ending of the target that commits after its member read: 404, no key
 key_inactive	POST /api/teams/[teamId]/members/[memberId]/confirm-key returns 404 when the database guard refuses the key because the member was ended since the check
++-	POST /api/teams/[teamId]/members/[memberId]/confirm-key a TEAM_KEY_RECIPIENT_GUARD refusal of the key write still answers the departed guard's key_inactive as 404 MEMBER_NOT_FOUND

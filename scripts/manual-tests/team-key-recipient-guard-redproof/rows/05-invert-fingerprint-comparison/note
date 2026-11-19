@@ -1,0 +1,1 @@
+C2 comparison inverted: a matching fingerprint is refused recipient_key_changed. Collateral (+): every matching write is now refused (the guarded fixtures, the round trips, teams POST, executeVaultReset's seeded keys) and every mismatching one commits (TEMP table, teams POST mismatch).

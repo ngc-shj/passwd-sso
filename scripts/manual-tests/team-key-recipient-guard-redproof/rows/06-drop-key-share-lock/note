@@ -1,0 +1,1 @@
+C2 FOR KEY SHARE removed: the guard reads the pre-retirement key without waiting; the FK check still waits, so the race reds at its outcome (committed), not at the witness.

@@ -4,7 +4,9 @@
 // takes FOR NO KEY UPDATE, which KEY SHARE does not block. The waiting state is
 // read from pg_stat_activity after a short pause; the integration race cells
 // (pg_blocking_pids witnesses) are the authoritative evidence.
-const { Client } = require("pg");
+import pg from "pg";
+
+const { Client } = pg;
 const url = process.argv[2];
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

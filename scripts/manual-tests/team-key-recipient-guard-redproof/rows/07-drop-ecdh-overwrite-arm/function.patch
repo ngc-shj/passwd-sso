@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -16,7 +16,7 @@
+   END IF;
+ 
+   IF NEW.ecdh_public_key IS NOT NULL THEN
+-    v_refusal := 'ecdh_key_overwrite';
++    NULL; -- arm removed
+   ELSE
+     BEGIN
+       PERFORM set_config('app.bypass_rls', 'on', true);

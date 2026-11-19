@@ -1,0 +1,1 @@
+C2 recipient_no_key arm removed: a key row for a recipient with no key (or no users row) is not refused by the guard.

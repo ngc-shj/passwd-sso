@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -28,7 +28,7 @@
+       IF v_found AND (
+            EXISTS (SELECT 1 FROM public.team_member_keys k WHERE k.user_id = NEW.id)
+            OR EXISTS (SELECT 1 FROM public.team_members m WHERE m.user_id = NEW.id AND m.key_distributed)) THEN
+-        v_refusal := 'ecdh_key_change_with_keys';
++        NULL; -- arm removed
+       END IF;
+     EXCEPTION WHEN OTHERS THEN
+       RAISE;

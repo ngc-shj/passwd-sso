@@ -1,0 +1,18 @@
+--- a/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
++++ b/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
+@@ -215,13 +215,13 @@
+ 
+   DELETE FROM team_member_keys k
+    USING users u
+-   WHERE u.id = k.user_id AND u.ecdh_public_key IS NULL;
++   WHERE u.id = k.user_id;
+   GET DIAGNOSTICS n_keys = ROW_COUNT;
+ 
+   UPDATE team_members m
+      SET key_distributed = false
+     FROM users u
+-   WHERE u.id = m.user_id AND u.ecdh_public_key IS NULL AND m.key_distributed;
++   WHERE u.id = m.user_id AND m.key_distributed;
+   GET DIAGNOSTICS n_flags = ROW_COUNT;
+ 
+   RAISE NOTICE 'team-key-residue: key_rows=% flags=%', n_keys, n_flags;

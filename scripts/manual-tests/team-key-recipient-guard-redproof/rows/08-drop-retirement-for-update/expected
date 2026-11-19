@@ -1,0 +1,3 @@
+no backend blocked on pid	team-key recipient binding — real-DB integration races writer first: a raw retirement waits for the guarded insert, then is refused ecdh_key_change_with_keys
+no backend blocked on pid	team-key recipient binding — real-DB integration races key change first: the guarded insert waits for the retirement, then is refused recipient_no_key
+55P03	team-key recipient binding — real-DB integration no added lock: under a FOR KEY SHARE holder, unrelated and unchanged-key updates complete; only a retirement waits

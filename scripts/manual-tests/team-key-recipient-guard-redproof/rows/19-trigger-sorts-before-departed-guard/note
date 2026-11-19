@@ -1,0 +1,1 @@
+trg_team_member_keys_recipient_guard renamed to sort before trg_team_member_keys_departed_member_guard: an ended member's mismatching key row gets the recipient guard's token first.

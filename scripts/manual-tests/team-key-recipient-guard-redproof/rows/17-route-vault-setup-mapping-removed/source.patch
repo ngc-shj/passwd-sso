@@ -1,0 +1,12 @@
+--- a/src/app/api/vault/setup/route.ts
++++ b/src/app/api/vault/setup/route.ts
+@@ -184,9 +184,6 @@
+   } catch (e) {
+     // A concurrent setup committed first (the vaultSetupAt check above is a
+     // plain read): the database refuses overwriting its ECDH public key.
+-    if (teamKeyRecipientGuardArm(e) === TEAM_KEY_RECIPIENT_GUARD_ARM.ECDH_KEY_OVERWRITE) {
+-      return errorResponse(API_ERROR.VAULT_ALREADY_SETUP);
+-    }
+     throw e;
+   }
+ 
