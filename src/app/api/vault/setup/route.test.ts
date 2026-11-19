@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 import { teamKeyRecipientGuardError } from "@/__tests__/helpers/database-guard-error";
+import { logAuditAsync } from "@/lib/audit/audit";
 
 const { mockAuth, mockPrismaUser, mockPrismaVaultKey, mockTransaction, mockRateLimiter, mockCreateRateLimiter, mockWithUserTenantRls } = vi.hoisted(() => {
   const mockRateLimiter = { check: vi.fn() };
@@ -139,6 +140,7 @@ describe("POST /api/vault/setup", () => {
 
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("VAULT_ALREADY_SETUP");
+    expect(logAuditAsync).not.toHaveBeenCalled();
   });
 
   it("rethrows another ECDH key guard refusal", async () => {
@@ -157,6 +159,7 @@ describe("POST /api/vault/setup", () => {
     const json = await res.json();
     expect(json.success).toBe(true);
     expect(mockTransaction).toHaveBeenCalledTimes(1);
+    expect(logAuditAsync).toHaveBeenCalledTimes(1);
   });
 
   it("stores ECDH key pair fields in user update", async () => {

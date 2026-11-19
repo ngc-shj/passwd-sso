@@ -1147,13 +1147,16 @@ export function redProofOverride(name: string): string | undefined {
 /** The migration C1's two blocks live in. */
 export const RLS_BACKFILL_RERUN_DIR = "20261110000000_rls_backfill_rerun";
 
+/** The migration the team-key residue repair (C9 of #1076) lives in. */
+export const TEAM_KEY_RECIPIENT_BINDING_DIR = "20261119000000_team_key_recipient_binding";
+
 /**
  * Per migration, the red-proof override variable naming a mutated copy of its
  * migration.sql to read instead of the shipped file.
  */
 const BACKFILL_OVERRIDE_VARS: Readonly<Record<string, string>> = {
   [RLS_BACKFILL_RERUN_DIR]: "RLS_BACKFILL_RERUN_SQL",
-  "20261119000000_team_key_recipient_binding": "TEAM_KEY_RESIDUE_SQL",
+  [TEAM_KEY_RECIPIENT_BINDING_DIR]: "TEAM_KEY_RESIDUE_SQL",
 };
 
 /**

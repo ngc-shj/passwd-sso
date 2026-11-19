@@ -42,6 +42,7 @@ import {
   setGucs,
   setTestBypass,
   sqlStateOf,
+  TEAM_KEY_RECIPIENT_BINDING_DIR,
   writeRefusedState,
   type GucState,
   type TestContext,
@@ -75,7 +76,6 @@ import { executeVaultReset } from "@/lib/vault/vault-reset";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 
 const hex = (n: number) => randomBytes(n).toString("hex");
-const MIGRATION_DIR = "20261119000000_team_key_recipient_binding";
 const RESIDUE_BLOCK = "team-key-residue";
 const RECIPIENT_GUARD = "TEAM_KEY_RECIPIENT_GUARD";
 const DEPARTED_GUARD = "DEPARTED_MEMBER_GUARD";
@@ -720,14 +720,18 @@ describe("team-key recipient binding — real-DB integration", () => {
 
         const notices = collectNotices(client);
         try {
-          await client.query(readBackfillBlock(MIGRATION_DIR, RESIDUE_BLOCK));
+          await client.query(readBackfillBlock(TEAM_KEY_RECIPIENT_BINDING_DIR, RESIDUE_BLOCK));
         } finally {
           notices.stop();
         }
 
         expect(await readGucs(client)).toEqual(sentinels);
         const repaired = { keyRows: 0, distributed: false };
-        expect(await states(client, seeded)).toEqual({ activeResidue: repaired, endedResidue: repaired, keyed: held });
+        // One labelled assertion per user, so a red proof names which half failed.
+        const after = await states(client, seeded);
+        expect(after.activeResidue, "active residue repaired").toEqual(repaired);
+        expect(after.endedResidue, "ended residue repaired").toEqual(repaired);
+        expect(after.keyed, "keyed user untouched").toEqual(held);
         // Lower bounds: the block reaches every tenant.
         const reports = notices.messages.filter((m) => m.startsWith(`${RESIDUE_BLOCK}:`));
         expect(reports).toHaveLength(1);
@@ -928,6 +932,8 @@ describe("team-key recipient binding — real-DB integration", () => {
       expect(await keyRows(r.teamId, r.m)).toEqual([{ key_version: 1, recipient_key_fingerprint: fingerprint }]);
       expect(await dbFingerprint(r.m)).toBe(fingerprint);
       expect(await distributed(r.memberRowId)).toBe(true);
+      // Positive control for the refusal cells' "no audit" assertion.
+      expect(await auditRows(r.t, AUDIT_ACTION.TEAM_MEMBER_KEY_DISTRIBUTE, r.teamId)).toHaveLength(1);
     });
 
     it("rotation round trip: the keys from rotate-key/data, fingerprinted by the client function, are accepted", async () => {
@@ -947,6 +953,8 @@ describe("team-key recipient binding — real-DB integration", () => {
         expect(v2).toEqual({ key_version: 2, recipient_key_fingerprint: await dbFingerprint(userId) });
       }
       expect(await teamKeyVersion(r.teamId)).toBe(2);
+      // Positive control for the refusal cell's "no audit" assertion.
+      expect(await auditRows(r.t, AUDIT_ACTION.TEAM_KEY_ROTATION, r.teamId)).toHaveLength(1);
     });
 
     it("confirm-key with a mismatching fingerprint: 409 TEAM_KEY_RECIPIENT_CHANGED, no key row, still pending, no audit", async () => {
@@ -1081,15 +1089,29 @@ describe("team-key recipient binding — real-DB integration", () => {
       expect(before).toMatchObject({ vault_setup_at: null });
       mockAuth.mockResolvedValue({ user: { id: u } });
 
-      const res = await vaultSetupRoute(jsonRequest("http://localhost/api/vault/setup", "POST", {
+      const setup = (userId: string) => vaultSetupRoute(jsonRequest("http://localhost/api/vault/setup", "POST", {
         encryptedSecretKey: hex(32), secretKeyIv: hex(12), secretKeyAuthTag: hex(16), accountSalt: hex(32),
         authHash: hex(32), verifierHash: hex(32),
         verificationArtifact: { ciphertext: hex(32), iv: hex(12), authTag: hex(16) },
-        ecdhPublicKey: nonAsciiKey(u), encryptedEcdhPrivateKey: hex(32), ecdhPrivateKeyIv: hex(12), ecdhPrivateKeyAuthTag: hex(16),
+        ecdhPublicKey: nonAsciiKey(userId), encryptedEcdhPrivateKey: hex(32), ecdhPrivateKeyIv: hex(12), ecdhPrivateKeyAuthTag: hex(16),
       }));
-      expect({ status: res.status, body: await res.json() }).toEqual({ status: 409, body: { error: "VAULT_ALREADY_SETUP" } });
+      const setupAudits = (userId: string) => sql(
+        `SELECT 1 FROM audit_outbox WHERE tenant_id = $1::uuid AND payload->>'action' = $2 AND payload->>'userId' = $3`,
+        t, AUDIT_ACTION.VAULT_SETUP, userId,
+      );
+
+      const res = await setup(u);
+      expect(res.status, "setup over a committed key refused").toBe(409);
+      expect(await res.json()).toEqual({ error: "VAULT_ALREADY_SETUP" });
       expect(await userRow()).toEqual(before);
       expect(await sql(`SELECT 1 FROM vault_keys WHERE user_id = $1::uuid`, u)).toEqual([]);
+      expect(await setupAudits(u)).toEqual([]);
+
+      // Positive control for the "no audit" assertion: a first setup in the same tenant is audited.
+      const fresh = await ctx.createUser(t);
+      mockAuth.mockResolvedValue({ user: { id: fresh } });
+      expect((await setup(fresh)).status).toBe(201);
+      expect(await setupAudits(fresh)).toHaveLength(1);
     });
   });
 });

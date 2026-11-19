@@ -1,3 +1,5 @@
+import { SQLSTATE_CHECK_VIOLATION } from "@/lib/prisma/prisma-error";
+
 const ZERO_UUID = "00000000-0000-4000-8000-000000000000";
 
 /**
@@ -11,7 +13,7 @@ export function databaseGuardError(guardName: string, arm: string): Error {
     meta: {
       driverAdapterError: {
         cause: {
-          originalCode: "23514",
+          originalCode: SQLSTATE_CHECK_VIOLATION,
           originalMessage: `${guardName}:${arm}: team_member_keys (team ${ZERO_UUID}, user ${ZERO_UUID})`,
         },
       },

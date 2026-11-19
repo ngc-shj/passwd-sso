@@ -19,6 +19,8 @@ export const TEAM_KEY_RECIPIENT_GUARD_ARM = {
   ECDH_KEY_OVERWRITE: "ecdh_key_overwrite",
   /** A key retired while the user still holds a key row or a distributed flag. */
   ECDH_KEY_CHANGE_WITH_KEYS: "ecdh_key_change_with_keys",
+  /** The retirement's own users row was not found under its lock (unreachable from routes). */
+  RECIPIENT_ROW_UNLOCKED: "recipient_row_unlocked",
 } as const;
 
 /** The arm token when `err` is a refusal of either recipient guard, otherwise null. */

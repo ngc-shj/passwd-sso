@@ -93,3 +93,40 @@ The two integration files' local `armOf` copies became one shared `guardArmOf(er
 the tests do not check the parser with itself. The new file's two copies of the outcome chain
 became `outcomeOf`. The `actual=` texts the red-proof rows match are unchanged. The #1074 rows 31a
 and 31b (`source.patch` over `helpers.ts`) have their hunk headers refreshed.
+
+## D11 — R24: additive column and strict guard in one migration (accepted)
+The column (nullable) and the guard that refuses a NULL fingerprint ship in one migration. Splitting
+the guard into a later release would leave a release in which the reset/distribution race stays open
+and residue can accumulate after C9 has run — C9 is only sound when the guards are armed in the same
+transaction. The cost is the rollout window: an instance still on the old build answers 500
+(`fingerprint_missing`, fail-closed — no unbound wrap is stored) on confirm-key, rotate-key and
+teams POST until it is replaced; the window is the rollout's own length. The old caller's
+intermediate-state outcome is the integration file's `fingerprint_missing` refusal cell (an INSERT
+without the column). The PR's deployment notes state the window.
+
+## D12 — `TEAM_KEY_RECIPIENT_GUARD_ARM` lists D1's arm
+`recipient_row_unlocked` (D1) is in the const object, so the unit test's "other arms are rethrown"
+loop enumerates it.
+
+## D13 — Self-R-check (testing) fixes
+- The C9 cell asserts each user's state separately with a label, and the vault-setup race cell
+  asserts the status with a label before the body, so rows 07, 20 and 20b carry real tokens
+  (`setup over a committed key refused`, `active residue repaired`, `keyed user untouched`) instead
+  of `-`; those rows and the other C9 / setup rows (17, 21, 22) were re-run.
+- The confirm-key and rotation round-trip cells assert their audit row exists, the positive control
+  for the 409 cells' "no audit" assertion.
+- The migration directory is one exported const (`TEAM_KEY_RECIPIENT_BINDING_DIR`) used as the
+  `BACKFILL_OVERRIDE_VARS` key and by the test.
+
+## D13 — Step 2-5 self-R-check fixes
+- R49: `rls-cross-tenant-verify.sql`'s pinned-search_path ASSERT matched only `set_config('app.bypass_…`
+  in a body; it now uses 10b's three forms (body `set_config`, body `SET`, the function's `SET`
+  clause). Proved on the worktree database in a rolled-back transaction: a routine granting
+  `app.bypass_rls` in its `SET` clause without a pin is listed, its pinned twin is not.
+- R18: the red-proof runner's `FUNCTION_RULE_ALLOWLIST` entry matched only through
+  `undefined === undefined`; it is now `routine: null`, an explicit "dynamic name only" marker the
+  matcher and the stale-entry message name.
+- RT8: the vault-setup refusal cells (unit and integration) assert no `VAULT_SETUP` audit, each with
+  a positive control (the unit 201 case, a first setup in the same tenant).
+- RT1/RT10: `e2e/helpers/db.test.ts` resolves the `seedUser` upsert with `rowCount: 1`, as pg does
+  for a write, and pins that the membership is then seeded.

@@ -3015,11 +3015,13 @@ const CREATE_ROUTINE_TEXT_RE = new RegExp(
 );
 
 // Routines created outside prisma/migrations (R5-M2). A file entry names the
-// routine it may create; an entry that matches nothing fails the run.
+// routine it may create, or `routine: null` for routines whose name the file
+// builds at run time (the text match reads no name); an entry that matches
+// nothing fails the run.
 const FUNCTION_RULE_ALLOWLIST = [
   { file: "scripts/rls-cross-tenant-negative-test.sh", routine: "rls_negative_secdef_probe", why: "Case 9: a SECURITY DEFINER probe on a throwaway database, dropped by the case itself" },
   { file: "scripts/rls-cross-tenant-negative-test.sh", routine: "rls_bypass_enforced", why: "Case 19 (RLS_NEGATIVE_MUTATE_REAL_POLICY, CI's ephemeral database only): replaces the enforce-mode function with one returning false and restores the migration's definition in the same case" },
-  { file: "scripts/manual-tests/departed-member-guard-redproof.sh", why: "Red-proof runner: replaces a guard function (departed_member_guard, or the team_key_recipient_guard / users_ecdh_key_guard a row's `function` file names) with one mutant per row on a scratch database it creates from a template and drops; the mutant is the migration's definition with one patch applied, so the routine name is a variable" },
+  { file: "scripts/manual-tests/departed-member-guard-redproof.sh", routine: null, why: "Red-proof runner: replaces a guard function (departed_member_guard, or the team_key_recipient_guard / users_ecdh_key_guard a row's `function` file names) with one mutant per row on a scratch database it creates from a template and drops; the mutant is the migration's definition with one patch applied, so the routine name is a variable" },
   { file: "src/__tests__/db-integration/audit-db-grants.integration.test.ts", routine: "rls_bypass_enforced", why: "RLS mode cells: a function returning a fixed value, created in an empty throwaway database the test makes and drops, so the audit's mode check can be driven through main() without un-flipping the shared database" },
   { file: "src/__tests__/db-integration/departed-member-leaked-authority.integration.test.ts", routine: "c1_confirm_key_park", why: "confirm-key race cell: a trigger function that waits on a test-held advisory key, dropped in finally; sets no bypass setting" },
   { file: "src/__tests__/db-integration/departed-member-leaked-authority.integration.test.ts", routine: "c5_accept_rollback_probe", why: "C5 rollback cell: a trigger function that only raises, dropped in finally; sets no bypass setting" },
@@ -3029,7 +3031,7 @@ const FUNCTION_RULE_ALLOWLIST = [
   { prefix: "scripts/__tests__/", why: "gate fixture strings: inputs for the gates that refuse these statements" },
 ];
 const functionAllowed = (file, routine) =>
-  FUNCTION_RULE_ALLOWLIST.find((e) => (e.prefix ? file.startsWith(e.prefix) : e.file === file && e.routine === routine?.toLowerCase()));
+  FUNCTION_RULE_ALLOWLIST.find((e) => (e.prefix ? file.startsWith(e.prefix) : e.file === file && (e.routine === null ? routine === undefined : e.routine === routine?.toLowerCase())));
 
 const poolViolations = [];
 const functionViolations = [];
@@ -3073,7 +3075,7 @@ for (const [file] of POOL_RULE_ALLOWLIST) {
 }
 for (const entry of FUNCTION_RULE_ALLOWLIST) {
   if (entry.file && existsSync(entry.file) && !usedFunctionAllowances.has(entry)) {
-    functionViolations.push({ file: entry.file, line: 0, detail: `FUNCTION_RULE_ALLOWLIST entry (${entry.routine}) matches nothing: remove it` });
+    functionViolations.push({ file: entry.file, line: 0, detail: `FUNCTION_RULE_ALLOWLIST entry (${entry.routine ?? "dynamic name"}) matches nothing: remove it` });
   }
 }
 

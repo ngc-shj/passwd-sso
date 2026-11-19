@@ -500,8 +500,8 @@ BEGIN
             FROM pg_catalog.pg_proc pr
            WHERE pr.oid = 'public.users_ecdh_key_guard()'::regprocedure),
     '[E-RLS-BYPASS-ROUTINE] users_ecdh_key_guard no longer sets exactly users,team_members,team_member_keys';
-  -- A routine that grants itself the bypass and resolves names through the
-  -- caller's search_path reads a caller's TEMP table in place of the real one
+  -- A routine that grants itself the bypass (in its body or its SET clause, the
+  -- forms counted above) and resolves names through the caller's search_path reads a caller's TEMP table in place of the real one
   -- (pg_temp is searched first): every such routine pins search_path. Readers
   -- of the setting (enforce_tenant_id_from_context) grant nothing and are not
   -- in the class.
@@ -509,7 +509,9 @@ BEGIN
     SELECT 1 FROM pg_catalog.pg_proc pr
     JOIN pg_catalog.pg_namespace n ON n.oid = pr.pronamespace
     WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-      AND pr.prosrc ~* $re$set_config\s*\(\s*'app\.bypass_$re$
+      AND (pr.prosrc ~* $re$set_config\s*\(\s*'app\.bypass_$re$
+           OR pr.prosrc ~* $re$\mSET\s+((LOCAL|SESSION)\s+)?app\.bypass_$re$
+           OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
       AND NOT EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'search\_path=%')
   ),
     format('[E-RLS-BYPASS-ROUTINE] routines grant themselves an app.bypass_* setting without a pinned search_path: %s', (
@@ -517,7 +519,9 @@ BEGIN
       FROM pg_catalog.pg_proc pr
       JOIN pg_catalog.pg_namespace n ON n.oid = pr.pronamespace
       WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
-        AND pr.prosrc ~* $re$set_config\s*\(\s*'app\.bypass_$re$
+        AND (pr.prosrc ~* $re$set_config\s*\(\s*'app\.bypass_$re$
+             OR pr.prosrc ~* $re$\mSET\s+((LOCAL|SESSION)\s+)?app\.bypass_$re$
+             OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
         AND NOT EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'search\_path=%')
     ));
 END $$;

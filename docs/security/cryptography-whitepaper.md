@@ -327,7 +327,7 @@ compromise scenario. A future "compromise rotation" mode that also rotates
 tracked separately (Phase B+). For incident-response scenarios, contact
 your tenant admin. The database refuses replacing a non-NULL
 `ecdhPublicKey` directly and retiring one while any `TeamMemberKey` row or
-distributed flag for the user survives (#1076), so such a mode has to clear
+distributed flag for the user survives (`#1076`), so such a mode has to clear
 those first, as vault reset does.
 
 ### 6.2 Team Key Rotation

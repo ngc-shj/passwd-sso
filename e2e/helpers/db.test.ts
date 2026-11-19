@@ -128,7 +128,8 @@ describe("seedTenant", () => {
 describe("seedUser", () => {
   beforeEach(() => {
     mockQuery.mockClear();
-    mockQuery.mockResolvedValue({ rows: [] });
+    // pg reports one row for an INSERT ... ON CONFLICT DO UPDATE that wrote.
+    mockQuery.mockResolvedValue({ rows: [], rowCount: 1 });
   });
 
   const baseUser = {
@@ -216,6 +217,11 @@ describe("seedUser", () => {
       await seedUser({ ...baseUser, vaultFields });
       const [sql] = getCall(0);
       expect(sql).toMatch(/WHERE users\.ecdh_public_key IS NULL/i);
+    });
+
+    it("seeds the tenant membership when the upsert wrote the user row", async () => {
+      await seedUser({ ...baseUser, vaultFields });
+      expect(mockQuery).toHaveBeenCalledTimes(2);
     });
 
     it("throws, without seeding the tenant membership, when the user already holds an ECDH public key", async () => {
