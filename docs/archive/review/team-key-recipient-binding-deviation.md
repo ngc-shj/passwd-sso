@@ -79,8 +79,9 @@ names a table or routine of this change. CI's audit job is the authoritative run
 - `scripts/manual-tests/team-key-recipient-guard-redproof/rows/`: rows 1–22 (with 11a/11b, 13b, 20b)
   all prove. Rows 08, 11a and 21 go red earlier than the plan's named assertion (the lock witness;
   enforce-mode RLS refusing the leaked bypass on the same INSERT; the C9 block's own
-  `RLS_BYPASS_NOT_GRANTED`), each caused by the mutation. Rows 07, 20 and 20b carry `-` tokens because
-  the failure diff is truncated.
+  `RLS_BYPASS_NOT_GRANTED`), each caused by the mutation. Rows 07, 20 and 20b first carried `-` tokens
+  (chai truncates the diff); the cells now label their assertions, and the rows pin those labels
+  (re-proved, with row 17).
 - Rows 12 and 13a run through `rls-cross-tenant-verify.sql` on a fresh database: widening either
   function's bypass tables and removing C2's `SET search_path` each fail verify with
   `[E-RLS-BYPASS-ROUTINE]`; restored, verify is green.
