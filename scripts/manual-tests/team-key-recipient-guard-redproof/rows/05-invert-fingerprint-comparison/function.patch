@@ -1,6 +1,6 @@
 --- a/function.sql
 +++ b/function.sql
-@@ -51,7 +51,7 @@
+@@ -47,7 +47,7 @@
  
      IF v_found IS NOT TRUE OR v_key IS NULL THEN
        v_refusal := 'recipient_no_key';

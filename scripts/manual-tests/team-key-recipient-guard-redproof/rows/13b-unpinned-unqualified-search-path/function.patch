@@ -8,12 +8,12 @@
  AS $$
  DECLARE
    v_prev_rls text := current_setting('app.bypass_rls', true);
-@@ -40,7 +39,7 @@
-       PERFORM set_config('app.bypass_purpose', 'team_key_recipient_guard', true);
+@@ -39,7 +38,7 @@
+     PERFORM set_config('app.bypass_purpose', 'team_key_recipient_guard', true);
  
-       SELECT u.ecdh_public_key, true INTO v_key, v_found
--        FROM public.users u WHERE u.id = NEW.user_id
-+        FROM users u WHERE u.id = NEW.user_id
-         FOR KEY SHARE;
-     EXCEPTION WHEN OTHERS THEN
-       RAISE;
+     SELECT u.ecdh_public_key, true INTO v_key, v_found
+-      FROM public.users u WHERE u.id = NEW.user_id
++      FROM users u WHERE u.id = NEW.user_id
+       FOR KEY SHARE;
+     PERFORM set_config('app.bypass_rls', COALESCE(v_prev_rls, ''), true);
+     PERFORM set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true);

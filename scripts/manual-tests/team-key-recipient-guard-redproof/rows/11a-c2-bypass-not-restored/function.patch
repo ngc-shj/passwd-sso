@@ -1,9 +1,9 @@
 --- a/function.sql
 +++ b/function.sql
-@@ -45,9 +45,6 @@
-     EXCEPTION WHEN OTHERS THEN
-       RAISE;
-     END;
+@@ -41,9 +41,6 @@
+     SELECT u.ecdh_public_key, true INTO v_key, v_found
+       FROM public.users u WHERE u.id = NEW.user_id
+       FOR KEY SHARE;
 -    PERFORM set_config('app.bypass_rls', COALESCE(v_prev_rls, ''), true);
 -    PERFORM set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true);
 -    PERFORM set_config('app.bypass_purpose', COALESCE(v_prev_purpose, ''), true);

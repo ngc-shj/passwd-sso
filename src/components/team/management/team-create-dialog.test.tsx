@@ -263,6 +263,7 @@ describe("TeamCreateDialog", () => {
 
   it.each([
     ["CONFLICT", "conflict"],
+    ["TEAM_KEY_RECIPIENT_CHANGED", "createVaultChanged"],
     [undefined, "unknownError"],
   ])("shows a toast and leaves the slug field alone on a 409 with code %s", async (code, message) => {
     setupVault({ status: VAULT_STATUS.UNLOCKED });

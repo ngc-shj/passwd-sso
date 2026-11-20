@@ -1,6 +1,6 @@
 --- a/function.sql
 +++ b/function.sql
-@@ -50,7 +50,7 @@
+@@ -46,7 +46,7 @@
      PERFORM set_config('app.bypass_purpose', COALESCE(v_prev_purpose, ''), true);
  
      IF v_found IS NOT TRUE OR v_key IS NULL THEN

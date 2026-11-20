@@ -15,6 +15,7 @@
   "createButton": "Create",
   "created": "Team created",
   "createFailed": "Failed to create team",
+  "createVaultChanged": "Your vault was changed on another device or tab. Reload the page and unlock your vault again before creating the team.",
   "slugTaken": "This slug is already taken",
   "slugTooShort": "Slug must be at least 2 characters",
   "slugTooLong": "Slug must be 50 characters or less",

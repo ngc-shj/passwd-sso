@@ -182,6 +182,10 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
         const body = await readApiErrorBody(res);
         if (body?.error === API_ERROR.SLUG_ALREADY_TAKEN) {
           setSlugError(t("slugTaken"));
+        } else if (body?.error === API_ERROR.TEAM_KEY_RECIPIENT_CHANGED) {
+          // The recipient is the creator: their vault was reset elsewhere, and
+          // a retry here would wrap to the same stale in-memory key.
+          toast.error(t("createVaultChanged"));
         } else {
           toast.error(tApi(apiErrorToI18nKey(body?.error)));
         }

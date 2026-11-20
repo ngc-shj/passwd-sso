@@ -1,1 +1,1 @@
-C2 FOR KEY SHARE removed: the guard reads the pre-retirement key without waiting; the FK check still waits, so the race reds at its outcome (committed), not at the witness.
+C2 FOR KEY SHARE removed: the guard reads the pre-retirement key without waiting; the FK check still waits, so the race reds at its outcome (committed), not at the witness. Collateral (+): the savepoint cell's 55P03 precondition (the guard's read waiting on a held FOR UPDATE) no longer holds.

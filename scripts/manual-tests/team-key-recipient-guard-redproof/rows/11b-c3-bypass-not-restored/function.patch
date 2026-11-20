@@ -1,9 +1,9 @@
 --- a/function.sql
 +++ b/function.sql
-@@ -33,9 +33,6 @@
-     EXCEPTION WHEN OTHERS THEN
-       RAISE;
-     END;
+@@ -29,9 +29,6 @@
+          OR EXISTS (SELECT 1 FROM public.team_members m WHERE m.user_id = NEW.id AND m.key_distributed)) THEN
+       v_refusal := 'ecdh_key_change_with_keys';
+     END IF;
 -    PERFORM set_config('app.bypass_rls', COALESCE(v_prev_rls, ''), true);
 -    PERFORM set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true);
 -    PERFORM set_config('app.bypass_purpose', COALESCE(v_prev_purpose, ''), true);

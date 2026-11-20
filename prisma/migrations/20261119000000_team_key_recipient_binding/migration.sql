@@ -35,7 +35,10 @@ BEGIN;
 -- schema-qualified names (an unpinned invoker function resolves `users` through
 -- the caller's search_path, where a temp table shadows it). Their cross-table
 -- reads use departed_member_guard's pattern: the caller's bypass settings are
--- saved, set to exactly the tables read, and restored before any RAISE.
+-- saved, set to exactly the tables read, and restored before any RAISE. There
+-- is no exception sub-block (it would give every row's lock read its own
+-- subtransaction): an error from the read aborts the statement, and the
+-- transaction-local settings roll back with it.
 -- Messages carry the written row's own ids and a fixed arm token only.
 
 ALTER TABLE "team_member_keys" ADD COLUMN "recipient_key_fingerprint" VARCHAR(64);
@@ -80,17 +83,13 @@ BEGIN
     -- A fingerprint attached to a wrap nobody rewrote asserts an unchecked binding.
     v_refusal := 'fingerprint_rebind';
   ELSE
-    BEGIN
-      PERFORM set_config('app.bypass_rls', 'on', true);
-      PERFORM set_config('app.bypass_tables', 'users', true);
-      PERFORM set_config('app.bypass_purpose', 'team_key_recipient_guard', true);
+    PERFORM set_config('app.bypass_rls', 'on', true);
+    PERFORM set_config('app.bypass_tables', 'users', true);
+    PERFORM set_config('app.bypass_purpose', 'team_key_recipient_guard', true);
 
-      SELECT u.ecdh_public_key, true INTO v_key, v_found
-        FROM public.users u WHERE u.id = NEW.user_id
-        FOR KEY SHARE;
-    EXCEPTION WHEN OTHERS THEN
-      RAISE;
-    END;
+    SELECT u.ecdh_public_key, true INTO v_key, v_found
+      FROM public.users u WHERE u.id = NEW.user_id
+      FOR KEY SHARE;
     PERFORM set_config('app.bypass_rls', COALESCE(v_prev_rls, ''), true);
     PERFORM set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true);
     PERFORM set_config('app.bypass_purpose', COALESCE(v_prev_purpose, ''), true);
@@ -142,21 +141,17 @@ BEGIN
   IF NEW.ecdh_public_key IS NOT NULL THEN
     v_refusal := 'ecdh_key_overwrite';
   ELSE
-    BEGIN
-      PERFORM set_config('app.bypass_rls', 'on', true);
-      PERFORM set_config('app.bypass_tables', 'users,team_members,team_member_keys', true);
-      PERFORM set_config('app.bypass_purpose', 'users_ecdh_key_guard', true);
+    PERFORM set_config('app.bypass_rls', 'on', true);
+    PERFORM set_config('app.bypass_tables', 'users,team_members,team_member_keys', true);
+    PERFORM set_config('app.bypass_purpose', 'users_ecdh_key_guard', true);
 
-      PERFORM 1 FROM public.users u WHERE u.id = NEW.id FOR UPDATE;
-      v_found := FOUND;
-      IF v_found AND (
-           EXISTS (SELECT 1 FROM public.team_member_keys k WHERE k.user_id = NEW.id)
-           OR EXISTS (SELECT 1 FROM public.team_members m WHERE m.user_id = NEW.id AND m.key_distributed)) THEN
-        v_refusal := 'ecdh_key_change_with_keys';
-      END IF;
-    EXCEPTION WHEN OTHERS THEN
-      RAISE;
-    END;
+    PERFORM 1 FROM public.users u WHERE u.id = NEW.id FOR UPDATE;
+    v_found := FOUND;
+    IF v_found AND (
+         EXISTS (SELECT 1 FROM public.team_member_keys k WHERE k.user_id = NEW.id)
+         OR EXISTS (SELECT 1 FROM public.team_members m WHERE m.user_id = NEW.id AND m.key_distributed)) THEN
+      v_refusal := 'ecdh_key_change_with_keys';
+    END IF;
     PERFORM set_config('app.bypass_rls', COALESCE(v_prev_rls, ''), true);
     PERFORM set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true);
     PERFORM set_config('app.bypass_purpose', COALESCE(v_prev_purpose, ''), true);

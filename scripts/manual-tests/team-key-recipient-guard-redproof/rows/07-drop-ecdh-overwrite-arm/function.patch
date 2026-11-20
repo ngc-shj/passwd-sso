@@ -7,5 +7,5 @@
 -    v_refusal := 'ecdh_key_overwrite';
 +    NULL; -- arm removed
    ELSE
-     BEGIN
-       PERFORM set_config('app.bypass_rls', 'on', true);
+     PERFORM set_config('app.bypass_rls', 'on', true);
+     PERFORM set_config('app.bypass_tables', 'users,team_members,team_member_keys', true);

@@ -4087,6 +4087,30 @@ describe("function rule: routines are created in migrations", () => {
     expect(other.code).toBe(1);
     expect(other.stderr).toContain(`${negative}:5  creates another`);
   });
+
+  describe("a `routine: null` entry (the red-proof runner, whose routine name is a variable)", () => {
+    const runner = "scripts/manual-tests/departed-member-guard-redproof.sh";
+    const runnerText = readFileSync(join(REPO_ROOT, runner), "utf8");
+
+    it("passes the runner's dynamic CREATE OR REPLACE FUNCTION ${qualified}()", () => {
+      expect(runnerText).toContain("CREATE OR REPLACE FUNCTION ${qualified}()");
+      const { code, stderr } = runMulti([[runner, runnerText]]);
+      expect(code, stderr).toBe(0);
+    });
+
+    it("refuses a literal routine name in the same file, naming it", () => {
+      const evil = `psql -c "CREATE FUNCTION evil() RETURNS int AS 'SELECT 1' LANGUAGE sql"\n`;
+      const { code, stderr } = runMulti([[runner, runnerText + evil]]);
+      expect(code).toBe(1);
+      expect(stderr).toContain(`${runner}:${runnerText.split("\n").length}  creates evil`);
+    });
+
+    it("reports the entry as stale, by its dynamic name, when the file creates no routine", () => {
+      const { code, stderr } = runMulti([[runner, "#!/usr/bin/env bash\necho no routine here\n"]]);
+      expect(code).toBe(1);
+      expect(stderr).toContain(`${runner}:0  FUNCTION_RULE_ALLOWLIST entry (dynamic name) matches nothing: remove it`);
+    });
+  });
 });
 
 describe("function rule: the enforce-mode function is migration-owned", () => {

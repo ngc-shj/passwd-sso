@@ -130,7 +130,9 @@ The self-R-check sub-agents were briefed read-only but left edits, kept after re
   positive control (the membership is seeded when the upsert wrote); the setup route test asserts the
   audit is skipped on the 409 and written on success. The whitepaper's issue number is backticked.
 
-## D13 — Step 2-5 self-R-check fixes
+## D15 — Step 2-5 self-R-check fixes
+Overlaps D14: R49 and R18 below are the `rls-cross-tenant-verify.sql` and `check-bypass-rls` edits
+D14 records; this section is their finding-by-finding account.
 - R49: `rls-cross-tenant-verify.sql`'s pinned-search_path ASSERT matched only `set_config('app.bypass_…`
   in a body; it now uses 10b's three forms (body `set_config`, body `SET`, the function's `SET`
   clause). Proved on the worktree database in a rolled-back transaction: a routine granting
@@ -142,3 +144,44 @@ The self-R-check sub-agents were briefed read-only but left edits, kept after re
   a positive control (the unit 201 case, a first setup in the same tenant).
 - RT1/RT10: `e2e/helpers/db.test.ts` resolves the `seedUser` upsert with `rowCount: 1`, as pg does
   for a write, and pins that the membership is then seeded.
+
+## D16 — Phase 3 Round 1 fixes
+1. Both guards lose their `BEGIN … EXCEPTION WHEN OTHERS THEN RAISE; END;` sub-block (it only
+   re-raised, and gave every row's lock read its own subtransaction XID, so a large rotation would
+   suboverflow); an error from the read aborts the statement and the transaction-local settings roll
+   back with it. Applied to the worktree database with `CREATE OR REPLACE` and a checksum update
+   (`migrate status` clean, `db:check-drift` 0). function.patch rows 02–09, 11a, 11b and 13b were
+   regenerated against the new extract (01 and 10 were byte-identical), the C9 source.patch rows'
+   hunk headers refreshed; every mutation is the same as its note. New cell: a guarded INSERT whose
+   users read times out (55P03, inside `team_key_recipient_guard()`) under a SAVEPOINT, rolled back
+   to it, leaves the caller's settings and RLS filtering. VE3's exact-shape asserts still pass.
+2. C2's allow side for an inherited fingerprint: an `it.each` over the eight wrap columns (user_id
+   re-pointed at another member holding the same key string) on a row bound to the current key, and
+   confirm-key's update branch over such a row (200, same row, rewrapped). Row
+   `05b-refuse-inherited-matching-fingerprint` proves all nine; no deny cell moves.
+3. `check-bypass-rls` self-tests for the `routine: null` entry: the runner's dynamic CREATE passes, a
+   literal `CREATE FUNCTION evil()` in the same file fails naming it, and a file creating nothing
+   reports the entry stale as "dynamic name". With the matcher changed to `e.routine === null ?
+   true : …` (a temporary edit, reverted; `git diff --stat` empty) the `evil` cell fails alone.
+4. Row `11a2-c2-tables-purpose-not-restored`: only the bypass_tables / bypass_purpose restores
+   removed; reds the C2 restore cell at `tables: 'users'`. 11a kept.
+5. Row 21's note now says what it pins (a loud `RLS_BYPASS_NOT_GRANTED: users` inside the block).
+   Row `21b-c9-bypass-dropped-entirely` drops both the bypass_rls and bypass_tables grants: the block
+   runs under the caller's RLS and the nil tenant and silently repairs nothing (`active residue
+   repaired`).
+6. The teams POST success cell reads the creator's key from `/api/vault/unlock/data`'s
+   `ecdhPublicKey` (creator seeded with a set-up vault and a non-ASCII key) and fingerprints it with
+   `recipientKeyFingerprint`; rows 05 and 11a name the renamed cell.
+7. `e2e/helpers/db.test.ts`: both membership positive controls assert the second query is the
+   `tenant_members` insert.
+8. `seedUser` without vaultFields: the reset is guarded by `WHERE users.ecdh_public_key IS NULL` and
+   throws when it updates nothing; pinned both ways. Its only caller (global-setup's fresh user)
+   runs after `cleanup()`, so no flow re-seeds a keyed user.
+9. Team creation maps 409 `TEAM_KEY_RECIPIENT_CHANGED` to `Team.createVaultChanged` (reload and
+   unlock again: the recipient is the creator, whose in-memory key is stale); rotation and
+   distribution keep the shared ApiErrors text. Dialog test case added.
+
+Red-proofs after these changes: all 26 rows of the team-key set prove. Rows 05 and 11a gain the nine
+new allow cells as collateral (the inverted comparison, and the leaked bypass refusing every guarded
+key write, refuse them too); row 06 gains the savepoint cell (without the guard's FOR KEY SHARE the
+55P03 comes from the foreign-key check, outside the guard). #1074 rows 01, 27 and R1y prove.

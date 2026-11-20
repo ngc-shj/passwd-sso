@@ -1,6 +1,6 @@
 --- a/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
 +++ b/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
-@@ -209,7 +209,6 @@
+@@ -204,7 +204,6 @@
    n_flags integer;
  BEGIN
    PERFORM set_config('app.bypass_rls', 'on', true);

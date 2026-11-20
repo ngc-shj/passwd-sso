@@ -38,6 +38,7 @@ import {
   readBackfillBlock,
   readGucs,
   recipientKey,
+  seedVaultUser,
   setBypassRlsGucs,
   setGucs,
   setTestBypass,
@@ -68,6 +69,7 @@ import { GET as rotateKeyDataRoute } from "@/app/api/teams/[teamId]/rotate-key/d
 import { GET as pendingKeyDistributionsRoute } from "@/app/api/teams/pending-key-distributions/route";
 import { POST as createTeamRoute } from "@/app/api/teams/route";
 import { POST as vaultSetupRoute } from "@/app/api/vault/setup/route";
+import { GET as unlockDataRoute } from "@/app/api/vault/unlock/data/route";
 import { createPool } from "@/lib/db/pool-factory";
 import { prisma } from "@/lib/prisma";
 import { SQLSTATE_CHECK_VIOLATION } from "@/lib/prisma/prisma-error";
@@ -489,6 +491,39 @@ describe("team-key recipient binding — real-DB integration", () => {
     });
   });
 
+  describe("C2: the judged column list, on a row bound to the recipient's current key", () => {
+    /** A key row bound to the recipient's current key; and another member holding the same key string. */
+    async function boundRow() {
+      const f = await recipientTeam();
+      const id = await addKey(f, f.key!.fingerprint);
+      const twin = await member(f.t);
+      await addRow(f.t, f.teamId, twin, { keyDistributed: false });
+      await setKey(twin, f.key!.publicKey);
+      return { ...f, id, twin };
+    }
+
+    type Fixture = Awaited<ReturnType<typeof boundRow>>;
+    const REWRITES: readonly (readonly [string, (r: Fixture) => unknown])[] = [
+      // Re-pointed to a user whose key the row's fingerprint also names.
+      ["user_id", (r) => r.twin],
+      ["encrypted_team_key", () => hex(32)],
+      ["team_key_iv", () => hex(12)],
+      ["team_key_auth_tag", () => hex(16)],
+      ["ephemeral_public_key", () => hex(32)],
+      ["hkdf_salt", () => hex(32)],
+      ["wrap_version", () => 2],
+      ["key_version", () => 2],
+    ];
+
+    it.each(REWRITES)("an UPDATE of %s keeping the matching fingerprint is judged and allowed; the column is rewritten", async (column, value) => {
+      const r = await boundRow();
+      const next = value(r);
+      const cast = column === "user_id" ? "::uuid" : "";
+      expectAllowed(await asApp(r.t, `UPDATE team_member_keys SET ${column} = $2${cast} WHERE id = $1::uuid`, [r.id, next]));
+      expect(await keyRow(r.id)).toMatchObject({ [column]: next, recipient_key_fingerprint: r.key!.fingerprint });
+    });
+  });
+
   describe("C2/C3: the scoped bypass and the pinned search_path", () => {
     /** The caller's settings, as a block's sentinels, under `t` so the write passes RLS. */
     const prior = (t: string): GucState => ({ ...gucSentinels(), tenant: t });
@@ -522,6 +557,29 @@ describe("team-key recipient binding — real-DB integration", () => {
         expect(await readGucs(client)).toEqual(settings);
         expect(await visibleUsers(client, [f.u, foreign])).toEqual([f.u]);
       });
+    });
+
+    it("a guarded INSERT whose users read fails inside the bypass, rolled back to a savepoint, leaves the caller's settings", async () => {
+      const f = await recipientTeam();
+      const foreign = await ctx.createUser(await tenant());
+      const held = await race.holdRowLock(`SELECT 1 FROM users WHERE id = $1::uuid FOR UPDATE`, [f.u]);
+      try {
+        await withAppTx(f.t, async (client) => {
+          await client.query(`SET LOCAL lock_timeout = '200ms'`);
+          const settings = prior(f.t);
+          await setGucs(client, settings);
+          await client.query("SAVEPOINT guarded");
+          const error = await client.query(INSERT_KEY, [...insertKeyParams(f, f.key!.fingerprint)]).then(() => null, (e: unknown) => e);
+          // The precondition: the lock wait timed out in the guard's own read, with its bypass set.
+          expect(sqlStateOf(error)).toBe("55P03");
+          expect((error as { where?: string }).where).toMatch(/team_key_recipient_guard\(\)/);
+          await client.query("ROLLBACK TO SAVEPOINT guarded");
+          expect(await readGucs(client)).toEqual(settings);
+          expect(await visibleUsers(client, [f.u, foreign])).toEqual([f.u]);
+        });
+      } finally {
+        await held.release();
+      }
     });
 
     it("a TEMP TABLE users holding a matching key does not shadow the guard's read: the write is still refused", async () => {
@@ -990,6 +1048,23 @@ describe("team-key recipient binding — real-DB integration", () => {
       expect(await distributed(r.memberRowId)).toBe(true);
     });
 
+    it("confirm-key's upsert update branch over a row already bound to the current key: allowed, the wrap rewritten", async () => {
+      const r = await routeTeam({ memberDistributed: false });
+      const id = await addKey({ t: r.t, teamId: r.teamId, u: r.m }, r.memberKey.fingerprint);
+      mockAuth.mockResolvedValue({ user: { id: r.owner } });
+
+      const body = wrapBody(1, r.memberKey.fingerprint);
+      const res = await confirmKey(r.teamId, r.memberRowId, body);
+      expect(res.status).toBe(200);
+      expect(await keyRow(id)).toMatchObject({
+        id,
+        encrypted_team_key: body.encryptedTeamKey,
+        recipient_key_fingerprint: r.memberKey.fingerprint,
+      });
+      expect(await keyRows(r.teamId, r.m)).toHaveLength(1);
+      expect(await distributed(r.memberRowId)).toBe(true);
+    });
+
     it("rotate-key after reset -> set up -> redistribute between data and POST: 409 for the whole rotation, nothing written", async () => {
       const r = await routeTeam({ memberDistributed: true });
       const entryId = randomUUID();
@@ -1053,17 +1128,18 @@ describe("team-key recipient binding — real-DB integration", () => {
       expect(await auditRows(r.t, AUDIT_ACTION.TEAM_KEY_ROTATION, r.teamId)).toEqual([]);
     });
 
-    async function createTeam(fingerprint: (creatorKey: { fingerprint: string }) => Promise<string>) {
+    /** teams POST by a creator with a set-up vault and a non-ASCII key, signed in; `fingerprint` runs as them. */
+    async function createTeam(fingerprint: () => Promise<string>) {
       const t = await tenant();
-      const creator = await ctx.createUser(t);
-      const creatorKey = await recipientKey(ctx.su, creator);
+      const { userId: creator } = await seedVaultUser(ctx, t);
+      await setKey(creator, nonAsciiKey(creator));
       const teamId = randomUUID();
       mockAuth.mockResolvedValue({ user: { id: creator } });
       const res = await createTeamRoute(jsonRequest("http://localhost/api/teams", "POST", {
         id: teamId, name: "Bound", slug: `bound-${teamId.slice(0, 8)}`,
-        teamMemberKey: wrapBody(1, await fingerprint(creatorKey)),
+        teamMemberKey: wrapBody(1, await fingerprint()),
       }));
-      return { t, creator, creatorKey, teamId, res };
+      return { t, creator, teamId, res };
     }
 
     it("teams POST with a mismatching creator fingerprint: 409 TEAM_KEY_RECIPIENT_CHANGED, no team, membership or key row", async () => {
@@ -1074,8 +1150,15 @@ describe("team-key recipient binding — real-DB integration", () => {
       expect(await sql(`SELECT 1 FROM team_member_keys WHERE team_id = $1::uuid`, c.teamId)).toEqual([]);
     });
 
-    it("teams POST with the creator's fingerprint: created, the stored fingerprint is the trigger's view", async () => {
-      const c = await createTeam(async (k) => k.fingerprint);
+    it("teams POST with the creator's key from vault/unlock/data, fingerprinted by the client function: created, the stored fingerprint is the trigger's view", async () => {
+      const c = await createTeam(async () => {
+        const res = await (unlockDataRoute as unknown as (req: NextRequest) => Promise<Response>)(
+          new NextRequest("http://localhost/api/vault/unlock/data"),
+        );
+        expect(res.status).toBe(200);
+        const { ecdhPublicKey } = (await res.json()) as { ecdhPublicKey: string };
+        return recipientKeyFingerprint(ecdhPublicKey);
+      });
       expect(c.res.status).toBe(201);
       expect(await keyRows(c.teamId, c.creator)).toEqual([{ key_version: 1, recipient_key_fingerprint: await dbFingerprint(c.creator) }]);
     });

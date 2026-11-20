@@ -1,6 +1,6 @@
 --- a/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
 +++ b/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
-@@ -226,10 +226,6 @@
+@@ -221,10 +221,6 @@
  
    RAISE NOTICE 'team-key-residue: key_rows=% flags=%', n_keys, n_flags;
  

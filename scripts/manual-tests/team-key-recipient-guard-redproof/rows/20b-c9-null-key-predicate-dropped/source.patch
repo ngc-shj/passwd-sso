@@ -1,6 +1,6 @@
 --- a/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
 +++ b/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
-@@ -215,13 +215,13 @@
+@@ -210,13 +210,13 @@
  
    DELETE FROM team_member_keys k
     USING users u

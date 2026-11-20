@@ -1,6 +1,6 @@
 --- a/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
 +++ b/prisma/migrations/20261119000000_team_key_recipient_binding/migration.sql
-@@ -199,38 +199,6 @@
+@@ -194,38 +194,6 @@
  -- print the NOTICE; it reaches the server log at log_min_messages = notice or
  -- lower, or a psql run of the block.
  -- BEGIN BACKFILL team-key-residue
