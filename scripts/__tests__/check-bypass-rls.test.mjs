@@ -4088,7 +4088,7 @@ describe("function rule: routines are created in migrations", () => {
     expect(other.stderr).toContain(`${negative}:5  creates another`);
   });
 
-  describe("a `routine: null` entry (the red-proof runner, whose routine name is a variable)", () => {
+  describe("a `dynamic` entry (the red-proof runner, whose routine name is a variable)", () => {
     const runner = "scripts/manual-tests/departed-member-guard-redproof.sh";
     const runnerText = readFileSync(join(REPO_ROOT, runner), "utf8");
 
@@ -4103,6 +4103,18 @@ describe("function rule: routines are created in migrations", () => {
       const { code, stderr } = runMulti([[runner, runnerText + evil]]);
       expect(code).toBe(1);
       expect(stderr).toContain(`${runner}:${runnerText.split("\n").length}  creates evil`);
+    });
+
+    // Names the text match cannot read are not "dynamic" unless spelled exactly
+    // as the entry's `${qualified}`.
+    it.each([
+      ["a comment before the name", "CREATE FUNCTION /**/evil()"],
+      ["a non-ASCII name", "CREATE FUNCTION évil()"],
+      ["another variable", "CREATE FUNCTION ${other}()"],
+    ])("refuses an unreadable name spelled other than the entry's: %s", (_label, create) => {
+      const { code, stderr } = runMulti([[runner, `${runnerText}psql -c "${create} RETURNS int AS 'SELECT 1' LANGUAGE sql"\n`]]);
+      expect(code).toBe(1);
+      expect(stderr).toContain(`${runner}:${runnerText.split("\n").length}  creates a routine`);
     });
 
     it("reports the entry as stale, by its dynamic name, when the file creates no routine", () => {

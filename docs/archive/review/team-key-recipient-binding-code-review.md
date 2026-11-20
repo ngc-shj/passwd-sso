@@ -105,3 +105,48 @@ Verification: tsc 0; lint 0; unit 1206 files / 25725 passed; `next build` 0; int
 54 cells + departed-member-db-invariants) 193 passed; red-proofs: all 26 team-key rows and #1074 rows
 01/27/R1y PROVED; `check:bypass-rls` 0; VE3 fresh-database RLS sequence green (10b red by design,
 `audit-db-grants` environment-only per D7).
+
+## Round 2 (fix commit 4f7b7972c, after rebase onto origin/main)
+### Functionality Findings
+No findings. The removal of the exception sub-block is equivalent on every path: the old handler
+only re-raised, so the restore was skipped on error before as well; every way a caller can catch
+the error (`ROLLBACK TO SAVEPOINT`, an outer plpgsql handler) is a subtransaction abort that reverts
+the transaction-local settings. `seedUser` call sites checked; the creation message is correct for
+both `recipient_key_changed` and `recipient_no_key`.
+
+### Security Findings
+- **S1 [Minor] R47** The `routine: null` entry exempted any routine whose name the text regex fails
+  to capture (`CREATE FUNCTION /**/evil()`, a non-ASCII name, another variable) in the runner file.
+- **S2 [Minor, Adjacent]** No savepoint cell for `users_ecdh_key_guard`'s error-in-window path.
+No R43 widening: bypass tables and purposes are byte-identical to Round 1; nothing between set and
+restore writes, fires a trigger, or resolves a name through the caller's `search_path`; no
+production code catches these errors in a savepoint or handler.
+
+### Testing Findings
+- **T-R2-1 [Minor] RT7** The Round 1 savepoint cell's restore assertions pin PostgreSQL's
+  subtransaction rollback; no guard mutation can red them (its guard-sensitive part is the 55P03 /
+  `where` precondition, row 06).
+All Round 1 testing findings verified closed; the collateral `+` lines added to rows 05/06/11a are
+mutation-caused (failure messages read).
+
+### Recurring Issue Check
+- Functionality: R3, R5, R9, R12, R14, R17, R29, R38, R40, R42, R43, R48, R52, R54 OK; R24 accepted
+  (D11); R15, R25, R55 N/A.
+- Security: R1/R3, R14, R37, R43, R49, R54 OK; R47 → S1; RS1 N/A, RS2 N/A, RS3 OK, RS4 OK, RS5 N/A,
+  RS6 N/A.
+- Testing: R19 N/A; R44/R50 OK; RT1, RT2, RT4, RT5, RT8, RT10, RT11 OK; RT3, RT6, RT9 N/A; RT7 →
+  T-R2-1.
+
+### Resolution Status — Round 2
+- **S1** The runner's entry is now `dynamic: "${qualified}"`: it admits a match that read no name
+  only when the raw token after FUNCTION is exactly that spelling. Self-tests added for a comment
+  before the name, a non-ASCII name and another variable (each refused, "creates a routine");
+  red-proved by reverting the matcher to `routine === undefined` alone (the three cells red).
+- **S2** Twin cell: a FOR KEY SHARE holder on the recipient's row (a FOR UPDATE holder stops the
+  UPDATE at the executor's own tuple lock, before the trigger — probed: `where` names only
+  "while locking tuple"), P → NULL under a SAVEPOINT with `lock_timeout`, 55P03 inside
+  `users_ecdh_key_guard()`, rolled back, caller's settings and RLS filtering intact. Row 08 (C3's
+  FOR UPDATE dropped) now requires it (`expected null to be '55P03'`) and proves.
+- **T-R2-1** Comment on both savepoint cells and a note in D16: the restore assertions pin
+  PostgreSQL's rule the removal relies on; the guard-sensitive parts are the preconditions
+  (rows 06 and 08); the guards' own restores are the C2/C3 restore cells (rows 11a/11a2/11b).

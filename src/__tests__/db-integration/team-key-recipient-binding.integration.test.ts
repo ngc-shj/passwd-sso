@@ -574,6 +574,38 @@ describe("team-key recipient binding — real-DB integration", () => {
           expect(sqlStateOf(error)).toBe("55P03");
           expect((error as { where?: string }).where).toMatch(/team_key_recipient_guard\(\)/);
           await client.query("ROLLBACK TO SAVEPOINT guarded");
+          // These two pin the PostgreSQL rule the guard relies on since it has no
+          // exception block (a rolled-back subtransaction reverts its settings);
+          // no guard mutation can red them. The guard's own restore is the C2
+          // restore cell above (rows 11a/11a2); this cell's guard-sensitive part
+          // is the precondition (row 06).
+          expect(await readGucs(client)).toEqual(settings);
+          expect(await visibleUsers(client, [f.u, foreign])).toEqual([f.u]);
+        });
+      } finally {
+        await held.release();
+      }
+    });
+
+    it("a key retirement whose own-row upgrade fails inside the bypass, rolled back to a savepoint, leaves the caller's settings", async () => {
+      const f = await recipientTeam();
+      const foreign = await ctx.createUser(await tenant());
+      // FOR KEY SHARE does not conflict with the UPDATE's own row lock, so the
+      // wait lands in the guard's FOR UPDATE upgrade (a FOR UPDATE holder would
+      // stop the UPDATE before the trigger fires).
+      const held = await race.holdRowLock(`SELECT 1 FROM users WHERE id = $1::uuid FOR KEY SHARE`, [f.u]);
+      try {
+        await withAppTx(f.t, async (client) => {
+          await client.query(`SET LOCAL lock_timeout = '200ms'`);
+          const settings = prior(f.t);
+          await setGucs(client, settings);
+          await client.query("SAVEPOINT guarded");
+          const error = await client.query(`UPDATE users SET ecdh_public_key = NULL WHERE id = $1::uuid`, [f.u]).then(() => null, (e: unknown) => e);
+          // The precondition: the lock wait timed out in the guard's own upgrade, with its bypass set.
+          expect(sqlStateOf(error)).toBe("55P03");
+          expect((error as { where?: string }).where).toMatch(/users_ecdh_key_guard\(\)/);
+          await client.query("ROLLBACK TO SAVEPOINT guarded");
+          // As in the cell above, these pin PostgreSQL's subtransaction rollback.
           expect(await readGucs(client)).toEqual(settings);
           expect(await visibleUsers(client, [f.u, foreign])).toEqual([f.u]);
         });

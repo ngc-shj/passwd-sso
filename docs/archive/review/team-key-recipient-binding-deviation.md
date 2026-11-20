@@ -155,6 +155,10 @@ D14 records; this section is their finding-by-finding account.
    hunk headers refreshed; every mutation is the same as its note. New cell: a guarded INSERT whose
    users read times out (55P03, inside `team_key_recipient_guard()`) under a SAVEPOINT, rolled back
    to it, leaves the caller's settings and RLS filtering. VE3's exact-shape asserts still pass.
+   (Round 2: that cell's restore assertions pin PostgreSQL's subtransaction rollback, which the
+   removal relies on, and no guard mutation can red them; its guard-sensitive part is the 55P03 /
+   `where` precondition, proven by row 06. The guard's own restore is the C2 restore cell, rows
+   11a/11a2.)
 2. C2's allow side for an inherited fingerprint: an `it.each` over the eight wrap columns (user_id
    re-pointed at another member holding the same key string) on a row bound to the current key, and
    confirm-key's update branch over such a row (200, same row, rewrapped). Row
@@ -185,3 +189,10 @@ Red-proofs after these changes: all 26 rows of the team-key set prove. Rows 05 a
 new allow cells as collateral (the inverted comparison, and the leaked bypass refusing every guarded
 key write, refuse them too); row 06 gains the savepoint cell (without the guard's FOR KEY SHARE the
 55P03 comes from the foreign-key check, outside the guard). #1074 rows 01, 27 and R1y prove.
+
+## D17 — Phase 3 Round 2 fixes
+- `check-bypass-rls`: the runner's allowlist entry is `dynamic: "${qualified}"` (replacing
+  `routine: null`, D14/D15); the matcher admits an unreadable name only when the raw token after
+  FUNCTION is exactly that spelling. Self-tests for three other unreadable spellings, red-proved.
+- `users_ecdh_key_guard` savepoint twin cell, with a FOR KEY SHARE holder (a FOR UPDATE holder
+  blocks the UPDATE before the trigger fires); row 08 requires it.
