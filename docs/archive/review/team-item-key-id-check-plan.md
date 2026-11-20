@@ -428,3 +428,17 @@ C4 on `passwd_sso_wt_1011`; the gate self-tests; `npx vitest run`; `npx next bui
 | C4 | integration tests, seed rework, red proofs | locked |
 | C5 | destructive gate `ADD CHECK` kind | locked |
 | C6 | schema / deployment.md / gates / manifest / drift | locked |
+
+## Implementation Checklist
+
+- [x] M1 `prisma/migrations/20261120000000_team_item_key_id_check/migration.sql` (C1)
+- [x] M2 `prisma/migrations/20261120000100_team_item_key_id_check_validate/migration.sql` (C2)
+- [ ] `scripts/checks/check-destructive-migration.mjs` + `check-destructive-migration.test.mjs` + `destructive-migration-baseline.txt` (C5)
+- [ ] `src/__tests__/db-integration/helpers.ts`: `TEAM_ITEM_KEY_ID_CHECK_SQL` override in `readBackfillBlock` (reuse `redProofOverride`)
+- [ ] `src/__tests__/db-integration/team-item-key-id-check.integration.test.ts` (new, C4 1-5); reuse `readBackfillBlock`, `expectBypassRefusal`, `enterBypassRole` pattern, `gucSentinels`/`runBlock` style from the writers test
+- [ ] `src/__tests__/db-integration/team-key-rekey-writers.integration.test.ts`: A10 cell, rerun describe `seedFixtures` + helper split
+- [ ] `src/__tests__/db-integration/team-rekey-pass.integration.test.ts`: convert L1674 / L1693 / L1737
+- [ ] `prisma/schema.prisma` comments (both `itemKeyId`)
+- [ ] `docs/operations/deployment.md` (C6)
+- [ ] `src/lib/team/team-key-resolution.ts` `isRekeyPending` docstring
+- [ ] Verify: migration-transaction / rls-dml / destructive gates, `node scripts/audit-db-grants.mjs` (no diff), `npm run db:check-drift`, `npx vitest run`, `npx next build`, `npm run test:integration`, pre-pr

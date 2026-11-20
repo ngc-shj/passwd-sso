@@ -14,13 +14,18 @@
  *      exit 1 (STALE_ALLOWLIST_ENTRY anti-drift)
  * T6 — destructive DDL appearing only inside a comment or string literal does
  *      NOT trip the gate (no false positive)
+ * T9 — ALTER TABLE … ADD … CHECK in each grammatical form → exit 1 (ADD CHECK)
+ * T10 — a CHECK outside ALTER TABLE … ADD (CREATE TABLE, ALTER DOMAIN, a policy's
+ *       WITH CHECK, VALIDATE CONSTRAINT, a comment or string) → exit 0
+ * T11 — the #1011 migration's kind set is exactly ADD CHECK
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
+import { findDestructiveKinds } from "../checks/check-destructive-migration.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
@@ -273,5 +278,101 @@ describe("check-destructive-migration gate", () => {
     const r = runGate();
 
     expect(r.status).toBe(0);
+  });
+
+  // A CHECK added to an existing table narrows writes the way SET NOT NULL
+  // does: old code still live during the migration can be refused.
+  const addCheckCases = [
+    ["ADD CONSTRAINT c CHECK", `ALTER TABLE "t" ADD CONSTRAINT "c" CHECK ("x" > 0);`],
+    ["ADD CHECK without a constraint name", `ALTER TABLE "t" ADD CHECK ("x" > 0);`],
+    ["ALTER TABLE ONLY", `ALTER TABLE ONLY "t" ADD CONSTRAINT "c" CHECK ("x" > 0);`],
+    ["ALTER TABLE IF EXISTS", `ALTER TABLE IF EXISTS "t" ADD CONSTRAINT "c" CHECK ("x" > 0);`],
+    // The CHECK is the second subcommand, after one that is not an ADD.
+    [
+      "a multi-subcommand ALTER TABLE",
+      `ALTER TABLE "t" ALTER COLUMN "x" SET DEFAULT 0, ADD CONSTRAINT "c" CHECK ("x" >= 0);`,
+    ],
+    ["ADD COLUMN c int CHECK (…)", `ALTER TABLE "t" ADD COLUMN "c" INT CHECK ("c" > 0);`],
+    [
+      "ADD COLUMN IF NOT EXISTS … CONSTRAINT c CHECK (…)",
+      `ALTER TABLE "t" ADD COLUMN IF NOT EXISTS "c" INT NOT NULL DEFAULT 1 CONSTRAINT "c_pos" CHECK ("c" > 0);`,
+    ],
+    ["ADD without the optional COLUMN keyword", `ALTER TABLE "t" ADD "c" INT CHECK ("c" > 0);`],
+    // NOT VALID skips the scan of stored rows, not the check of new writes.
+    ["NOT VALID", `ALTER TABLE "t" ADD CONSTRAINT "c" CHECK ("x" > 0) NOT VALID;`],
+    // tokenize() re-scans DO bodies with quotes neutralised, so DDL inside an
+    // EXECUTE literal is seen.
+    [
+      "a CHECK inside a DO-body EXECUTE literal",
+      `DO $$ BEGIN EXECUTE 'ALTER TABLE t ADD CONSTRAINT c CHECK (x > 0)'; END $$;`,
+    ],
+  ];
+
+  for (const [kind, sql] of addCheckCases) {
+    it(`T9: fails on ${kind}`, () => {
+      addMigration("20260101000008_add_check", sql);
+
+      const r = runGate();
+
+      expect(r.status).toBe(1);
+      expect(r.stderr).toContain("DESTRUCTIVE_MIGRATION: 20260101000008_add_check (ADD CHECK)");
+    });
+  }
+
+  const notAddCheckCases = [
+    // A new table has no old writers.
+    [
+      "CREATE TABLE … CHECK",
+      `CREATE TABLE "t" ("x" INT CHECK ("x" > 0), CONSTRAINT "c" CHECK ("x" < 10));`,
+    ],
+    // The walk back for ALTER TABLE … ADD stops at the statement boundary.
+    [
+      "CREATE TABLE … CHECK after an ALTER TABLE … ADD COLUMN",
+      `ALTER TABLE "u" ADD COLUMN "y" TEXT; CREATE TABLE "t" ("x" INT CHECK ("x" > 0));`,
+    ],
+    // No migration uses a domain (`grep -rn "CREATE DOMAIN" prisma/migrations`
+    // is empty), so a domain CHECK has no writers to break.
+    ["ALTER DOMAIN … ADD CONSTRAINT … CHECK", `ALTER DOMAIN "d" ADD CONSTRAINT "c" CHECK (VALUE > 0);`],
+    // Every RLS migration writes this shape.
+    [
+      "a policy's WITH CHECK after an ALTER TABLE",
+      `ALTER TABLE "t" ENABLE ROW LEVEL SECURITY; CREATE POLICY p ON "t" USING (true) WITH CHECK (true);`,
+    ],
+    ["VALIDATE CONSTRAINT", `ALTER TABLE "t" VALIDATE CONSTRAINT "c";`],
+    [
+      "a CHECK only in a top-level comment or string",
+      [
+        `-- ALTER TABLE "t" ADD CONSTRAINT "c" CHECK ("x" > 0);`,
+        `/* ALTER TABLE t ADD CHECK (x > 0); */`,
+        `INSERT INTO "notes" ("body") VALUES ('ALTER TABLE t ADD CHECK (x > 0)');`,
+      ].join("\n"),
+    ],
+  ];
+
+  for (const [kind, sql] of notAddCheckCases) {
+    it(`T10: passes on ${kind}`, () => {
+      addMigration("20260101000009_not_add_check", sql);
+
+      const r = runGate();
+
+      expect(r.status).toBe(0);
+    });
+  }
+
+  // Baseline entries are per directory, so this migration's entry would also
+  // cover destructive DDL added to it later; pin its kind set instead.
+  it("T11: the #1011 ItemKey identity migration flags ADD CHECK and nothing else", () => {
+    const sql = readFileSync(
+      resolve(
+        REPO_ROOT,
+        "prisma",
+        "migrations",
+        "20261120000000_team_item_key_id_check",
+        "migration.sql",
+      ),
+      "utf8",
+    );
+
+    expect(findDestructiveKinds(sql)).toEqual(["ADD CHECK"]);
   });
 });

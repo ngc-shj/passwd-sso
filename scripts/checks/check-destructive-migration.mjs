@@ -17,6 +17,14 @@
  * (scale-to-zero), which is a deliberate operator decision, not a default.
  * See docs/operations/deployment.md "Migration Compatibility Rules".
  *
+ * Narrowing includes a hand-written CHECK added to an existing table (`ADD
+ * CHECK`): like SET NOT NULL, it refuses writes old code may still make, and a
+ * CHECK added without this gate noticing is how D41 of #988 happened. Prisma
+ * never generates a CHECK, so flagging one costs ordinary migrations nothing.
+ * FK and unique additions are deliberately NOT flagged: Prisma generates them
+ * for every relation and `@unique`, so flagging them would make every baseline
+ * entry routine.
+ *
  * Detection is LEXICAL, not a regex over raw text. `tokenize()` walks the SQL in
  * a single left-to-right pass tracking string/comment state, so:
  *   - `SELECT '-- harmless'; DROP TABLE users;` IS caught — the `--` sits inside
@@ -307,6 +315,23 @@ const DESTRUCTIVE_MATCHERS = [
       if (t[j] === undefined || t[j] === ";") return false;
       j += 1; // column name
       return at(t, j, "SET", "DATA", "TYPE") || t[j] === "TYPE";
+    },
+  ],
+  // ALTER TABLE … ADD [CONSTRAINT c] CHECK, and a CHECK in an ADD [COLUMN]
+  // definition. CHECK is a reserved word, so within an ALTER TABLE it can only
+  // open a constraint being added; walking back to the statement boundary for
+  // ALTER TABLE therefore covers ONLY, IF EXISTS, IF NOT EXISTS and
+  // multi-subcommand forms without enumerating them. A CHECK in CREATE TABLE
+  // (no old writers), ALTER DOMAIN (no domain is used) or a policy's WITH CHECK
+  // has no ALTER TABLE before it in its statement, so it is not matched.
+  [
+    "ADD CHECK",
+    (t, i) => {
+      if (t[i] !== "CHECK") return false;
+      for (let j = i - 1; j >= 0 && t[j] !== ";"; j--) {
+        if (at(t, j, "ALTER", "TABLE")) return true;
+      }
+      return false;
     },
   ],
 ];

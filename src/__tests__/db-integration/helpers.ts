@@ -1102,14 +1102,25 @@ export function redProofOverride(name: string): string | undefined {
 /** The migration C1's two blocks live in. */
 export const RLS_BACKFILL_RERUN_DIR = "20261110000000_rls_backfill_rerun";
 
+/** The migration of #1011's repair block and its two CHECKs. */
+export const TEAM_ITEM_KEY_ID_CHECK_DIR = "20261120000000_team_item_key_id_check";
+
+/** The migrations whose block a red proof may replace, and the variable naming the copy. */
+const BACKFILL_RED_PROOF_OVERRIDES: Readonly<Record<string, string>> = {
+  [RLS_BACKFILL_RERUN_DIR]: "RLS_BACKFILL_RERUN_SQL",
+  [TEAM_ITEM_KEY_ID_CHECK_DIR]: "TEAM_ITEM_KEY_ID_CHECK_SQL",
+};
+
 /**
  * The text between a migration's `-- BEGIN BACKFILL <name>` and `-- END
  * BACKFILL <name>` markers; throws unless exactly one pair exists. For the
  * rerun migration, RLS_BACKFILL_RERUN_SQL names a file to read instead (a
- * mutated copy, for a red proof outside the source tree).
+ * mutated copy, for a red proof outside the source tree); for the
+ * team-item-key-id-check migration, TEAM_ITEM_KEY_ID_CHECK_SQL does.
  */
 export function readBackfillBlock(migrationDir: string, name: string): string {
-  const override = migrationDir === RLS_BACKFILL_RERUN_DIR ? redProofOverride("RLS_BACKFILL_RERUN_SQL") : undefined;
+  const overrideVar = BACKFILL_RED_PROOF_OVERRIDES[migrationDir];
+  const override = overrideVar ? redProofOverride(overrideVar) : undefined;
   const sqlText = readFileSync(
     override ?? join(process.cwd(), "prisma/migrations", migrationDir, "migration.sql"),
     "utf8",
@@ -1118,6 +1129,40 @@ export function readBackfillBlock(migrationDir: string, name: string): string {
   if (found.length !== 1) throw new Error(`expected exactly one BACKFILL block "${name}" in ${migrationDir}, found ${found.length}`);
   return found[0][1];
 }
+
+/** What a repaired entry's high-water is computed from: the entry's own rows, as they stand before the repair. */
+export type RolloutEntryRows = {
+  itemKeyVersion: number;
+  /** item_key_version_high_water before the repair (0 for a previous-release create); the repair only raises it. */
+  highWater?: number;
+  historyItemKeyVersions?: readonly number[];
+  /** attachments.cek_key_version; NULL (a mode-0 attachment) counts as 0. */
+  attachmentCekKeyVersions?: readonly (number | null)[];
+};
+
+/**
+ * The state TEAM_ITEM_KEY_ID_CHECK_DIR's block leaves on a v1+ entry it gives
+ * a minted id (a previous-release create, upgrade or restore with no provable
+ * identity): marker 0, so it is pending re-key; the high-water raised to the
+ * largest item_key_version the entry, its history and its attachments' CEKs
+ * use; and a fresh item_key_id that no history row or attachment carries.
+ * The backfill cell asserts its minted entries match this, so seeds written
+ * in this shape cannot drift from what the block produces.
+ */
+export const REPAIRED_ROLLOUT_ENTRY = {
+  /** item_key_team_key_version */
+  marker: 0,
+  /** item_key_version_high_water */
+  highWater: (rows: RolloutEntryRows): number =>
+    Math.max(
+      rows.highWater ?? 0,
+      rows.itemKeyVersion,
+      ...(rows.historyItemKeyVersions ?? []),
+      ...(rows.attachmentCekKeyVersions ?? []).map((v) => v ?? 0),
+    ),
+  /** item_key_id: a fresh UUID, as gen_random_uuid() gives the block. */
+  mintItemKeyId: (): string => randomUUID(),
+} as const;
 
 export type GucState = { rls: string | null; tables: string | null; purpose: string | null; tenant: string | null };
 

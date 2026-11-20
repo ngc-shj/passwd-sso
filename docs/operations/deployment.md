@@ -232,6 +232,24 @@ release: **before** `./scripts/deploy.sh`, run the report in
 disable the team webhooks its section 2 lists — the migration's audit rows fan
 out to webhooks once it runs. After the deploy, follow the rest of that page.
 
+### One-time upgrade: `20261120000000_team_item_key_id_check`
+
+This release adds the database constraint that a team entry has an ItemKey id
+exactly when it has an ItemKey. Upgrade from 0.5.0, and let 0.5.0 finish rolling
+out first. A deployment still on 0.4.x upgrades to 0.5.0, then to this release:
+a single deploy from 0.4.x would apply the constraint while 0.4.x instances still
+serve, and their team entry creates and edits would fail with 500 until they are
+replaced.
+
+The migration repairs what 0.4.x instances wrote during the 0.5.0 rollout before
+it adds the constraint, and puts every repaired entry back in the team's re-key
+count. It holds an exclusive lock on the team entry and history tables while it
+runs, so team entry requests wait for it. Its counts appear in the PostgreSQL
+server log (`team-item-key-id-check backfill: …`), not in the deploy output. No
+operator action is needed beyond running the re-key pass for the teams whose
+count rises. The 0.5.0 rollout requirement on history restores below still
+applies to any restore that may have reached a 0.4.x instance.
+
 ### One-time upgrade: anchor publisher converged, DCR role retired
 
 The release carrying migration `20261023010000_retire_dcr_cleanup_worker_role`
@@ -1441,7 +1459,7 @@ These operations re-encrypt all entries client-side and submit the results atomi
 
 A team key rotation is followed by a per-entry re-key pass (new ItemKey per entry; see [cryptography whitepaper §6.2](../security/cryptography-whitepaper.md)). Its requests go to `/api/teams/*/passwords/*/rekey` and the attachment migrate paths, which need the 20 MB ingress allowance above.
 
-**Upgrading to the release that adds the re-key pass** (migration `20261104000000_team_key_rotation_rekey`): `deploy.sh` migrates before the services roll, so instances of the previous release keep serving against the new columns for the length of the rollout. Those instances do not write the new ItemKey identity: a team entry they create with an ItemKey, or upgrade from a legacy (v0) entry to one, carries no ItemKey id until it is re-keyed. This release counts such an entry as pending re-key, so it shows in the team's re-key count and an owner or admin running the re-key pass gives it an id. Until then, editing it or adding an attachment to it is refused with "the entry's key changed". No operator action is needed for these beyond running the pass. The database constraint that every ItemKey has an id is added in the next release.
+**Upgrading to the release that adds the re-key pass** (migration `20261104000000_team_key_rotation_rekey`): `deploy.sh` migrates before the services roll, so instances of the previous release keep serving against the new columns for the length of the rollout. Those instances do not write the new ItemKey identity: a team entry they create with an ItemKey, or upgrade from a legacy (v0) entry to one, carries no ItemKey id until it is re-keyed. This release counts such an entry as pending re-key, so it shows in the team's re-key count and an owner or admin running the re-key pass gives it an id. Until then, editing it or adding an attachment to it is refused with "the entry's key changed". No operator action is needed for these beyond running the pass. The database constraint that every ItemKey has an id is added by `20261120000000_team_item_key_id_check` in the release after (see "One-time upgrade" above).
 
 **Rollout requirement — no team history restores on previous-release instances.** A history restore served by an instance of the previous release writes back the history row's ItemKey wrap but keeps the entry's ItemKey id and re-key marker, and leaves the list overview as it was. The entry then names an ItemKey it no longer holds and is not counted as pending re-key, so the pass does not repair it: attachments and history rows bound to that id may fail to open, and an ItemKey wrapped under an older team key stays in use. This cannot be detected from the data afterwards. Before the rollout, drain the previous release's instances (or take them out of the load balancer) so that no team request reaches them once the migration has run, or ask team members not to edit or restore team entries until every instance runs this release. If a restore may have reached an old instance, the `ENTRY_HISTORY_RESTORE` audit rows of the rollout window name the entries: have a team member open each one and, where it fails to open, restore a version that opens or recreate the entry.
 
