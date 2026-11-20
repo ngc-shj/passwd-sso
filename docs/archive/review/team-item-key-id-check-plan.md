@@ -52,6 +52,14 @@ on a fresh install every migration legitimately runs in one deploy.
 0.5.0 snapshots then copy whatever pair the entry has into history. A (v0, X) entry therefore
 also produces (v0, X) **history** rows (round-1 F1).
 
+Composite shapes (code review round 1, F1/S1). An upgrade PUT of a (v0, X) entry gives (v1, X)
+with a fresh wrap and the marker kept. A restore of an older-version wrap keeps the marker, which
+leaves the marker above the wrap's team key version. Two invariants of every 0.5.0 writer make
+part of this decidable:
+- the marker is at most the wrap's normalised team key version;
+- an id names one `item_key_version` (on entries, history rows and attachment CEKs).
+Step 4 arms a and c use them.
+
 ### D-b: what the block does to each shape (mirrors the 0.5.0 restore rule)
 
 0.5.0's restore is the only 0.5.0 writer that sets an existing ItemKey's identity
@@ -80,6 +88,8 @@ id. It sets an id only where the CHECK requires one.
 | v1+, id NULL, \|H\| = 1 | id := the one id in H (identity proven; attachments bound to it then match the live wrap) |
 | v1+, id NULL, \|H\| ≠ 1 | id := gen_random_uuid() |
 | v1+, id X, marker > 0, some id in H ≠ X | marker 0 only; the id is kept (round-3 S9) |
+| any version, marker > max(team_key_version, 1) | marker 0 only (code review round 1, S1) |
+| v1+, id X, marker > 0, X on a history row or attachment CEK at another item_key_version | marker 0 only (code review round 1, F1) |
 | anything else | untouched |
 
 Why the marker-only arm is decidable when the label is not (round-3 S9):
@@ -398,8 +408,14 @@ C4 on `passwd_sso_wt_1011`; the gate self-tests; `npx vitest run`; `npx next bui
 - SC1: stale labels on id'd entries left by a 0.4.77 restore that leave no evidence. This means
   a restore from a NULL-id row of a different ItemKey, a restore whose id'd evidence row has
   since been trimmed by the 20-row cap, and a stale label a later 0.5.0 snapshot copied into
-  history (round-2 S7). The decidable F5 case (an id'd evidence row still present, marker > 0) is
-  put back in the pass by the marker-only arm. The labels are never moved (round-2 F1). They are owned by
+  history (round-2 S7). The decidable cases are put back in the pass by the marker-only arms of
+  step 4:
+  - an id'd evidence row with the entry's wrap is still present and the marker is above 0 (F5);
+  - the marker is above the wrap's team key version;
+  - the entry's id is carried at another `item_key_version` by a history row or an attachment
+    CEK (code review round 1).
+
+  What stays undecidable is a different key restored at the same item key and team key versions. The labels are never moved (round-2 F1). They are owned by
   the 0.5.0 deployment.md rollout requirement, whose `ENTRY_HISTORY_RESTORE` audit-row procedure
   names the entries. The re-key pass, if run, tries every held key, so a CEK under a stale label
   is not lost.
@@ -433,12 +449,12 @@ C4 on `passwd_sso_wt_1011`; the gate self-tests; `npx vitest run`; `npx next bui
 
 - [x] M1 `prisma/migrations/20261120000000_team_item_key_id_check/migration.sql` (C1)
 - [x] M2 `prisma/migrations/20261120000100_team_item_key_id_check_validate/migration.sql` (C2)
-- [ ] `scripts/checks/check-destructive-migration.mjs` + `check-destructive-migration.test.mjs` + `destructive-migration-baseline.txt` (C5)
-- [ ] `src/__tests__/db-integration/helpers.ts`: `TEAM_ITEM_KEY_ID_CHECK_SQL` override in `readBackfillBlock` (reuse `redProofOverride`)
-- [ ] `src/__tests__/db-integration/team-item-key-id-check.integration.test.ts` (new, C4 1-5); reuse `readBackfillBlock`, `expectBypassRefusal`, `enterBypassRole` pattern, `gucSentinels`/`runBlock` style from the writers test
-- [ ] `src/__tests__/db-integration/team-key-rekey-writers.integration.test.ts`: A10 cell, rerun describe `seedFixtures` + helper split
-- [ ] `src/__tests__/db-integration/team-rekey-pass.integration.test.ts`: convert L1674 / L1693 / L1737
-- [ ] `prisma/schema.prisma` comments (both `itemKeyId`)
-- [ ] `docs/operations/deployment.md` (C6)
-- [ ] `src/lib/team/team-key-resolution.ts` `isRekeyPending` docstring
-- [ ] Verify: migration-transaction / rls-dml / destructive gates, `node scripts/audit-db-grants.mjs` (no diff), `npm run db:check-drift`, `npx vitest run`, `npx next build`, `npm run test:integration`, pre-pr
+- [x] `scripts/checks/check-destructive-migration.mjs` + `check-destructive-migration.test.mjs` + `destructive-migration-baseline.txt` (C5)
+- [x] `src/__tests__/db-integration/helpers.ts`: `TEAM_ITEM_KEY_ID_CHECK_SQL` override in `readBackfillBlock` (reuse `redProofOverride`)
+- [x] `src/__tests__/db-integration/team-item-key-id-check.integration.test.ts` (new, C4 1-5); reuse `readBackfillBlock`, `expectBypassRefusal`, `enterBypassRole` pattern, `gucSentinels`/`runBlock` style from the writers test
+- [x] `src/__tests__/db-integration/team-key-rekey-writers.integration.test.ts`: A10 cell, rerun describe `seedFixtures` + helper split
+- [x] `src/__tests__/db-integration/team-rekey-pass.integration.test.ts`: convert L1674 / L1693 / L1737
+- [x] `prisma/schema.prisma` comments (both `itemKeyId`)
+- [x] `docs/operations/deployment.md` (C6)
+- [x] `src/lib/team/team-key-resolution.ts` `isRekeyPending` docstring
+- [x] Verify: migration-transaction / rls-dml / destructive gates, `node scripts/audit-db-grants.mjs` (no diff), `npm run db:check-drift`, `npx vitest run`, `npx next build`, `npm run test:integration`, pre-pr

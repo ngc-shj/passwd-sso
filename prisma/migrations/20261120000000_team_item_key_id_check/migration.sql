@@ -29,13 +29,26 @@ BEGIN;
 --     history rows whose wrap equals the entry's, when they carry exactly one;
 --     equal wraps are the same ItemKey. Otherwise
 --  3. a minted id.
---  4. v1+ entry with an id and a marker above 0, sharing its wrap with a
---     history row under another id: marker 0, id kept. Two labels on one
---     ItemKey are legitimate in 0.5.0 (its restore mints an id for each
---     restore of a history row of unknown identity), so no label is moved;
---     but that restore writes marker 0, and no 0.5.0 writer that sets a marker
---     above 0 keeps the wrap. Only a 0.4.77 restore of a row that had an id
---     leaves this, and the entry may hold an ItemKey from before a rotation.
+--  4. Marker 0, id kept, for an entry whose rows prove a 0.4.77 write left
+--     its ItemKey's creation version wrong:
+--     a. a marker above its wrap's (normalised) team key version. 0.5.0 sets
+--        the marker to the wrap's version or keeps it with an ItemKey whose
+--        wraps are all at or after it; 0.4.77 restored an older wrap and kept
+--        the marker.
+--     b. v1+ with an id and a marker above 0, sharing its wrap with a history
+--        row under another id. Two labels on one ItemKey are legitimate in
+--        0.5.0 (its restore mints an id for each restore of a history row of
+--        unknown identity), so no label is moved; but that restore writes
+--        marker 0, and no 0.5.0 writer that sets a marker above 0 keeps the
+--        wrap. Only a 0.4.77 restore of a row that had an id leaves this.
+--     c. v1+ with an id and a marker above 0, whose id a history row or an
+--        attachment's CEK carries at another itemKeyVersion. In 0.5.0 an id
+--        names one version (every new ItemKey gets a new id); 0.4.77 changed
+--        the version (a restore, or an upgrade of a v0 entry a restore had
+--        left an id on) and kept the id.
+--     The entry may then hold an ItemKey from before a rotation. A restore of
+--     another key at the same version and team key version leaves no
+--     evidence, and stays as it is.
 --  5. v0 history row with an id (0.5.0 snapshot of a case-1 entry): id NULL.
 --  6. History rows of the entries 2-3 gave an id, whose wrap equals the
 --     entry's and that have no id: the entry's id. Only those entries, for the
@@ -54,8 +67,9 @@ BEGIN;
 -- 0.5.0 writer produces. Every table is under FORCE RLS and the RDS migrate
 -- role is NOSUPERUSER NOBYPASSRLS, so the block grants itself exactly these
 -- tables, transaction-locally, and restores the previous settings after
--- (20261116200000 is the precedent). The NOTICE is seen in the server log or
--- through psql; `prisma migrate deploy` does not print it.
+-- (20261116200000 is the precedent). The NOTICE is seen through psql, or in
+-- the server log where log_min_messages is notice or lower; `prisma migrate
+-- deploy` does not print it.
 -- BEGIN BACKFILL team-item-key-id-check
 DO $backfill$
 DECLARE
@@ -127,19 +141,30 @@ BEGIN
   -- 4.
   UPDATE team_password_entries e
      SET item_key_team_key_version = 0
-   WHERE e.item_key_version >= 1
-     AND e.item_key_id IS NOT NULL
-     AND e.item_key_team_key_version > 0
-     AND EXISTS (
-       SELECT 1 FROM team_password_entry_histories h
-        WHERE h.entry_id = e.id
-          AND h.item_key_id IS NOT NULL
-          AND h.item_key_id <> e.item_key_id
-          AND h.encrypted_item_key = e.encrypted_item_key
-          AND h.item_key_iv = e.item_key_iv
-          AND h.item_key_auth_tag = e.item_key_auth_tag
-          AND h.team_key_version = e.team_key_version
-          AND h.item_key_version = e.item_key_version);
+   WHERE e.item_key_team_key_version > GREATEST(e.team_key_version, 1)
+      OR (e.item_key_version >= 1
+          AND e.item_key_id IS NOT NULL
+          AND e.item_key_team_key_version > 0
+          AND (EXISTS (
+                 SELECT 1 FROM team_password_entry_histories h
+                  WHERE h.entry_id = e.id
+                    AND h.item_key_id IS NOT NULL
+                    AND h.item_key_id <> e.item_key_id
+                    AND h.encrypted_item_key = e.encrypted_item_key
+                    AND h.item_key_iv = e.item_key_iv
+                    AND h.item_key_auth_tag = e.item_key_auth_tag
+                    AND h.team_key_version = e.team_key_version
+                    AND h.item_key_version = e.item_key_version)
+               OR EXISTS (
+                 SELECT 1 FROM team_password_entry_histories h
+                  WHERE h.entry_id = e.id
+                    AND h.item_key_id = e.item_key_id
+                    AND h.item_key_version <> e.item_key_version)
+               OR EXISTS (
+                 SELECT 1 FROM attachments a
+                  WHERE a.team_password_entry_id = e.id
+                    AND a.cek_item_key_id = e.item_key_id
+                    AND a.cek_key_version <> e.item_key_version)));
   GET DIAGNOSTICS n_stale_pending = ROW_COUNT;
 
   -- 5.

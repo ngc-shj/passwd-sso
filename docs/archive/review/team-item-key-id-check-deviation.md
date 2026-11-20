@@ -61,3 +61,29 @@
   every path except a copy of M1 with the entries CHECK replaced by `CHECK (true)` turned A10 red
   ("expected null to match object { code: '23514' }"). The same tree with an unchanged copy
   passed.
+- D9 (code review round 1, step 4 widened): step 4 now also resets the marker in two cases:
+  - (a) the marker is above `GREATEST(team_key_version, 1)`;
+  - (c) the entry's id is carried at another version by a history row or an attachment CEK.
+
+  The backfill cell seeds a case each arm moves and an allow twin for each, plus the testing
+  review's wrap-equality controls for steps 4(b) and 6 and two attachments on a minted entry. Its
+  counts are now `stale_pending` 6 and `high_water` 9; the rest are unchanged. No existing seed
+  changed state.
+
+  All mutants were regenerated from the widened file (`mutants-r3`): the 17 old ones (07–09
+  re-targeted, keeping their meaning) and 15 new ones:
+  - (a) removed, `>=`, and bare `team_key_version`;
+  - (c1) and (c2), each removed or with `<>` dropped;
+  - 4(b) and step 6 reduced to 3 columns, to each single missing column, and to
+    `IS NOT DISTINCT FROM`.
+
+  Every mutant turned the cell named in D8 red; every new one failed the backfill cell on the seed
+  meant to catch it.
+
+  helpers.ts mutants were run from a scratch symlink tree:
+  - dropping the attachment term of `REPAIRED_ROLLOUT_ENTRY.highWater` turned the guard red;
+  - so did `?? 0` → `?? 4`;
+  - `?? 0` → `?? 1` survives. It is an equivalent mutant: the helper only computes v1+ entries,
+    whose max is already at least 1.
+
+  `npm run test:integration` passes in full: 173 files, 2396 tests.
