@@ -180,13 +180,13 @@ async function handlePUT(req: NextRequest, { params }: RouteContext) {
       if (locked.itemKeyVersion === 0) {
         return { ok: false, code: API_ERROR.ENTRY_UPGRADE_REQUIRED };
       }
-      // A v1+ entry with no id was written by an instance of the previous
-      // release during rollout (D41) and is pending re-key, which needs its
-      // legacy attachments migrated first. Its unknown ItemKey is accepted
-      // only from a client that read it as unknown too; the CEK is then bound
-      // to no id, and the re-key opens it by trial. Every writer of this
-      // release mints an id, so a change of the entry's ItemKey since the
-      // client's read is still refused unless an older instance made it.
+      // A v1+ entry with no id was written by an instance of an older release
+      // during the 0.5.0 rollout (D41); 20261120000000 gave every such entry
+      // an id and its CHECK refuses the shape since, so the null arm is
+      // unreachable and stays only because the column is nullable. A client
+      // that read the entry before that repair still sends null, and is
+      // refused as ITEM_KEY_CHANGED: its read no longer names the entry's
+      // ItemKey.
       const sameItemKey =
         locked.itemKeyId === null ? body.itemKeyId === null : itemKeyIdsMatch(body.itemKeyId, locked.itemKeyId);
       if (!sameItemKey) {

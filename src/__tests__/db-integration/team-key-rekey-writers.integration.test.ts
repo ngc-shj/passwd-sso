@@ -34,10 +34,15 @@ import {
   setBypassRlsGucs,
   setGucs,
   setTestBypass,
+  TEAM_ENTRY_ITEM_KEY_ID_CHECK,
+  TEAM_HISTORY_ITEM_KEY_ID_CHECK,
+  TEAM_ITEM_KEY_ID_CHECK_DIR,
+  teamItemKeyIdCheckAlters,
   writeRefusedState,
   type TestContext,
 } from "./helpers";
 import { createPool } from "@/lib/db/pool-factory";
+import { SQLSTATE_CHECK_VIOLATION } from "@/lib/prisma/prisma-error";
 import { createRaceHelpers } from "./race-helpers";
 
 const mockAuth = vi.fn();
@@ -362,22 +367,13 @@ describe("team entry key identity writers — real-DB integration", () => {
 
   /** Drops the two CHECKs 20261120000000 adds, inside the caller's transaction, so pre-change shapes can be set up. */
   async function dropItemKeyIdChecks(client: pg.PoolClient): Promise<void> {
-    await client.query(`ALTER TABLE team_password_entries DROP CONSTRAINT team_password_entries_item_key_id_iff_item_key`);
-    await client.query(`ALTER TABLE team_password_entry_histories DROP CONSTRAINT team_password_entry_histories_v0_no_item_key_id`);
+    await client.query(`ALTER TABLE team_password_entries DROP CONSTRAINT ${TEAM_ENTRY_ITEM_KEY_ID_CHECK}`);
+    await client.query(`ALTER TABLE team_password_entry_histories DROP CONSTRAINT ${TEAM_HISTORY_ITEM_KEY_ID_CHECK}`);
   }
 
-  /** Re-adds them as 20261120000000 does. */
+  /** Re-adds them with 20261120000000's own statements. */
   async function addItemKeyIdChecks(client: pg.PoolClient): Promise<void> {
-    await client.query(
-      `ALTER TABLE team_password_entries
-         ADD CONSTRAINT team_password_entries_item_key_id_iff_item_key
-         CHECK ((item_key_version = 0) = (item_key_id IS NULL)) NOT VALID`,
-    );
-    await client.query(
-      `ALTER TABLE team_password_entry_histories
-         ADD CONSTRAINT team_password_entry_histories_v0_no_item_key_id
-         CHECK (item_key_version <> 0 OR item_key_id IS NULL) NOT VALID`,
-    );
+    for (const statement of teamItemKeyIdCheckAlters(TEAM_ITEM_KEY_ID_CHECK_DIR)) await client.query(statement);
   }
 
   // ── A10: the backfill block ──────────────────────────────────────────────
@@ -456,7 +452,8 @@ describe("team entry key identity writers — real-DB integration", () => {
       // 20261120000000 adds the CHECK once no release writes a v1 entry without an id.
       await addItemKeyIdChecks(client);
       const constraint = await client.query(
-        `SELECT 1 FROM pg_constraint WHERE conname = 'team_password_entries_item_key_id_iff_item_key'`,
+        `SELECT 1 FROM pg_constraint WHERE conname = $1`,
+        [TEAM_ENTRY_ITEM_KEY_ID_CHECK],
       );
       expect(constraint.rowCount).toBe(1);
       // The last statement of the transaction: the refusal aborts it, and the finally rolls back.
@@ -468,7 +465,7 @@ describe("team entry key identity writers — real-DB integration", () => {
          ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid, 'b', $5, $6, 'o', $5, $6, 1, now(), now())`,
         [randomUUID(), teamV3, tenantId, owner1, hex(12), hex(16)],
       ).then(() => null, (e: unknown) => e as { code?: string; constraint?: string });
-      expect(refused).toMatchObject({ code: "23514", constraint: "team_password_entries_item_key_id_iff_item_key" });
+      expect(refused).toMatchObject({ code: SQLSTATE_CHECK_VIOLATION, constraint: TEAM_ENTRY_ITEM_KEY_ID_CHECK });
     } finally {
       await client.query("ROLLBACK");
       client.release();

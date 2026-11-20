@@ -10,7 +10,10 @@
 
   One early run went red with `high_water` 10 instead of 7. Two agents were running integration
   files against `passwd_sso_wt_1011` at the same time, and the database was clean again right
-  after. Every later serial run was green.
+  after. Every later serial run was green. The Phase 2 self-check (RT11) asked for the second
+  condition not to be assumed. The cell now runs the block once in its own transaction before
+  seeding, which repairs any committed residue (from a crashed run elsewhere, say), so the literal
+  counts depend only on the cell's rows. The first condition still holds.
 - D2 (C4, table-list cells): beyond the plan, each table-list cell seeds the backfill cell's
   shapes after dropping the constraints. With one clean row, the histories case was refused only
   through step 7. PostgreSQL evaluates leakproof predicates (`IS NOT NULL`) before the RLS policy,
@@ -39,3 +42,22 @@
   `REVOKE ALL ON DATABASE passwd_sso_wt_1011 FROM passwd_dcr_cleanup_worker`, the state that
   migration intends, the three files pass (69/69). The other 170 files passed in the full run.
   audit-db-grants passing also confirms D6: the manifest matches.
+- D8 (C4, red-proof record): after the self-check changes, every block mutant was run against
+  the final test file through `TEAM_ITEM_KEY_ID_CHECK_SQL` (a mutated copy outside the source
+  tree), and each failed. The cells that failed:
+  - the backfill cell (its post-state map, counts or settings check), for 1 (v0 clear removed),
+    2 (adopt removed), 3 (adopt picks one of several), 4a (wrap equality on three columns),
+    4b (`IS NOT DISTINCT FROM`), 5 (id'd entries relabelled), 6 (marker reset removed),
+    7 (marker-only arm removed), 8 (marker-only ignores the marker), 9 (marker-only on every
+    id), 10 (history v0 clear removed), 11 (link generalised), 12 (link removed) and
+    14 (settings restore removed);
+  - for 13 (high-water removed), the backfill cell and the attachments table-list control;
+  - for 15 (lock removed), lock cells (a) and (b);
+  - for 16 (lock after the updates), lock cell (b);
+  - for 17 (bypass removed), the backfill cell and all three table-list controls.
+
+  In the writers file, the A10 tail now runs M1's own `ADD CONSTRAINT` statements
+  (`teamItemKeyIdCheckAlters` in helpers.ts) instead of a hand copy. A scratch tree that links
+  every path except a copy of M1 with the entries CHECK replaced by `CHECK (true)` turned A10 red
+  ("expected null to match object { code: '23514' }"). The same tree with an unchanged copy
+  passed.

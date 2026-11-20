@@ -52,8 +52,8 @@ export function isAesGcmAuthFailure(e: unknown): boolean {
  * older team key, or it holds an ItemKey of unknown identity (v1+ with a
  * NULL id). The database refuses that second shape since
  * 20261120000000_team_item_key_id_check, which repaired the rows 0.4.77
- * instances wrote during the 0.5.0 rollout; the check stays because the
- * column is nullable for v0 entries.
+ * instances wrote during the 0.5.0 rollout; the check stays as a defensive
+ * arm because the column's type is still nullable.
  */
 export function isRekeyPending(
   entry: { itemKeyVersion: number; itemKeyId?: string | null; itemKeyTeamKeyVersion: number },

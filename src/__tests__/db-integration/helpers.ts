@@ -1105,6 +1105,26 @@ export const RLS_BACKFILL_RERUN_DIR = "20261110000000_rls_backfill_rerun";
 /** The migration of #1011's repair block and its two CHECKs. */
 export const TEAM_ITEM_KEY_ID_CHECK_DIR = "20261120000000_team_item_key_id_check";
 
+/** The repair block's BACKFILL marker name in TEAM_ITEM_KEY_ID_CHECK_DIR. */
+export const TEAM_ITEM_KEY_ID_CHECK_BLOCK = "team-item-key-id-check";
+
+/** The two CHECKs TEAM_ITEM_KEY_ID_CHECK_DIR adds. */
+export const TEAM_ENTRY_ITEM_KEY_ID_CHECK = "team_password_entries_item_key_id_iff_item_key";
+export const TEAM_HISTORY_ITEM_KEY_ID_CHECK = "team_password_entry_histories_v0_no_item_key_id";
+
+/**
+ * The two `ALTER TABLE …;` statements of a #1011 migration (the ADDs of
+ * TEAM_ITEM_KEY_ID_CHECK_DIR, after its repair block, or the VALIDATEs that
+ * follow it), read from the shipped file so a test runs exactly what deploys.
+ */
+export function teamItemKeyIdCheckAlters(migrationDir: string): string[] {
+  const text = readFileSync(join(process.cwd(), "prisma/migrations", migrationDir, "migration.sql"), "utf8");
+  const tail = text.split(`-- END BACKFILL ${TEAM_ITEM_KEY_ID_CHECK_BLOCK}\n`).at(-1)!;
+  const statements = tail.replace(/^--.*$/gm, "").match(/ALTER TABLE[^;]*;/g) ?? [];
+  if (statements.length !== 2) throw new Error(`expected two ALTER TABLE statements in ${migrationDir}, found ${statements.length}`);
+  return statements;
+}
+
 /** The migrations whose block a red proof may replace, and the variable naming the copy. */
 const BACKFILL_RED_PROOF_OVERRIDES: Readonly<Record<string, string>> = {
   [RLS_BACKFILL_RERUN_DIR]: "RLS_BACKFILL_RERUN_SQL",

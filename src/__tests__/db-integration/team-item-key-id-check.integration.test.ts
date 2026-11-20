@@ -15,8 +15,6 @@
 
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID, randomBytes } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import type pg from "pg";
 import {
   appConnectionString,
@@ -31,17 +29,19 @@ import {
   setBypassRlsGucs,
   setGucs,
   superuserConnectionString,
+  TEAM_ENTRY_ITEM_KEY_ID_CHECK as ENTRY_CHECK,
+  TEAM_HISTORY_ITEM_KEY_ID_CHECK as HISTORY_CHECK,
+  TEAM_ITEM_KEY_ID_CHECK_BLOCK as BLOCK_NAME,
   TEAM_ITEM_KEY_ID_CHECK_DIR,
+  teamItemKeyIdCheckAlters as alterStatements,
   type RolloutEntryRows,
   type TestContext,
 } from "./helpers";
 import { createPool } from "@/lib/db/pool-factory";
+import { SQLSTATE_CHECK_VIOLATION } from "@/lib/prisma/prisma-error";
 import { createRaceHelpers } from "./race-helpers";
 
-const ENTRY_CHECK = "team_password_entries_item_key_id_iff_item_key";
-const HISTORY_CHECK = "team_password_entry_histories_v0_no_item_key_id";
 const VALIDATE_DIR = "20261120000100_team_item_key_id_check_validate";
-const BLOCK_NAME = "team-item-key-id-check";
 const REPORT = "team-item-key-id-check backfill:";
 const BLOCK_TABLES = ["team_password_entries", "team_password_entry_histories", "attachments"] as const;
 const LOCK_STATEMENT = "LOCK TABLE team_password_entries, team_password_entry_histories IN ACCESS EXCLUSIVE MODE";
@@ -58,15 +58,6 @@ type Wrap = { encryptedItemKey: string | null; itemKeyIv: string | null; itemKey
 
 function newWrap(): Wrap {
   return { encryptedItemKey: hex(48), itemKeyIv: hex(12), itemKeyAuthTag: hex(16) };
-}
-
-/** The `ALTER TABLE …;` statements of a migration file, after its backfill block if it has one. */
-function alterStatements(dir: string): string[] {
-  const text = readFileSync(join(process.cwd(), "prisma/migrations", dir, "migration.sql"), "utf8");
-  const tail = text.split(`-- END BACKFILL ${BLOCK_NAME}\n`).at(-1)!;
-  const statements = tail.replace(/^--.*$/gm, "").match(/ALTER TABLE[^;]*;/g) ?? [];
-  if (statements.length !== 2) throw new Error(`expected two ALTER TABLE statements in ${dir}, found ${statements.length}`);
-  return statements;
 }
 
 const pgError = (e: unknown) => e as { code?: string; constraint?: string; where?: string; message?: string };
@@ -304,11 +295,11 @@ describe("team item key id CHECKs (#1011) — real-DB integration", () => {
       };
 
       expect({ refused, accepted, updates, histories }).toEqual({
-        refused: { entryV1NullInsert: `23514 ${ENTRY_CHECK}`, entryV0IdInsert: `23514 ${ENTRY_CHECK}` },
+        refused: { entryV1NullInsert: `${SQLSTATE_CHECK_VIOLATION} ${ENTRY_CHECK}`, entryV0IdInsert: `${SQLSTATE_CHECK_VIOLATION} ${ENTRY_CHECK}` },
         accepted: { entryV0Null: "accepted", entryV1Id: "accepted", entryV2Id: "accepted" },
-        updates: { entryV1ToNullId: `23514 ${ENTRY_CHECK}`, entryV0ToId: `23514 ${ENTRY_CHECK}` },
+        updates: { entryV1ToNullId: `${SQLSTATE_CHECK_VIOLATION} ${ENTRY_CHECK}`, entryV0ToId: `${SQLSTATE_CHECK_VIOLATION} ${ENTRY_CHECK}` },
         histories: {
-          historyV0Id: `23514 ${HISTORY_CHECK}`, historyV0Null: "accepted", historyV1Null: "accepted", historyV1Id: "accepted",
+          historyV0Id: `${SQLSTATE_CHECK_VIOLATION} ${HISTORY_CHECK}`, historyV0Null: "accepted", historyV1Null: "accepted", historyV1Id: "accepted",
         },
       });
 
@@ -529,6 +520,11 @@ describe("team item key id CHECKs (#1011) — real-DB integration", () => {
       const notices = collectNotices(client);
       try {
         await dropConstraints(client);
+        // The block counts the whole database: a first run, before the seeds,
+        // repairs any committed residue in a repairable shape (a crashed run
+        // elsewhere), so the literal counts below depend only on this cell's rows.
+        await client.query(repairBlock());
+        notices.messages.length = 0;
         const s = await seedRepairShapes(client);
         await enterOwnerRole(client);
 
@@ -598,7 +594,7 @@ describe("team item key id CHECKs (#1011) — real-DB integration", () => {
         expect({
           entries: await attempt(client, validateEntries),
           histories: await attempt(client, validateHistories),
-        }).toEqual({ entries: `23514 ${ENTRY_CHECK}`, histories: `23514 ${HISTORY_CHECK}` });
+        }).toEqual({ entries: `${SQLSTATE_CHECK_VIOLATION} ${ENTRY_CHECK}`, histories: `${SQLSTATE_CHECK_VIOLATION} ${HISTORY_CHECK}` });
       });
     });
 
