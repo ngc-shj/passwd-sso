@@ -4124,18 +4124,23 @@ describe("function rule: routines are created in migrations", () => {
       const again = `pg_exec "$db" -c "CREATE OR REPLACE FUNCTION \${qualified}() RETURNS int AS 'SELECT 1' LANGUAGE sql"\n`;
       const { code, stderr } = runMulti([[runner, runnerText + again]]);
       expect(code).toBe(1);
-      expect(stderr).toContain(`${runner}:${runnerText.split("\n").length}  creates \${qualified} again`);
+      const first = runnerText.split("\n").findIndex((l) => l.includes("CREATE OR REPLACE FUNCTION ${qualified}")) + 1;
+      expect(first).toBeGreaterThan(0);
+      expect(stderr).toContain(`${runner}:${runnerText.split("\n").length}  creates \${qualified} again: a dynamic FUNCTION_RULE_ALLOWLIST entry admits one site (first at line ${first})`);
     });
 
-    it("refuses to load an allowlist entry naming neither routine nor dynamic", () => {
-      // Run against a copy of the gate whose runner entry lost its key (a typo).
+    it.each([
+      ["names neither routine nor dynamic (a typo)", 'dynamc: "${qualified}", why:'],
+      ["names both, one empty", 'routine: "x", dynamic: "", why:'],
+    ])("refuses to load an allowlist entry that %s", (_label, replacement) => {
+      // Run against a copy of the gate whose runner entry is ill-formed.
       const gateDir = mkdtempSync(join(tmpdir(), "bypass-gate-"));
       try {
         cpSync(dirname(CHECKER), join(gateDir, "checks"), { recursive: true });
         symlinkSync(join(REPO_ROOT, "node_modules"), join(gateDir, "node_modules"));
         const gate = join(gateDir, "checks/check-bypass-rls.mjs");
         const source = readFileSync(gate, "utf8");
-        const patched = source.replace('dynamic: "${qualified}", why:', 'dynamc: "${qualified}", why:');
+        const patched = source.replace('dynamic: "${qualified}", why:', replacement);
         expect(patched).not.toBe(source);
         writeFileSync(gate, patched, "utf8");
         const { code, stderr } = runMulti([[runner, runnerText]], gate);

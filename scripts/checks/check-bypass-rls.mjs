@@ -3032,12 +3032,15 @@ const FUNCTION_RULE_ALLOWLIST = [
   { file: "src/__tests__/db-integration/departed-member-followups.integration.test.ts", routine: "c1_audit_outbox_raise_probe", why: "C1 atomicity cells: a trigger function that only raises, dropped in finally; sets no bypass setting" },
   { prefix: "scripts/__tests__/", why: "gate fixture strings: inputs for the gates that refuse these statements" },
 ];
-// Each file entry names exactly one of `routine` / `dynamic`: an entry with
-// neither would compare undefined to an unread name and admit every one.
+// An entry is `{ prefix }` alone, or a file with exactly one of `routine` /
+// `dynamic`, every value a non-empty string. Presence is `!== undefined`, as
+// the matcher reads it: an entry with neither key would compare undefined to an
+// unread name and admit every one, and an empty `dynamic` admits an empty token.
 for (const e of FUNCTION_RULE_ALLOWLIST) {
-  if (e.prefix) continue;
-  const kinds = ["routine", "dynamic"].filter((k) => typeof e[k] === "string" && e[k] !== "");
-  if (kinds.length !== 1) throw new Error(`FUNCTION_RULE_ALLOWLIST entry for ${e.file} must name exactly one of routine / dynamic`);
+  const keys = ["prefix", "file", "routine", "dynamic"].filter((k) => e[k] !== undefined);
+  const wellFormed = keys.every((k) => typeof e[k] === "string" && e[k] !== "")
+    && (keys.join() === "prefix" || keys.join() === "file,routine" || keys.join() === "file,dynamic");
+  if (!wellFormed) throw new Error(`FUNCTION_RULE_ALLOWLIST entry for ${e.file ?? e.prefix} must name exactly one of routine / dynamic with its file, or a prefix alone, as non-empty strings`);
 }
 const functionAllowed = (file, routine, rawName) =>
   FUNCTION_RULE_ALLOWLIST.find((e) => (e.prefix

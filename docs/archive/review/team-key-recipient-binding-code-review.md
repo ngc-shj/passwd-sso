@@ -187,3 +187,24 @@ statement, `SET LOCAL` in a rolled-back transaction).
 - **MIN-2** The allowlist's shape is checked at load: each file entry names exactly one non-empty
   `routine` or `dynamic`, else the gate throws. Self-test runs a copy of the gate with the runner
   entry's key misspelt (refused); red-proved by disabling the check.
+
+## Round 4 (fix commit 78fa28a4a)
+### Findings
+- Security MIN-1 / Functionality F-R4-1 [Minor] R48 (converged): the load-time shape check counted a
+  key only when it was a non-empty string, while the matcher and counter read `dynamic !== undefined`;
+  `{ file, routine: "x", dynamic: "" }` loaded and was matched as a dynamic entry admitting an empty
+  token. File-less and prefix-hybrid entries were not checked.
+- Testing T-R4-1 [Minor] RT7: the second-site cell did not pin "(first at line N)".
+- Round 3 MIN-1/MIN-2/T-R3-1 verified closed; counter per entry and bound to its file; no R43 widening.
+
+### Recurring Issue Check
+- Security: R43, R47 OK; R48 → MIN-1; RS1–RS6 N/A. Functionality: R3, R17, R29, R42–R44, R47, R49–R52,
+  R55 OK; R48 → F-R4-1. Testing: RT1, RT2, RT5, RT8–RT11 OK; RT3, RT4, RT6 N/A; RT7 → T-R4-1.
+
+### Resolution Status — Round 4
+- **MIN-1 / F-R4-1** One presence rule (`!== undefined`) in the shape check, as in the matcher: an
+  entry is `{ prefix }` alone or `{ file, routine }` / `{ file, dynamic }`, every value a non-empty
+  string, else the gate throws at load. Self-test `it.each` covers a misspelt key and
+  `routine: "x", dynamic: ""`; the latter red-proved against the Round 3 check.
+- **T-R4-1** The second-site cell asserts the full detail including `(first at line N)`, N derived
+  from the runner text; red-proved by reporting the current line instead.

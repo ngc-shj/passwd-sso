@@ -201,3 +201,8 @@ key write, refuse them too); row 06 gains the savepoint cell (without the guard'
 `check-bypass-rls`'s `dynamic` entry admits one site, the allowlist's shape is checked at load, and
 the self-tests pin exact (not prefix/suffix/substring) matching; each red-proved by mutating the
 gate.
+
+## D19 — Phase 3 Round 4 fixes
+The allowlist shape check reads presence the way the matcher does (`!== undefined`) and admits only
+`{ prefix }` or `{ file, routine | dynamic }` with non-empty strings; the second-site self-test pins
+the first site's line.
