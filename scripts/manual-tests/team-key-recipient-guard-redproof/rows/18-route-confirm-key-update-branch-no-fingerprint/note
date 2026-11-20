@@ -1,0 +1,1 @@
+confirm-key's upsert update branch omits the fingerprint: over a legacy NULL row the rewrite is refused fingerprint_missing; over an old-key row it inherits the old fingerprint and is refused recipient_key_changed. Collateral (+): the unit cell asserting the fingerprint in both upsert branches.

@@ -1,0 +1,10 @@
+--- a/src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts
++++ b/src/app/api/teams/[teamId]/members/[memberId]/confirm-key/route.ts
+@@ -183,7 +183,6 @@
+             ephemeralPublicKey: data.ephemeralPublicKey,
+             hkdfSalt: data.hkdfSalt,
+             wrapVersion: data.wrapVersion,
+-            recipientKeyFingerprint: data.recipientKeyFingerprint,
+           },
+         });
+ 

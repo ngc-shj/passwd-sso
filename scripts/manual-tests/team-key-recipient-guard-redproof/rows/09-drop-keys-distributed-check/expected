@@ -1,0 +1,4 @@
+actual=committed	team-key recipient binding — real-DB integration races writer first: a raw retirement waits for the guarded insert, then is refused ecdh_key_change_with_keys
+actual=committed	team-key recipient binding — real-DB integration C3: users_ecdh_key_guard ecdh_key_change_with_keys: P -> NULL with a key row is refused; key and row unchanged
+actual=committed	team-key recipient binding — real-DB integration C3: users_ecdh_key_guard ecdh_key_change_with_keys: P -> NULL with only a key_distributed = true membership is refused
++-	team-key recipient binding — real-DB integration C3: users_ecdh_key_guard ecdh_key_change_with_keys: P -> NULL with a key row only in another tenant's team is refused

@@ -58,6 +58,9 @@ export const teamMemberKeySchema = z.object({
   hkdfSalt: hexSalt,
   keyVersion: z.number().int().min(1).max(TEAM_KEY_VERSION_MAX),
   wrapVersion: z.number().int().min(1).max(1).default(1),
+  // SHA-256 of the recipient's ECDH public key string the key was wrapped to
+  // (recipientKeyFingerprint). Lowercase, as the column's CHECK requires.
+  recipientKeyFingerprint: z.string().regex(/^[0-9a-f]{64}$/),
 });
 
 export const createTeamE2ESchema = createTeamSchema.extend({

@@ -1,0 +1,1 @@
+C3 bypass restore removed: after a checked retirement the transaction keeps bypass_rls=on over users, team_members, team_member_keys.

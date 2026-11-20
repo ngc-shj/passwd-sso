@@ -31,6 +31,7 @@ import {
   readBackfillBlock,
   readGucs,
   RLS_BACKFILL_RERUN_DIR,
+  recipientKey,
   setBypassRlsGucs,
   setGucs,
   setTestBypass,
@@ -149,12 +150,13 @@ describe("team entry key identity writers — real-DB integration", () => {
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"TeamRole", true, $6::timestamptz, now(), now())`,
       randomUUID(), teamId, userId, tenantId, role, opts.deactivated ? new Date().toISOString() : null,
     );
+    const fingerprint = opts.deactivated ? null : (await recipientKey(ctx.su, userId)).fingerprint;
     for (const keyVersion of keyVersions) {
       const text = `INSERT INTO team_member_keys (
            id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
-           ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, now(), now())`;
-      const params = [randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion];
+           ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, $11, now(), now())`;
+      const params = [randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion, fingerprint];
       // An ended member holds the keys written before the row ended; the
       // database refuses writing one now (departed_member_guard, key_inactive).
       if (opts.deactivated) await writeRefusedState(ctx.su, text, params);
@@ -675,10 +677,11 @@ describe("team entry key identity writers — real-DB integration", () => {
             aadVersion: 1,
           }],
           carry: [{ id: seed.carried, teamKeyVersion: 1, reason }],
-          memberKeys: [seed.holder, seed.nonHolder].map((userId) => ({
+          memberKeys: await Promise.all([seed.holder, seed.nonHolder].map(async (userId) => ({
             userId, encryptedTeamKey: hex(32), teamKeyIv: hex(12), teamKeyAuthTag: hex(16),
             ephemeralPublicKey: hex(32), hkdfSalt: hex(32), keyVersion: 3,
-          })),
+            recipientKeyFingerprint: (await recipientKey(ctx.su, userId)).fingerprint,
+          }))),
         }),
         { params: Promise.resolve({ teamId: seed.teamId }) },
       );

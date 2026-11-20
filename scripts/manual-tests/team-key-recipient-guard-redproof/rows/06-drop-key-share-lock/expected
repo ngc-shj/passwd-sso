@@ -1,0 +1,2 @@
+actual=committed	team-key recipient binding — real-DB integration races key change first: the guarded insert waits for the retirement, then is refused recipient_no_key
++-	team-key recipient binding — real-DB integration C2/C3: the scoped bypass and the pinned search_path a guarded INSERT whose users read fails inside the bypass, rolled back to a savepoint, leaves the caller's settings

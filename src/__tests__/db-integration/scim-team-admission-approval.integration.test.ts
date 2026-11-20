@@ -22,6 +22,7 @@ import {
   assertRlsApplies,
   createPrismaForRole,
   createTestContext,
+  recipientKey,
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
@@ -82,7 +83,7 @@ function jsonRequest(url: string, method: string, body?: unknown): NextRequest {
   });
 }
 
-function keyMaterial(keyVersion: number) {
+function keyMaterial(keyVersion: number, recipientKeyFingerprint: string) {
   return {
     encryptedTeamKey: hex(32),
     teamKeyIv: hex(12),
@@ -91,6 +92,7 @@ function keyMaterial(keyVersion: number) {
     hkdfSalt: hex(32),
     keyVersion,
     wrapVersion: 1,
+    recipientKeyFingerprint,
   };
 }
 
@@ -153,7 +155,7 @@ describe("scim-team-admission-approval — real-DB integration", () => {
   }
 
   async function setEcdhKey(userId: string) {
-    await sql(`UPDATE users SET ecdh_public_key = $2 WHERE id = $1::uuid`, userId, hex(32));
+    await recipientKey(ctx.su, userId);
   }
 
   async function team(owner: string, tenant = tenantId): Promise<string> {
@@ -169,11 +171,12 @@ describe("scim-team-admission-approval — real-DB integration", () => {
   }
 
   async function seedKey(teamId: string, userId: string, tenant = tenantId, keyVersion = 1) {
+    const { fingerprint } = await recipientKey(ctx.su, userId);
     await sql(
       `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
-         team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, now(), now())`,
-      randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion,
+         team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, $11, now(), now())`,
+      randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion, fingerprint,
     );
   }
 
@@ -361,10 +364,13 @@ describe("scim-team-admission-approval — real-DB integration", () => {
     );
   }
 
-  function confirmKeyCall(teamId: string, memberId: string, actorUserId: string, keyVersion: number) {
+  async function confirmKeyCall(teamId: string, memberId: string, actorUserId: string, keyVersion: number) {
     mockAuth.mockResolvedValue({ user: { id: actorUserId } });
+    const [row] = await sql<{ user_id: string }>(`SELECT user_id FROM team_members WHERE id = $1::uuid`, memberId);
+    // A member that is gone has no key to bind to; the route refuses before it reads the fingerprint.
+    const fingerprint = row ? (await recipientKey(ctx.su, row.user_id)).fingerprint : "0".repeat(64);
     return confirmKeyRoute(
-      jsonRequest(`http://localhost/api/teams/${teamId}/members/${memberId}/confirm-key`, "POST", keyMaterial(keyVersion)),
+      jsonRequest(`http://localhost/api/teams/${teamId}/members/${memberId}/confirm-key`, "POST", keyMaterial(keyVersion, fingerprint)),
       { params: Promise.resolve({ teamId, memberId }) },
     );
   }

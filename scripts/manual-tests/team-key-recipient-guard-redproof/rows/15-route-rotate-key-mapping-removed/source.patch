@@ -1,0 +1,12 @@
+--- a/src/app/api/teams/[teamId]/rotate-key/route.ts
++++ b/src/app/api/teams/[teamId]/rotate-key/route.ts
+@@ -436,9 +436,6 @@
+     // A member reset their vault, set it up again and was redistributed since
+     // rotate-key/data: their new key was wrapped to the old public key. The
+     // whole rotation is refused; a retry refetches the members' keys.
+-    if (isTeamKeyRecipientChanged(e)) {
+-      return errorResponse(API_ERROR.TEAM_KEY_RECIPIENT_CHANGED);
+-    }
+     if (e instanceof TxValidationError) {
+       return validationError(e.details);
+     }

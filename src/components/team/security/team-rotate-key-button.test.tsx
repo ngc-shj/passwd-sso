@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 // Real Web Crypto (Node's, see team-vault-core.crypto.test.tsx for why the
 // jsdom wrapper is replaced): the button drives the real rotation builder.
-import { webcrypto as nodeWebcrypto } from "node:crypto";
+import { createHash, webcrypto as nodeWebcrypto } from "node:crypto";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 vi.stubGlobal("crypto", nodeWebcrypto);
 import "@testing-library/jest-dom/vitest";
@@ -95,6 +95,8 @@ async function v1(entryId: string, teamKey: CryptoKey, teamKeyVersion: number) {
   });
 }
 
+const memberPublicKeys: string[] = [];
+
 async function setupRotateFetch(opts: {
   entries: Record<string, unknown>[];
   actorKeyVersions: number[];
@@ -104,6 +106,7 @@ async function setupRotateFetch(opts: {
 }) {
   const member = await generateECDHKeyPair();
   const members = [{ userId: "u1", ecdhPublicKey: await exportPublicKey(member.publicKey) }];
+  memberPublicKeys.push(members[0].ecdhPublicKey);
   mockFetch.mockImplementation((url: string, init?: RequestInit) => {
     if (url.includes("rotate-key/data")) {
       return Promise.resolve(new Response(JSON.stringify({
@@ -153,6 +156,7 @@ describe("TeamRotateKeyButton", () => {
     vi.clearAllMocks();
     newTeamKeysSnapshot.refs.length = 0;
     newTeamKeysSnapshot.copies.length = 0;
+    memberPublicKeys.length = 0;
     mockCanUsePasskeyRecovery.mockResolvedValue(false);
     mockReauthenticateWithPasskey.mockResolvedValue({ ok: true });
   });
@@ -206,6 +210,11 @@ describe("TeamRotateKeyButton", () => {
       ["e-v0", legacy.blobIv, legacy.overviewIv],
     ]);
     expect(body.carry).toEqual([{ id: "e-not-held", teamKeyVersion: 3, reason: "not_held" }]);
+    expect((postedBody() as { memberKeys: { recipientKeyFingerprint: string }[] }).memberKeys).toEqual([
+      expect.objectContaining({
+        recipientKeyFingerprint: createHash("sha256").update(memberPublicKeys[0], "utf8").digest("hex"),
+      }),
+    ]);
     expect(vault.invalidateTeamKey).toHaveBeenCalledWith(TEAM_ID);
   });
 

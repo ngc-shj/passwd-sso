@@ -33,6 +33,7 @@ import {
   readBackfillBlock,
   readGucs,
   RLS_BACKFILL_RERUN_DIR,
+  recipientKey,
   setBypassRlsGucs,
   setGucs,
   setTestBypass,
@@ -229,11 +230,12 @@ describe("team membership across a tenant departure — real-DB integration", ()
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"TeamRole", true, COALESCE($6::timestamptz, now()), now())`,
       [rowId, teamId, userId, tenant, role, o.createdAt ?? null],
     );
+    const fingerprint = o.refused ? null : (await recipientKey(ctx.su, userId)).fingerprint;
     await write(
       `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
-         team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`,
-      [randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32)],
+         team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, $10, now(), now())`,
+      [randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32), fingerprint],
     );
     return rowId;
   }
@@ -1183,7 +1185,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
   });
   // ── Review round 1 ───────────────────────────────────────────
 
-  function memberKeyBody(userId: string, keyVersion: number) {
+  async function memberKeyBody(userId: string, keyVersion: number) {
     return {
       userId,
       encryptedTeamKey: hex(32),
@@ -1193,6 +1195,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
       hkdfSalt: hex(32),
       keyVersion,
       wrapVersion: 1,
+      recipientKeyFingerprint: (await recipientKey(ctx.su, userId)).fingerprint,
     };
   }
 
@@ -1230,7 +1233,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
   it("A1/A4: a rotation leaves a departed member out and pending; after a return confirm-key distributes the new version", async () => {
     const owner = await ctx.createUser(tenantId);
     const leaver = await member();
-    await sql(`UPDATE users SET ecdh_public_key = $2 WHERE id = $1::uuid`, leaver.id, hex(32));
+    await recipientKey(ctx.su, leaver.id);
     const teamId = await team(owner);
     const rowId = await addTeamMember(teamId, leaver.id, "MEMBER");
     await scimActive(leaver.id, false);
@@ -1238,7 +1241,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
     mockAuth.mockResolvedValue({ user: { id: owner } });
     const rotated = await rotateKey(
       jsonRequest(`http://localhost/api/teams/${teamId}/rotate-key`, "POST", {
-        newTeamKeyVersion: 2, entries: [], memberKeys: [memberKeyBody(owner, 2)],
+        newTeamKeyVersion: 2, entries: [], memberKeys: [await memberKeyBody(owner, 2)],
       }),
       { params: Promise.resolve({ teamId }) },
     );
@@ -1251,7 +1254,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
     const pendingAfterReturn = await (await pendingFor()).json();
     expect(JSON.stringify(pendingAfterReturn)).toContain(rowId);
     const confirmed = await confirmKey(
-      jsonRequest(`http://localhost/api/teams/${teamId}/members/${rowId}/confirm-key`, "POST", { ...memberKeyBody(leaver.id, 2), userId: undefined }),
+      jsonRequest(`http://localhost/api/teams/${teamId}/members/${rowId}/confirm-key`, "POST", { ...(await memberKeyBody(leaver.id, 2)), userId: undefined }),
       { params: Promise.resolve({ teamId, memberId: rowId }) },
     );
     expect(confirmed.status).toBe(200);
@@ -1354,6 +1357,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
       const creator = await ctx.createUser(tenantId);
       await sql(`UPDATE tenant_members SET role = 'ADMIN' WHERE user_id = $1::uuid`, creator);
       const teamId = randomUUID();
+      const creatorKey = await memberKeyBody(creator, 1);
       // Park the create at its teams INSERT (FK KEY SHARE on the tenant row).
       const blocker = await race.holdRowLock(`SELECT id FROM tenants WHERE id = $1::uuid FOR UPDATE`, [tenantId]);
       let creating: Promise<Response> | undefined;
@@ -1362,7 +1366,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
         mockAuth.mockResolvedValue({ user: { id: creator } });
         creating = createTeam(jsonRequest("http://localhost/api/teams", "POST", {
           id: teamId, name: "Raced", slug: `raced-${teamId.slice(0, 6)}`,
-          teamMemberKey: { ...memberKeyBody(creator, 1), userId: undefined },
+          teamMemberKey: { ...creatorKey, userId: undefined },
         }));
         const createPid = await race.waitForBackendBlockedBy(blocker.pid);
         departing = scimActive(creator, false);
@@ -1484,6 +1488,8 @@ describe("team membership across a tenant departure — real-DB integration", ()
       const teamId = await team(owner);
       await addTeamMember(teamId, leaver.id, "MEMBER");
       // Park the rotation at its member-key insert (FK KEY SHARE on the owner's users row).
+      await recipientKey(ctx.su, owner);
+      await recipientKey(ctx.su, leaver.id);
       const blocker = await race.holdRowLock(`SELECT id FROM users WHERE id = $1::uuid FOR UPDATE`, [owner]);
       let rotating: Promise<Response> | undefined;
       let departing: Promise<Response> | undefined;
@@ -1491,7 +1497,7 @@ describe("team membership across a tenant departure — real-DB integration", ()
         mockAuth.mockResolvedValue({ user: { id: owner } });
         rotating = rotateKey(
           jsonRequest(`http://localhost/api/teams/${teamId}/rotate-key`, "POST", {
-            newTeamKeyVersion: 2, entries: [], memberKeys: [memberKeyBody(owner, 2), memberKeyBody(leaver.id, 2)],
+            newTeamKeyVersion: 2, entries: [], memberKeys: [await memberKeyBody(owner, 2), await memberKeyBody(leaver.id, 2)],
           }),
           { params: Promise.resolve({ teamId }) },
         );

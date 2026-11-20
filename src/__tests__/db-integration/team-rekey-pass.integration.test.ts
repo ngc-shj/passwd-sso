@@ -34,7 +34,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { NextRequest } from "next/server";
-import { createTestContext, REPAIRED_ROLLOUT_ENTRY, setBypassRlsGucs, writeRefusedState, type TestContext } from "./helpers";
+import { createTestContext, recipientKey, REPAIRED_ROLLOUT_ENTRY, setBypassRlsGucs, writeRefusedState, type TestContext } from "./helpers";
 import {
   deriveItemCekWrapKey,
   deriveItemEncryptionKey,
@@ -187,9 +187,10 @@ describe("team re-key pass — real-DB integration", () => {
   async function insertMemberKey(team: Team, userId: string, keyVersion: number, ended = false) {
     const text = `INSERT INTO team_member_keys (
          id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
-         ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at
-       ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, now(), now())`;
-    const params = [randomUUID(), team.teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion];
+         ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at
+       ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, $11, now(), now())`;
+    const fingerprint = ended ? null : (await recipientKey(ctx.su, userId)).fingerprint;
+    const params = [randomUUID(), team.teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion, fingerprint];
     if (ended) await writeRefusedState(ctx.su, text, params);
     else await sql(text, ...params);
   }
@@ -503,10 +504,11 @@ describe("team re-key pass — real-DB integration", () => {
         newTeamKeyVersion: to,
         entries: payload.entries,
         carry: payload.carry,
-        memberKeys: memberIds.map((userId) => ({
+        memberKeys: await Promise.all(memberIds.map(async (userId) => ({
           userId, encryptedTeamKey: hex(32), teamKeyIv: hex(12), teamKeyAuthTag: hex(16),
           ephemeralPublicKey: hex(32), hkdfSalt: hex(32), keyVersion: to,
-        })),
+          recipientKeyFingerprint: (await recipientKey(ctx.su, userId)).fingerprint,
+        }))),
       }),
       params,
     );

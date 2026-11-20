@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 
+import { createHash } from "node:crypto";
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { clientLogWarn, clientLogError, CLIENT_LOG_EVENT, opaque } from "@/lib/logger/client";
@@ -682,7 +683,7 @@ describe("team-vault-core", () => {
     const rawKeyBytes = new Uint8Array([5, 6, 7, 8]);
     const ownTeamKeyBytes = new Uint8Array([3, 3, 3, 3]);
     mockUnwrapTeamKey.mockResolvedValue(ownTeamKeyBytes);
-    mockCreateTeamKeyEscrow.mockResolvedValue({
+    mockCreateTeamKeyEscrow.mockImplementation(async (_teamKey: Uint8Array, memberJwk: string) => ({
       encryptedTeamKey: "wrapped",
       teamKeyIv: "iv",
       teamKeyAuthTag: "tag",
@@ -690,7 +691,8 @@ describe("team-vault-core", () => {
       hkdfSalt: "salt",
       keyVersion: 4,
       wrapVersion: 1,
-    });
+      recipientKeyFingerprint: createHash("sha256").update(memberJwk, "utf8").digest("hex"),
+    }));
 
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === "/api/teams/pending-key-distributions") {
@@ -763,6 +765,12 @@ describe("team-vault-core", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/teams/team-1/members/member-1/confirm-key",
       expect.objectContaining({ method: "POST" }),
+    );
+    const confirmCall = fetchMock.mock.calls.find(
+      (c) => c[0] === "/api/teams/team-1/members/member-1/confirm-key",
+    ) as unknown as [string, RequestInit];
+    expect(JSON.parse(confirmCall[1].body as string).recipientKeyFingerprint).toBe(
+      createHash("sha256").update("user-2-pub", "utf8").digest("hex"),
     );
     expect(Array.from(rawKeyBytes)).toEqual([0, 0, 0, 0]);
     expect(Array.from(ownTeamKeyBytes)).toEqual([0, 0, 0, 0]);

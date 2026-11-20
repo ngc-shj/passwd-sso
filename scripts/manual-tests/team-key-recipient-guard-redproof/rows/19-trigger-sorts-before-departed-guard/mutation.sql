@@ -1,0 +1,2 @@
+ALTER TRIGGER trg_team_member_keys_recipient_guard ON team_member_keys
+  RENAME TO trg_team_member_keys_a_recipient_guard;

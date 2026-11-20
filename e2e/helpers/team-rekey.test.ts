@@ -16,9 +16,11 @@ vi.mock("pg", () => ({
 
 import { seedPendingTeamEntry, seedTeamAtKeyVersion, seedTeamKeyHolder } from "./team-rekey";
 import { E2E_TENANT } from "./db";
+import { recipientKeyFingerprint } from "../../src/lib/crypto/crypto-team";
 
 const TEAM_ID = "00000000-0000-4000-a000-000000000001";
 const USER_ID = "00000000-0000-4000-b000-000000000001";
+const USER_ECDH_KEY = JSON.stringify({ kty: "EC", crv: "P-256", x: "x-fixture", y: "y-fixture" });
 
 function call(index: number): [string, unknown[]] {
   return mockQuery.mock.calls[index] as [string, unknown[]];
@@ -44,13 +46,25 @@ describe("seedTeamAtKeyVersion", () => {
 });
 
 describe("seedTeamKeyHolder", () => {
-  it("inserts a key-distributed membership and one member-key row per version", async () => {
+  it("inserts a key-distributed membership and one member-key row per version, bound to the user's ECDH key", async () => {
+    mockQuery.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({ rows: [{ ecdh_public_key: USER_ECDH_KEY }] });
     await seedTeamKeyHolder({ teamId: TEAM_ID, userId: USER_ID, role: "OWNER", keyVersions: [1, 2] });
-    expect(mockQuery).toHaveBeenCalledTimes(3);
+    const fingerprint = await recipientKeyFingerprint(USER_ECDH_KEY);
+    expect(mockQuery).toHaveBeenCalledTimes(4);
     expect(call(0)[0]).toMatch(/INSERT INTO team_members[\s\S]*key_distributed[\s\S]*true/);
-    expect(call(1)[0]).toMatch(/INSERT INTO team_member_keys/);
-    expect(call(1)[1].at(-1)).toBe(1);
-    expect(call(2)[1].at(-1)).toBe(2);
+    expect(call(1)[0]).toMatch(/SELECT ecdh_public_key FROM users/);
+    expect(call(2)[0]).toMatch(/INSERT INTO team_member_keys[\s\S]*recipient_key_fingerprint/);
+    expect(call(2)[1].at(-1)).toBe(fingerprint);
+    expect(call(2)[1].at(-2)).toBe(1);
+    expect(call(3)[1].at(-1)).toBe(fingerprint);
+    expect(call(3)[1].at(-2)).toBe(2);
+  });
+
+  it("refuses a holder whose user has no ECDH public key, before inserting any member-key row", async () => {
+    await expect(
+      seedTeamKeyHolder({ teamId: TEAM_ID, userId: USER_ID, role: "OWNER", keyVersions: [1] }),
+    ).rejects.toThrow(/no ECDH public key/);
+    expect(mockQuery.mock.calls.some(([sql]) => /INSERT INTO team_member_keys/.test(sql as string))).toBe(false);
   });
 });
 

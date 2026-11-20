@@ -1,0 +1,2 @@
+actual=committed	team-key recipient binding — real-DB integration C3: users_ecdh_key_guard ecdh_key_overwrite: P -> P' is refused; the key is unchanged
+setup over a committed key refused	team-key recipient binding — real-DB integration writer routes and serving endpoints vault setup racing a committed setup (key set, vault_setup_at NULL): 409 VAULT_ALREADY_SETUP, no users column changed

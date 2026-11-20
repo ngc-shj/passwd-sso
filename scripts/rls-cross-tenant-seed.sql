@@ -64,9 +64,11 @@ INSERT INTO tenants (id, name, slug, created_at, updated_at) VALUES
   ('00000000-0000-0000-0000-0000000000A0', 'rls-x-tenant-a', 'rls-x-tenant-a', NOW(), NOW()),
   ('00000000-0000-0000-0000-0000000000B0', 'rls-x-tenant-b', 'rls-x-tenant-b', NOW(), NOW());
 
-INSERT INTO users (id, tenant_id, email, created_at, updated_at) VALUES
-  ('00000000-0000-0000-0000-0000000000A1', '00000000-0000-0000-0000-0000000000A0', 'rls-x-a@test.local', NOW(), NOW()),
-  ('00000000-0000-0000-0000-0000000000B1', '00000000-0000-0000-0000-0000000000B0', 'rls-x-b@test.local', NOW(), NOW());
+-- ecdh_public_key is set here so the team_member_keys rows below can carry the
+-- fingerprint team_key_recipient_guard requires; a key is not rewritten later.
+INSERT INTO users (id, tenant_id, email, ecdh_public_key, created_at, updated_at) VALUES
+  ('00000000-0000-0000-0000-0000000000A1', '00000000-0000-0000-0000-0000000000A0', 'rls-x-a@test.local', '{"kty":"EC","crv":"P-256","x":"rls-x-a","y":"seed"}', NOW(), NOW()),
+  ('00000000-0000-0000-0000-0000000000B1', '00000000-0000-0000-0000-0000000000B0', 'rls-x-b@test.local', '{"kty":"EC","crv":"P-256","x":"rls-x-b","y":"seed"}', NOW(), NOW());
 
 -- ---------------------------------------------------------------------------
 -- Level 1: depends only on tenant + user
@@ -232,9 +234,9 @@ INSERT INTO team_invitations (id, tenant_id, team_id, email, token_hash, expires
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A2', 'invitee-a@test.local', md5('rls-x-a-inv')::text, NOW() + interval '1 day', '00000000-0000-0000-0000-0000000000A1', NOW()),
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B2', 'invitee-b@test.local', md5('rls-x-b-inv')::text, NOW() + interval '1 day', '00000000-0000-0000-0000-0000000000B1', NOW());
 
-INSERT INTO team_member_keys (id, tenant_id, team_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag, ephemeral_public_key, hkdf_salt, updated_at) VALUES
-  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A2', '00000000-0000-0000-0000-0000000000A1', 'etk-a', 'aabbccddeeff00112233aabb', 'aabbccddeeff00112233aabbccddeeff', 'eph-a', 'aabbccddeeff00112233aabbccddeeff00112233aabbccddeeff00112233aabb', NOW()),
-  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B2', '00000000-0000-0000-0000-0000000000B1', 'etk-b', 'aabbccddeeff00112233aabb', 'aabbccddeeff00112233aabbccddeeff', 'eph-b', 'aabbccddeeff00112233aabbccddeeff00112233aabbccddeeff00112233aabb', NOW());
+INSERT INTO team_member_keys (id, tenant_id, team_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag, ephemeral_public_key, hkdf_salt, recipient_key_fingerprint, updated_at) VALUES
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A2', '00000000-0000-0000-0000-0000000000A1', 'etk-a', 'aabbccddeeff00112233aabb', 'aabbccddeeff00112233aabbccddeeff', 'eph-a', 'aabbccddeeff00112233aabbccddeeff00112233aabbccddeeff00112233aabb', encode(sha256(convert_to('{"kty":"EC","crv":"P-256","x":"rls-x-a","y":"seed"}', 'UTF8')), 'hex'), NOW()),
+  (gen_random_uuid(), '00000000-0000-0000-0000-0000000000B0', '00000000-0000-0000-0000-0000000000B2', '00000000-0000-0000-0000-0000000000B1', 'etk-b', 'aabbccddeeff00112233aabb', 'aabbccddeeff00112233aabbccddeeff', 'eph-b', 'aabbccddeeff00112233aabbccddeeff00112233aabbccddeeff00112233aabb', encode(sha256(convert_to('{"kty":"EC","crv":"P-256","x":"rls-x-b","y":"seed"}', 'UTF8')), 'hex'), NOW());
 
 INSERT INTO team_members (id, tenant_id, team_id, user_id, role, updated_at) VALUES
   (gen_random_uuid(), '00000000-0000-0000-0000-0000000000A0', '00000000-0000-0000-0000-0000000000A2', '00000000-0000-0000-0000-0000000000A1', 'OWNER', NOW()),

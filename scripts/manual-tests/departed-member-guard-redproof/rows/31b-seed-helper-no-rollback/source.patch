@@ -1,6 +1,6 @@
 --- a/src/__tests__/db-integration/helpers.ts
 +++ b/src/__tests__/db-integration/helpers.ts
-@@ -876,9 +876,6 @@
+@@ -898,9 +898,6 @@
        await client.query("COMMIT");
        return rows as T[];
      } catch (e) {

@@ -1,4 +1,9 @@
+import { createHash } from "node:crypto";
 import { describe, it, expect } from "vitest";
+import {
+  FINGERPRINT_VECTOR_HEX,
+  FINGERPRINT_VECTOR_JWK,
+} from "@/__tests__/fixtures/team-key-fingerprint-vector";
 import {
   generateTeamSymmetricKey,
   deriveTeamEncryptionKey,
@@ -6,6 +11,7 @@ import {
   wrapTeamKeyForMember,
   unwrapTeamKey,
   createTeamKeyEscrow,
+  recipientKeyFingerprint,
   sealTeamEntryField,
   openTeamEntryField,
   openTeamEntryFieldAt,
@@ -299,6 +305,24 @@ describe("crypto-team", () => {
     });
   });
 
+  describe("recipientKeyFingerprint", () => {
+    it("is the SHA-256 of the UTF-8 bytes of a string containing a non-ASCII character", async () => {
+      expect(FINGERPRINT_VECTOR_JWK).toContain("é");
+      const independent = createHash("sha256").update(FINGERPRINT_VECTOR_JWK, "utf8").digest("hex");
+
+      expect(independent).toBe(FINGERPRINT_VECTOR_HEX);
+      expect(await recipientKeyFingerprint(FINGERPRINT_VECTOR_JWK)).toBe(FINGERPRINT_VECTOR_HEX);
+    });
+
+    it("is 64 lowercase hex characters", async () => {
+      expect(await recipientKeyFingerprint("any key")).toMatch(/^[0-9a-f]{64}$/);
+    });
+
+    it("differs when the string differs by one character", async () => {
+      expect(await recipientKeyFingerprint(`${FINGERPRINT_VECTOR_JWK} `)).not.toBe(FINGERPRINT_VECTOR_HEX);
+    });
+  });
+
   describe("createTeamKeyEscrow (one-shot wrap)", () => {
     it("creates escrow result with all required fields", async () => {
       const teamKey = generateTeamSymmetricKey();
@@ -320,6 +344,24 @@ describe("crypto-team", () => {
       expect(result.hkdfSalt).toHaveLength(64);
       expect(result.wrapVersion).toBe(CURRENT_TEAM_WRAP_VERSION);
       expect(result.keyVersion).toBe(1);
+    });
+
+    it("carries the fingerprint of the exact public key string it wrapped to", async () => {
+      const memberKeyPair = await generateECDHKeyPair();
+      const memberPubJwk = await exportPublicKey(memberKeyPair.publicKey);
+
+      const result = await createTeamKeyEscrow(
+        generateTeamSymmetricKey(),
+        memberPubJwk,
+        TEST_TEAM_ID,
+        TEST_CTX.toUserId,
+        TEST_CTX.keyVersion,
+      );
+
+      expect(result.recipientKeyFingerprint).toBe(await recipientKeyFingerprint(memberPubJwk));
+      expect(result.recipientKeyFingerprint).toBe(
+        createHash("sha256").update(memberPubJwk, "utf8").digest("hex"),
+      );
     });
 
     it("member can unwrap team key from escrow result", async () => {

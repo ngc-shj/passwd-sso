@@ -739,6 +739,10 @@ model TeamMemberKey {
   hkdfSalt           String   @map("hkdf_salt") @db.VarChar(64)
   wrapVersion        Int      @default(1) @map("wrap_version")
   keyVersion         Int      @default(1) @map("key_version")
+  // SHA-256 (hex) of the users.ecdh_public_key string the client wrapped to;
+  // checked against the recipient's current key by a trigger (20261119000000).
+  // NULL only on rows written before that migration.
+  recipientKeyFingerprint String? @map("recipient_key_fingerprint") @db.VarChar(64)
   createdAt          DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
   updatedAt          DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
 

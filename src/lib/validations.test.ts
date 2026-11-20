@@ -237,6 +237,7 @@ describe("teamMemberKeySchema", () => {
     ephemeralPublicKey: '{"kty":"EC"}',
     hkdfSalt: "c".repeat(HEX_SALT_LENGTH),
     keyVersion: 1,
+    recipientKeyFingerprint: "d".repeat(64),
   };
 
   it("accepts valid team member key", () => {

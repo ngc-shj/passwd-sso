@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -42,8 +42,6 @@
+       FROM public.users u WHERE u.id = NEW.user_id
+       FOR KEY SHARE;
+     PERFORM set_config('app.bypass_rls', COALESCE(v_prev_rls, ''), true);
+-    PERFORM set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true);
+-    PERFORM set_config('app.bypass_purpose', COALESCE(v_prev_purpose, ''), true);
+ 
+     IF v_found IS NOT TRUE OR v_key IS NULL THEN
+       v_refusal := 'recipient_no_key';

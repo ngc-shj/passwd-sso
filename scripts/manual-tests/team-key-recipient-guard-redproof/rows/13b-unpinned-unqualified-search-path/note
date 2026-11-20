@@ -1,0 +1,1 @@
+C2 search_path pin removed and users unqualified: a caller's TEMP TABLE users shadows the guard's read.

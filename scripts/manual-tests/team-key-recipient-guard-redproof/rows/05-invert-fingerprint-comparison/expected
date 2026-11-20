@@ -1,0 +1,39 @@
+actual=recipient_key_changed	team-key recipient binding — real-DB integration C2: team_key_recipient_guard arms allows an INSERT whose fingerprint matches the recipient's key, and stores it
++-	team-key recipient binding — real-DB integration C2: team_key_recipient_guard arms recipient_key_changed: an INSERT whose fingerprint names another key is refused; no row
++-	team-key recipient binding — real-DB integration C2: team_key_recipient_guard arms allows a matching INSERT for a cross-tenant guest, whose users row the writer's tenant cannot see
++-	team-key recipient binding — real-DB integration C2: team_key_recipient_guard arms allows a DELETE of a key row
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of user_id is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of encrypted_team_key is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of team_key_iv is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of team_key_auth_tag is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of ephemeral_public_key is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of hkdf_salt is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of wrap_version is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of key_version is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of recipient_key_fingerprint is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of a column outside the list (updated_at) is not judged
++-	team-key recipient binding — real-DB integration C2/C3: the scoped bypass and the pinned search_path after a guarded INSERT the bypass settings are the caller's again, and users is still RLS-filtered
++-	team-key recipient binding — real-DB integration C2/C3: the scoped bypass and the pinned search_path a TEMP TABLE users holding a matching key does not shadow the guard's read: the write is still refused
++-	team-key recipient binding — real-DB integration C3: users_ecdh_key_guard ecdh_key_change_with_keys: P -> NULL with a key row is refused; key and row unchanged
++-	team-key recipient binding — real-DB integration C3: users_ecdh_key_guard ecdh_key_change_with_keys: P -> NULL with a key row only in another tenant's team is refused
++-	team-key recipient binding — real-DB integration C3: users_ecdh_key_guard executeVaultReset of a user holding keys in two tenants' teams passes: keys, flags and the key are gone
++-	team-key recipient binding — real-DB integration twin vector: the production fingerprint of a non-ASCII key is the trigger's; one flipped nibble is refused
++-	team-key recipient binding — real-DB integration C9: the migration's team-key residue repair repairs a residue user (active and ended membership), leaves a keyed user untouched, restores the settings
++-	team-key recipient binding — real-DB integration races writer first: a raw retirement waits for the guarded insert, then is refused ecdh_key_change_with_keys
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints confirm-key round trip: the key from pending-key-distributions, fingerprinted by the client function, is accepted
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints rotation round trip: the keys from rotate-key/data, fingerprinted by the client function, are accepted
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints confirm-key with a mismatching fingerprint: 409 TEAM_KEY_RECIPIENT_CHANGED, no key row, still pending, no audit
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints confirm-key's upsert update branch over a legacy NULL-fingerprint row, with the current fingerprint: allowed and rebound
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints confirm-key's upsert update branch over a row bound to an old key, with the current fingerprint: allowed and rebound
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints rotate-key after reset -> set up -> redistribute between data and POST: 409 for the whole rotation, nothing written
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints teams POST with a mismatching creator fingerprint: 409 TEAM_KEY_RECIPIENT_CHANGED, no team, membership or key row
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints teams POST with the creator's key from vault/unlock/data, fingerprinted by the client function: created, the stored fingerprint is the trigger's view
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row bound to the recipient's current key an UPDATE of user_id keeping the matching fingerprint is judged and allowed; the column is rewritten
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row bound to the recipient's current key an UPDATE of encrypted_team_key keeping the matching fingerprint is judged and allowed; the column is rewritten
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row bound to the recipient's current key an UPDATE of team_key_iv keeping the matching fingerprint is judged and allowed; the column is rewritten
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row bound to the recipient's current key an UPDATE of team_key_auth_tag keeping the matching fingerprint is judged and allowed; the column is rewritten
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row bound to the recipient's current key an UPDATE of ephemeral_public_key keeping the matching fingerprint is judged and allowed; the column is rewritten
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row bound to the recipient's current key an UPDATE of hkdf_salt keeping the matching fingerprint is judged and allowed; the column is rewritten
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row bound to the recipient's current key an UPDATE of wrap_version keeping the matching fingerprint is judged and allowed; the column is rewritten
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row bound to the recipient's current key an UPDATE of key_version keeping the matching fingerprint is judged and allowed; the column is rewritten
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints confirm-key's upsert update branch over a row already bound to the current key: allowed, the wrap rewritten

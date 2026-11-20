@@ -23,6 +23,7 @@ import { randomUUID, randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { pgErrorCode } from "@/lib/prisma/prisma-error";
+import { recipientKeyFingerprint } from "@/lib/crypto/crypto-team";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 
 // ─── Role connection strings ────────────────────────────────────
@@ -287,6 +288,27 @@ export const RETRYABLE_CLEANUP_SQLSTATES = [
  * previously could not see, never reclassifying one it already read.
  */
 export const sqlStateOf = pgErrorCode;
+
+/**
+ * The arm token of a `<guard>:<arm>:` refusal raised by a database guard
+ * function, from a pg error or a Prisma error wrapping one. Independent of the
+ * production parser (`databaseGuardArm`), so tests do not check it with itself.
+ */
+export function guardArmOf(error: unknown, guard: string): string | null {
+  const texts: string[] = [];
+  for (let e: unknown = error, depth = 0; e && depth < 6; depth++) {
+    if (e instanceof Error) texts.push(e.message);
+    const meta = (e as { meta?: { driverAdapterError?: { cause?: { message?: string } } } }).meta;
+    if (meta?.driverAdapterError?.cause?.message) texts.push(meta.driverAdapterError.cause.message);
+    e = (e as { cause?: unknown }).cause;
+  }
+  const pattern = new RegExp(`${guard}:([a-z_]+):`);
+  for (const text of texts) {
+    const m = pattern.exec(text);
+    if (m) return m[1];
+  }
+  return null;
+}
 
 /**
  * Tags a `tenant_claim_events` purge failure inside `deleteTestData` (QA-3a).
@@ -887,6 +909,29 @@ export async function writeRefusedState<T = Record<string, unknown>>(
   }
 }
 
+// ─── Team-key recipient binding ──────────────────────────────────
+
+/**
+ * Give a user an ECDH public key (only while it is NULL) and return the stored
+ * string with its fingerprint. A team_member_keys row, or a confirm-key /
+ * rotate-key / teams body, must carry this fingerprint or the database refuses
+ * the wrap. Idempotent: the key is read back, so a second call returns the
+ * same pair and never rewrites it (P -> P' is refused by users_ecdh_key_guard).
+ * The fingerprint comes from the production function, not a copy of the
+ * trigger's SQL expression.
+ */
+export async function recipientKey(
+  su: Pick<PrismaWithPool, "pool">,
+  userId: string,
+): Promise<{ publicKey: string; fingerprint: string }> {
+  const publicKey = JSON.stringify({ kty: "EC", crv: "P-256", x: userId, y: "fixture" });
+  await su.pool.query(`UPDATE users SET ecdh_public_key = $2 WHERE id = $1::uuid AND ecdh_public_key IS NULL`, [userId, publicKey]);
+  const { rows } = await su.pool.query<{ ecdh_public_key: string }>(`SELECT ecdh_public_key FROM users WHERE id = $1::uuid`, [userId]);
+  if (rows.length !== 1) throw new Error(`recipientKey: user ${userId} not found`);
+  const stored = rows[0].ecdh_public_key;
+  return { publicKey: stored, fingerprint: await recipientKeyFingerprint(stored) };
+}
+
 // ─── Deferred barrier for concurrency tests ─────────────────────
 
 export class Deferred<T = void> {
@@ -1102,6 +1147,9 @@ export function redProofOverride(name: string): string | undefined {
 /** The migration C1's two blocks live in. */
 export const RLS_BACKFILL_RERUN_DIR = "20261110000000_rls_backfill_rerun";
 
+/** The migration the team-key residue repair (C9 of #1076) lives in. */
+export const TEAM_KEY_RECIPIENT_BINDING_DIR = "20261119000000_team_key_recipient_binding";
+
 /** The migration of #1011's repair block and its two CHECKs. */
 export const TEAM_ITEM_KEY_ID_CHECK_DIR = "20261120000000_team_item_key_id_check";
 
@@ -1125,22 +1173,25 @@ export function teamItemKeyIdCheckAlters(migrationDir: string): string[] {
   return statements;
 }
 
-/** The migrations whose block a red proof may replace, and the variable naming the copy. */
-const BACKFILL_RED_PROOF_OVERRIDES: Readonly<Record<string, string>> = {
+/**
+ * Per migration, the red-proof override variable naming a mutated copy of its
+ * migration.sql to read instead of the shipped file.
+ */
+const BACKFILL_OVERRIDE_VARS: Readonly<Record<string, string>> = {
   [RLS_BACKFILL_RERUN_DIR]: "RLS_BACKFILL_RERUN_SQL",
+  [TEAM_KEY_RECIPIENT_BINDING_DIR]: "TEAM_KEY_RESIDUE_SQL",
   [TEAM_ITEM_KEY_ID_CHECK_DIR]: "TEAM_ITEM_KEY_ID_CHECK_SQL",
 };
 
 /**
  * The text between a migration's `-- BEGIN BACKFILL <name>` and `-- END
- * BACKFILL <name>` markers; throws unless exactly one pair exists. For the
- * rerun migration, RLS_BACKFILL_RERUN_SQL names a file to read instead (a
- * mutated copy, for a red proof outside the source tree); for the
- * team-item-key-id-check migration, TEAM_ITEM_KEY_ID_CHECK_SQL does.
+ * BACKFILL <name>` markers; throws unless exactly one pair exists. For a
+ * migration listed in BACKFILL_OVERRIDE_VARS, its variable names a file to read
+ * instead (a mutated copy, for a red proof outside the source tree).
  */
 export function readBackfillBlock(migrationDir: string, name: string): string {
-  const overrideVar = BACKFILL_RED_PROOF_OVERRIDES[migrationDir];
-  const override = overrideVar ? redProofOverride(overrideVar) : undefined;
+  const overrideVar = BACKFILL_OVERRIDE_VARS[migrationDir];
+  const override = overrideVar === undefined ? undefined : redProofOverride(overrideVar);
   const sqlText = readFileSync(
     override ?? join(process.cwd(), "prisma/migrations", migrationDir, "migration.sql"),
     "utf8",

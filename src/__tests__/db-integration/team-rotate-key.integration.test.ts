@@ -26,6 +26,7 @@ import { randomUUID, randomBytes, createCipheriv } from "node:crypto";
 import { NextRequest } from "next/server";
 import {
   createTestContext,
+  recipientKey,
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
@@ -377,6 +378,7 @@ describe("team key rotation — real-DB integration (C7)", () => {
       const newOverview = await encryptField(`ov-${i}-v2`, teamKey, buildTeamEntryAAD(teamId, entryId, "overview", 0));
       const memberKeyBody = {
         userId: ownerId,
+        recipientKeyFingerprint: (await recipientKey(ctx.su, ownerId)).fingerprint,
         encryptedTeamKey: hex(32),
         teamKeyIv: hex(12),
         teamKeyAuthTag: hex(16),
@@ -470,6 +472,7 @@ describe("team key rotation — real-DB integration (C7)", () => {
       entries: [{ id: entryId, itemKeyVersion: 0, encryptedBlob: newBlob, encryptedOverview: newOverview, aadVersion: 1 }],
       memberKeys: [{
         userId: ownerId,
+        recipientKeyFingerprint: (await recipientKey(ctx.su, ownerId)).fingerprint,
         encryptedTeamKey: hex(32), teamKeyIv: hex(12), teamKeyAuthTag: hex(16),
         ephemeralPublicKey: hex(32), hkdfSalt: hex(32), keyVersion: 2,
       }],
@@ -516,6 +519,7 @@ describe("team key rotation — real-DB integration (C7)", () => {
       ],
       memberKeys: [{
         userId: ownerId,
+        recipientKeyFingerprint: (await recipientKey(ctx.su, ownerId)).fingerprint,
         encryptedTeamKey: hex(32), teamKeyIv: hex(12), teamKeyAuthTag: hex(16),
         ephemeralPublicKey: hex(32), hkdfSalt: hex(32), keyVersion: 2,
       }],
@@ -561,6 +565,7 @@ describe("team key rotation — real-DB integration (C7)", () => {
       entries: [{ id: entry1, itemKeyVersion: 0, encryptedBlob: newBlob, encryptedOverview: newOverview, aadVersion: 1 }],
       memberKeys: [{
         userId: ownerId,
+        recipientKeyFingerprint: (await recipientKey(ctx.su, ownerId)).fingerprint,
         encryptedTeamKey: hex(32), teamKeyIv: hex(12), teamKeyAuthTag: hex(16),
         ephemeralPublicKey: hex(32), hkdfSalt: hex(32), keyVersion: 2,
       }],
@@ -587,6 +592,7 @@ describe("team key rotation — real-DB integration (C7)", () => {
       entries: [],
       memberKeys: [{
         userId: ownerId,
+        recipientKeyFingerprint: (await recipientKey(ctx.su, ownerId)).fingerprint,
         encryptedTeamKey: hex(32), teamKeyIv: hex(12), teamKeyAuthTag: hex(16),
         ephemeralPublicKey: hex(32), hkdfSalt: hex(32), keyVersion: 2,
       }],
@@ -613,14 +619,15 @@ describe("team key rotation — real-DB integration (C7)", () => {
     await seedTeamMember(ctx, tenantId, teamId, ownerId, "OWNER", true);
 
     // Seed an existing v1 TeamMemberKey row (as if from initial team creation).
+    const { fingerprint } = await recipientKey(ctx.su, ownerId);
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
         `INSERT INTO team_member_keys (
            id, team_id, user_id, tenant_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
-           ephemeral_public_key, hkdf_salt, wrap_version, key_version, created_at, updated_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`,
-        randomUUID(), teamId, ownerId, tenantId, hex(32), hex(12), hex(16), hex(32), hex(32),
+           ephemeral_public_key, hkdf_salt, wrap_version, key_version, recipient_key_fingerprint, created_at, updated_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, $10, now(), now())`,
+        randomUUID(), teamId, ownerId, tenantId, hex(32), hex(12), hex(16), hex(32), hex(32), fingerprint,
       );
     });
 
@@ -630,6 +637,7 @@ describe("team key rotation — real-DB integration (C7)", () => {
       entries: [],
       memberKeys: [{
         userId: ownerId,
+        recipientKeyFingerprint: (await recipientKey(ctx.su, ownerId)).fingerprint,
         encryptedTeamKey: hex(32), teamKeyIv: hex(12), teamKeyAuthTag: hex(16),
         ephemeralPublicKey: hex(32), hkdfSalt: hex(32), keyVersion: 2,
       }],
@@ -709,6 +717,7 @@ describe("team history decryptability after rotation — real-DB integration (C8
       entries: [{ id: entryId, itemKeyVersion: 0, encryptedBlob: newBlob, encryptedOverview: newOverview, aadVersion: 1 }],
       memberKeys: [{
         userId: ownerId,
+        recipientKeyFingerprint: (await recipientKey(ctx.su, ownerId)).fingerprint,
         encryptedTeamKey: Buffer.from(teamKeyV2Raw).toString("base64"),
         teamKeyIv: hex(12), teamKeyAuthTag: hex(16),
         ephemeralPublicKey: hex(32), hkdfSalt: hex(32), keyVersion: 2,

@@ -31,7 +31,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { NextRequest } from "next/server";
-import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
+import { createTestContext, recipientKey, setBypassRlsGucs, type TestContext } from "./helpers";
 import { createRaceHelpers } from "./race-helpers";
 import {
   deriveItemCekWrapKey,
@@ -185,13 +185,14 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
        VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::"TeamRole", true, now(), now())`,
       randomUUID(), teamId, userId, tenantId, role,
     );
+    const { fingerprint } = await recipientKey(ctx.su, userId);
     for (const keyVersion of keyVersions) {
       await sql(
         `INSERT INTO team_member_keys (
            id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
-           ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, now(), now())`,
-        randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion,
+           ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, $11, now(), now())`,
+        randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion, fingerprint,
       );
     }
     return userId;
@@ -696,10 +697,11 @@ describe("team attachments under the entry ItemKey — real-DB integration", () 
         jsonRequest(`http://localhost/api/teams/${team.teamId}/rotate-key`, "POST", {
           newTeamKeyVersion: 2,
           entries: [{ id: entry.entryId, itemKeyVersion: 1, snapshotIv: live.rows[0].item_key_iv, encryptedItemKey: rewrapped, aadVersion: 1 }],
-          memberKeys: [team.admin, newcomer].map((userId) => ({
+          memberKeys: await Promise.all([team.admin, newcomer].map(async (userId) => ({
             userId, encryptedTeamKey: hex(32), teamKeyIv: hex(12), teamKeyAuthTag: hex(16),
             ephemeralPublicKey: hex(32), hkdfSalt: hex(32), keyVersion: 2,
-          })),
+            recipientKeyFingerprint: (await recipientKey(ctx.su, userId)).fingerprint,
+          }))),
         }),
         { params: Promise.resolve({ teamId: team.teamId }) },
       );

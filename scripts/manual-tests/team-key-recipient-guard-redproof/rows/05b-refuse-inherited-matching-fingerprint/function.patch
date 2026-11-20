@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -33,6 +33,8 @@
+   ELSIF NOT v_wrap_changed THEN
+     -- A fingerprint attached to a wrap nobody rewrote asserts an unchecked binding.
+     v_refusal := 'fingerprint_rebind';
++  ELSIF TG_OP = 'UPDATE' AND NEW.recipient_key_fingerprint IS NOT DISTINCT FROM OLD.recipient_key_fingerprint THEN
++    v_refusal := 'recipient_key_changed';
+   ELSE
+     PERFORM set_config('app.bypass_rls', 'on', true);
+     PERFORM set_config('app.bypass_tables', 'users', true);

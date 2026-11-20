@@ -66,6 +66,7 @@ import {
   appConnectionString,
   expectBypassNotices,
   expectBypassRefusal,
+  recipientKey,
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
@@ -157,13 +158,14 @@ describe("team key prune (#1009)", () => {
       teamId, tenantId, `prune-${teamId.slice(0, 8)}`, version,
     );
     for (const userId of holders) {
+      const { fingerprint } = await recipientKey(ctx.su, userId);
       for (let v = 1; v <= version; v++) {
         await sql(
           `INSERT INTO team_member_keys (
              id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
-             ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at
-           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, now(), now())`,
-          randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), v,
+             ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at
+           ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, $11, now(), now())`,
+          randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), v, fingerprint,
         );
       }
     }
@@ -511,12 +513,13 @@ describe("team key prune (#1009)", () => {
              VALUES ($1::uuid, $2::uuid, $3, $3, 3, now(), now())`,
             [teamId, tenantId, `prune-rds-${teamId.slice(0, 8)}`],
           );
+          const { fingerprint } = await recipientKey(ctx.su, userA);
           for (let v = 1; v <= 3; v++) {
             await c.query(
               `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
-                 ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
-               VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'k', 'iv', 'tag', 'epk', 'salt', $5, 1, now(), now())`,
-              [randomUUID(), teamId, tenantId, userA, v],
+                 ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at)
+               VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'k', 'iv', 'tag', 'epk', 'salt', $5, 1, $6, now(), now())`,
+              [randomUUID(), teamId, tenantId, userA, v, fingerprint],
             );
           }
           const entryId = randomUUID();
@@ -816,11 +819,12 @@ describe("team key prune (#1009)", () => {
         async (tx) => {
           await tx.$executeRawUnsafe(`UPDATE teams SET team_key_version = 4 WHERE id = $1::uuid`, teamId);
           for (const userId of [userA, userB]) {
+            const { fingerprint } = await recipientKey(ctx.su, userId);
             await tx.$executeRawUnsafe(
               `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
-                 ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
-               VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'k', 'iv', 'tag', 'epk', 'salt', 4, 1, now(), now())`,
-              randomUUID(), teamId, tenantId, userId,
+                 ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at)
+               VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'k', 'iv', 'tag', 'epk', 'salt', 4, 1, $5, now(), now())`,
+              randomUUID(), teamId, tenantId, userId, fingerprint,
             );
           }
         },

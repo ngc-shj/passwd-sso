@@ -242,6 +242,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: Tea
             hkdfSalt: escrow.hkdfSalt,
             keyVersion: newTeamKeyVersion,
             wrapVersion: escrow.wrapVersion,
+            recipientKeyFingerprint: escrow.recipientKeyFingerprint,
           };
         }),
       );

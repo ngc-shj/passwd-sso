@@ -4087,6 +4087,78 @@ describe("function rule: routines are created in migrations", () => {
     expect(other.code).toBe(1);
     expect(other.stderr).toContain(`${negative}:5  creates another`);
   });
+
+  describe("a `dynamic` entry (the red-proof runner, whose routine name is a variable)", () => {
+    const runner = "scripts/manual-tests/departed-member-guard-redproof.sh";
+    const runnerText = readFileSync(join(REPO_ROOT, runner), "utf8");
+
+    it("passes the runner's dynamic CREATE OR REPLACE FUNCTION ${qualified}()", () => {
+      expect(runnerText).toContain("CREATE OR REPLACE FUNCTION ${qualified}()");
+      const { code, stderr } = runMulti([[runner, runnerText]]);
+      expect(code, stderr).toBe(0);
+    });
+
+    it("refuses a literal routine name in the same file, naming it", () => {
+      const evil = `psql -c "CREATE FUNCTION evil() RETURNS int AS 'SELECT 1' LANGUAGE sql"\n`;
+      const { code, stderr } = runMulti([[runner, runnerText + evil]]);
+      expect(code).toBe(1);
+      expect(stderr).toContain(`${runner}:${runnerText.split("\n").length}  creates evil`);
+    });
+
+    // Names the text match cannot read are not "dynamic" unless spelled exactly
+    // as the entry's `${qualified}`.
+    it.each([
+      ["a comment before the name", "CREATE FUNCTION /**/evil()"],
+      ["a non-ASCII name", "CREATE FUNCTION évil()"],
+      ["another variable", "CREATE FUNCTION ${other}()"],
+      // Exact, not a prefix, suffix or substring match.
+      ["a suffix after the dynamic name", "CREATE FUNCTION ${qualified}_evil()"],
+      ["a comment before the dynamic name", "CREATE FUNCTION /**/${qualified}()"],
+    ])("refuses an unreadable name spelled other than the entry's: %s", (_label, create) => {
+      const { code, stderr } = runMulti([[runner, `${runnerText}psql -c "${create} RETURNS int AS 'SELECT 1' LANGUAGE sql"\n`]]);
+      expect(code).toBe(1);
+      expect(stderr).toContain(`${runner}:${runnerText.split("\n").length}  creates a routine`);
+    });
+
+    it("refuses a second ${qualified} CREATE in the same file: the entry admits one site", () => {
+      const again = `pg_exec "$db" -c "CREATE OR REPLACE FUNCTION \${qualified}() RETURNS int AS 'SELECT 1' LANGUAGE sql"\n`;
+      const { code, stderr } = runMulti([[runner, runnerText + again]]);
+      expect(code).toBe(1);
+      const first = runnerText.split("\n").findIndex((l) => l.includes("CREATE OR REPLACE FUNCTION ${qualified}")) + 1;
+      expect(first).toBeGreaterThan(0);
+      expect(stderr).toContain(`${runner}:${runnerText.split("\n").length}  creates \${qualified} again: a dynamic FUNCTION_RULE_ALLOWLIST entry admits one site (first at line ${first})`);
+    });
+
+    it.each([
+      ["names neither routine nor dynamic (a typo)", 'dynamc: "${qualified}", why:'],
+      ["names both, one empty", 'routine: "x", dynamic: "", why:'],
+      // A prefix beside a file would let the matcher's prefix branch admit the whole prefix.
+      ["adds a prefix to a file entry", 'prefix: "scripts/", dynamic: "${qualified}", why:'],
+    ])("refuses to load an allowlist entry that %s", (_label, replacement) => {
+      // Run against a copy of the gate whose runner entry is ill-formed.
+      const gateDir = mkdtempSync(join(tmpdir(), "bypass-gate-"));
+      try {
+        cpSync(dirname(CHECKER), join(gateDir, "checks"), { recursive: true });
+        symlinkSync(join(REPO_ROOT, "node_modules"), join(gateDir, "node_modules"));
+        const gate = join(gateDir, "checks/check-bypass-rls.mjs");
+        const source = readFileSync(gate, "utf8");
+        const patched = source.replace('dynamic: "${qualified}", why:', replacement);
+        expect(patched).not.toBe(source);
+        writeFileSync(gate, patched, "utf8");
+        const { code, stderr } = runMulti([[runner, runnerText]], gate);
+        expect(code).not.toBe(0);
+        expect(stderr).toContain(`FUNCTION_RULE_ALLOWLIST entry for ${runner} must name exactly one of routine / dynamic`);
+      } finally {
+        rmSync(gateDir, { recursive: true, force: true });
+      }
+    });
+
+    it("reports the entry as stale, by its dynamic name, when the file creates no routine", () => {
+      const { code, stderr } = runMulti([[runner, "#!/usr/bin/env bash\necho no routine here\n"]]);
+      expect(code).toBe(1);
+      expect(stderr).toContain(`${runner}:0  FUNCTION_RULE_ALLOWLIST entry (dynamic name) matches nothing: remove it`);
+    });
+  });
 });
 
 describe("function rule: the enforce-mode function is migration-owned", () => {
