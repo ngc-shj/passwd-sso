@@ -42,7 +42,9 @@ COPY .npmrc ./
 # prisma pulls mysql2 for its MySQL connector and <3.22.0 carries
 # GHSA-3f6p-5ww8-9rcr (auth-plugin downgrade to mysql_clear_password leaks the
 # password), and <=3.23.0 carries GHSA-rgwj-5xj2-c3m3 (unbounded zlib inflate in
-# the compressed protocol handler). We deploy against PostgreSQL, so the
+# the compressed protocol handler). EFFECT_VER: prisma pulls effect (via
+# @prisma/config) and <=3.22.0 carries CVE-2026-121707 / GHSA-7589-6fvf-x4pw
+# (ReDoS in Schema.TemplateLiteral). We deploy against PostgreSQL, so the
 # connector is never invoked —
 # the pin is here because the copy still SHIPS in the runner and Trivy scans
 # what ships, not what runs. This stage is an ISOLATED `npm init` tree, so the
@@ -53,10 +55,12 @@ RUN PRISMA_VER=7.10.1 && \
     FMW_VER=9.7.0 && \
     DMT_VER=8.0.0 && \
     MYSQL2_VER=3.23.1 && \
+    EFFECT_VER=3.22.1 && \
     npm init -y >/dev/null 2>&1 && \
-    node -e "const f='package.json',p=require('/prisma-cli/'+f);p.overrides={...p.overrides,'find-my-way':'^${FMW_VER}','deepmerge-ts':'^${DMT_VER}','mysql2':'^${MYSQL2_VER}'};require('fs').writeFileSync(f,JSON.stringify(p,null,2))" && \
+    node -e "const f='package.json',p=require('/prisma-cli/'+f);p.overrides={...p.overrides,'find-my-way':'^${FMW_VER}','deepmerge-ts':'^${DMT_VER}','mysql2':'^${MYSQL2_VER}','effect':'^${EFFECT_VER}'};require('fs').writeFileSync(f,JSON.stringify(p,null,2))" && \
     npm install "prisma@${PRISMA_VER}" --ignore-scripts --loglevel=error && \
     node -e "const v=require('/prisma-cli/node_modules/prisma/package.json').version;if(v!=='${PRISMA_VER}'){console.error('prisma pin failed: got '+v+', expected ${PRISMA_VER}');process.exit(1)}" && \
+    node -e "const v=require('/prisma-cli/node_modules/effect/package.json').version,c=v.split('.').map(Number),m='${EFFECT_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('effect still '+v);process.exit(1)}}" && \
     node -e "const v=require('/prisma-cli/node_modules/find-my-way/package.json').version,c=v.split('.').map(Number),m='${FMW_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('find-my-way still '+v);process.exit(1)}}" && \
     node -e "const v=require('/prisma-cli/node_modules/deepmerge-ts/package.json').version,c=v.split('.').map(Number),m='${DMT_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('deepmerge-ts still '+v);process.exit(1)}}" && \
     node -e "const v=require('/prisma-cli/node_modules/mysql2/package.json').version,c=v.split('.').map(Number),m='${MYSQL2_VER}'.split('.').map(Number);for(let i=0;i<m.length;i++){const a=c[i]||0;if(a>m[i])break;if(a<m[i]){console.error('mysql2 still '+v);process.exit(1)}}" && \

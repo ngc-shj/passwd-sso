@@ -1,0 +1,3 @@
+TEAM_KEY_RECIPIENT_GUARD:fingerprint_missing	team-key recipient binding — real-DB integration writer routes and serving endpoints confirm-key's upsert update branch over a legacy NULL-fingerprint row, with the current fingerprint: allowed and rebound
+expected 409 to be 200	team-key recipient binding — real-DB integration writer routes and serving endpoints confirm-key's upsert update branch over a row bound to an old key, with the current fingerprint: allowed and rebound
++-	POST /api/teams/[teamId]/members/[memberId]/confirm-key passes the recipient key fingerprint into both the create and the update of the key row

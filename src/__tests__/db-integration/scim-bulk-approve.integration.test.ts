@@ -20,6 +20,7 @@ import {
   assertRlsApplies,
   createPrismaForRole,
   createTestContext,
+  recipientKey,
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
@@ -165,11 +166,12 @@ describe("scim-bulk-approve — real-DB integration", () => {
   }
 
   async function seedKey(teamId: string, userId: string, tenant = tenantId, keyVersion = 1) {
+    const { fingerprint } = await recipientKey(ctx.su, userId);
     await sql(
       `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
-         team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, now(), now())`,
-      randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion,
+         team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, $11, now(), now())`,
+      randomUUID(), teamId, tenant, userId, hex(32), hex(12), hex(16), hex(32), hex(32), keyVersion, fingerprint,
     );
   }
 

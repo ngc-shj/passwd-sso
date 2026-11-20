@@ -1,0 +1,1 @@
+C9 restore removed: the block leaves its own bypass settings and tenant in the caller's transaction.

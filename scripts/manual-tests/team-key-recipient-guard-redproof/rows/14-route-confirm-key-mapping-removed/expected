@@ -1,0 +1,3 @@
+TEAM_KEY_RECIPIENT_GUARD:recipient_key_changed	team-key recipient binding — real-DB integration writer routes and serving endpoints confirm-key with a mismatching fingerprint: 409 TEAM_KEY_RECIPIENT_CHANGED, no key row, still pending, no audit
+databaseGuardError	POST /api/teams/[teamId]/members/[memberId]/confirm-key a TEAM_KEY_RECIPIENT_GUARD refusal of the key write maps recipient_key_changed to 409 TEAM_KEY_RECIPIENT_CHANGED
+databaseGuardError	POST /api/teams/[teamId]/members/[memberId]/confirm-key a TEAM_KEY_RECIPIENT_GUARD refusal of the key write maps recipient_no_key to 409 TEAM_KEY_RECIPIENT_CHANGED

@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -46,7 +46,7 @@
+     PERFORM set_config('app.bypass_purpose', COALESCE(v_prev_purpose, ''), true);
+ 
+     IF v_found IS NOT TRUE OR v_key IS NULL THEN
+-      v_refusal := 'recipient_no_key';
++      NULL; -- arm removed
+     ELSIF encode(sha256(convert_to(v_key, 'UTF8')), 'hex') IS DISTINCT FROM NEW.recipient_key_fingerprint THEN
+       v_refusal := 'recipient_key_changed';
+     END IF;

@@ -178,7 +178,7 @@ describe("operator scripts as an owner-shaped NOSUPERUSER NOBYPASSRLS role", () 
 
   /** A row in each model a tenant move counts as stranded, so the cell's statements examine every one. */
   async function seedOwned(tenantId: string, userId: string): Promise<void> {
-    seededRows.push({ userId, rows: await seedUserOwnedRows(ctx.su.prisma, tenantId, userId) });
+    seededRows.push({ userId, rows: await seedUserOwnedRows(ctx.su, tenantId, userId) });
   }
 
   const freshClaim = (arm: string) => `${runToken()}-${arm}.${ALIAS_CLAIM}`;

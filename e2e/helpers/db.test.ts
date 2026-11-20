@@ -128,7 +128,8 @@ describe("seedTenant", () => {
 describe("seedUser", () => {
   beforeEach(() => {
     mockQuery.mockClear();
-    mockQuery.mockResolvedValue({ rows: [] });
+    // pg reports one row for an INSERT ... ON CONFLICT DO UPDATE that wrote.
+    mockQuery.mockResolvedValue({ rows: [], rowCount: 1 });
   });
 
   const baseUser = {
@@ -165,6 +166,24 @@ describe("seedUser", () => {
       // a fresh user stays fresh even if a previous test run set up their vault.
       expect(sql).toMatch(/account_salt = NULL/i);
       expect(sql).toMatch(/encrypted_secret_key = NULL/i);
+    });
+
+    it("resets an existing user only while its ECDH public key is NULL", async () => {
+      await seedUser(baseUser);
+      const [sql] = getCall(0);
+      expect(sql).toMatch(/WHERE users\.ecdh_public_key IS NULL/i);
+    });
+
+    it("seeds the tenant membership when the upsert wrote the user row", async () => {
+      await seedUser(baseUser);
+      expect(mockQuery).toHaveBeenCalledTimes(2);
+      expect(getCall(1)[0]).toMatch(/INSERT INTO tenant_members/i);
+    });
+
+    it("throws, without seeding the tenant membership, when the user already holds an ECDH public key", async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      await expect(seedUser(baseUser)).rejects.toThrow(/already has an ECDH public key/);
+      expect(mockQuery).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -210,6 +229,24 @@ describe("seedUser", () => {
       const [sql] = getCall(0);
       expect(sql).toMatch(/ON CONFLICT \(id\)/i);
       expect(sql).toMatch(/DO UPDATE SET/i);
+    });
+
+    it("rewrites an existing user only while its ECDH public key is NULL", async () => {
+      await seedUser({ ...baseUser, vaultFields });
+      const [sql] = getCall(0);
+      expect(sql).toMatch(/WHERE users\.ecdh_public_key IS NULL/i);
+    });
+
+    it("seeds the tenant membership when the upsert wrote the user row", async () => {
+      await seedUser({ ...baseUser, vaultFields });
+      expect(mockQuery).toHaveBeenCalledTimes(2);
+      expect(getCall(1)[0]).toMatch(/INSERT INTO tenant_members/i);
+    });
+
+    it("throws, without seeding the tenant membership, when the user already holds an ECDH public key", async () => {
+      mockQuery.mockResolvedValueOnce({ rows: [], rowCount: 0 });
+      await expect(seedUser({ ...baseUser, vaultFields })).rejects.toThrow(/already has an ECDH public key/);
+      expect(mockQuery).toHaveBeenCalledTimes(1);
     });
   });
 });

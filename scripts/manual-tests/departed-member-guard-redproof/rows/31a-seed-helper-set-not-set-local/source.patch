@@ -1,6 +1,6 @@
 --- a/src/__tests__/db-integration/helpers.ts
 +++ b/src/__tests__/db-integration/helpers.ts
-@@ -868,7 +868,7 @@
+@@ -890,7 +890,7 @@
    try {
      await client.query("BEGIN");
      try {

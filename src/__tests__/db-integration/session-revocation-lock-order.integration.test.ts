@@ -21,7 +21,7 @@ import { describe, it, expect, vi, beforeAll, afterAll, beforeEach, afterEach } 
 import { randomBytes, randomUUID } from "node:crypto";
 import { NextRequest } from "next/server";
 import type { Prisma } from "@prisma/client";
-import { assertRlsApplies, createTestContext, Deferred, setBypassRlsGucs, type TestContext } from "./helpers";
+import { assertRlsApplies, createTestContext, Deferred, recipientKey, setBypassRlsGucs, type TestContext } from "./helpers";
 import { BLOCK_WAIT_MS, createRaceHelpers } from "./race-helpers";
 import { TEAM_KEY_LOCK_TIMEOUT_MS, TEAM_MEMBERSHIP_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 
@@ -523,11 +523,12 @@ describe("departure revocation: models, lock identity, bounded wait, lock order 
          VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'MEMBER', true, now(), now())`,
         rowId, teamId, userId, tenantId,
       );
+      const { fingerprint } = await recipientKey(ctx.su, userId);
       await sql(
         `INSERT INTO team_member_keys (id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv,
-           team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at)
-         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, now(), now())`,
-        randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32),
+           team_key_auth_tag, ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at)
+         VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, 1, 1, $10, now(), now())`,
+        randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), fingerprint,
       );
       return rowId;
     }

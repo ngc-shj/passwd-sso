@@ -102,6 +102,7 @@ import { TEAM_ROTATE_KEY_FAILURE_LIMIT } from "@/lib/security/rate-limiters";
 import { TEAM_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/team/rotate-key";
 import { documentedMetadataKeys } from "@/__tests__/helpers/audit-log-reference";
 import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
+import { teamKeyRecipientGuardError } from "@/__tests__/helpers/database-guard-error";
 
 const ACTOR = "660e8400-e29b-41d4-a716-446655440001";
 const ADMITTED_AT = new Date("2026-03-01T00:00:00.000Z");
@@ -171,6 +172,7 @@ function validMemberKey(userId: string) {
     ephemeralPublicKey: "pub-key",
     hkdfSalt: "c".repeat(64),
     keyVersion: 2,
+    recipientKeyFingerprint: "d".repeat(64),
   };
 }
 
@@ -595,6 +597,64 @@ describe("POST /api/teams/[teamId]/rotate-key", () => {
         ]),
       }),
     );
+  });
+
+  it("passes the recipient key fingerprint of each member to TeamMemberKey createMany", async () => {
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [{ ...validMemberKey("660e8400-e29b-41d4-a716-446655440001"), recipientKeyFingerprint: "e".repeat(64) }],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(200);
+    expect(txMock.teamMemberKey.createMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: [expect.objectContaining({ recipientKeyFingerprint: "e".repeat(64) })],
+      }),
+    );
+  });
+
+  it("returns 400 when a member key has no fingerprint", async () => {
+    const { recipientKeyFingerprint: _omitted, ...withoutFingerprint } = validMemberKey("660e8400-e29b-41d4-a716-446655440001");
+    const res = await POST(
+      createRequest({
+        newTeamKeyVersion: 2,
+        entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+        memberKeys: [withoutFingerprint],
+      }),
+      createParams("team-1"),
+    );
+    expect(res.status).toBe(400);
+    expect(txMock.teamMemberKey.createMany).not.toHaveBeenCalled();
+  });
+
+  describe("a TEAM_KEY_RECIPIENT_GUARD refusal of the member keys", () => {
+    const post = () =>
+      POST(
+        createRequest({
+          newTeamKeyVersion: 2,
+          entries: [validEntry("660e8400-e29b-41d4-a716-446655440100")],
+          memberKeys: [validMemberKey("660e8400-e29b-41d4-a716-446655440001")],
+        }),
+        createParams("team-1"),
+      );
+
+    it.each(["recipient_key_changed", "recipient_no_key"])("maps %s to 409 TEAM_KEY_RECIPIENT_CHANGED", async (arm) => {
+      txMock.teamMemberKey.createMany.mockRejectedValueOnce(teamKeyRecipientGuardError(arm));
+
+      const res = await post();
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("TEAM_KEY_RECIPIENT_CHANGED");
+    });
+
+    it.each(["fingerprint_missing", "fingerprint_rebind"])("rethrows %s", async (arm) => {
+      txMock.teamMemberKey.createMany.mockRejectedValueOnce(teamKeyRecipientGuardError(arm));
+
+      await expect(post()).rejects.toThrow(/invocation/);
+    });
   });
 
   it("lists deactivated members for distribution of the new version, in the rotation transaction", async () => {

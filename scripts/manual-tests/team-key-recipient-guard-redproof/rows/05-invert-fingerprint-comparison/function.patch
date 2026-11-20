@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -47,7 +47,7 @@
+ 
+     IF v_found IS NOT TRUE OR v_key IS NULL THEN
+       v_refusal := 'recipient_no_key';
+-    ELSIF encode(sha256(convert_to(v_key, 'UTF8')), 'hex') IS DISTINCT FROM NEW.recipient_key_fingerprint THEN
++    ELSIF encode(sha256(convert_to(v_key, 'UTF8')), 'hex') IS NOT DISTINCT FROM NEW.recipient_key_fingerprint THEN
+       v_refusal := 'recipient_key_changed';
+     END IF;
+   END IF;

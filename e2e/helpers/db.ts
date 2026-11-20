@@ -243,7 +243,7 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
 
   if (options.vaultFields) {
     const v = options.vaultFields;
-    await p.query(
+    const seeded = await p.query(
       `INSERT INTO users (
         id, email, name,
         tenant_id, email_verified, vault_setup_at, created_at, updated_at,
@@ -273,7 +273,8 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
         ecdh_public_key = EXCLUDED.ecdh_public_key,
         encrypted_ecdh_private_key = EXCLUDED.encrypted_ecdh_private_key,
         ecdh_private_key_iv = EXCLUDED.ecdh_private_key_iv,
-        ecdh_private_key_auth_tag = EXCLUDED.ecdh_private_key_auth_tag`,
+        ecdh_private_key_auth_tag = EXCLUDED.ecdh_private_key_auth_tag
+      WHERE users.ecdh_public_key IS NULL`,
       [
         options.id,
         options.email,
@@ -298,10 +299,20 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
         v.ecdhPrivateKeyAuthTag ?? null,
       ]
     );
+    // users_ecdh_key_guard refuses an ECDH key replaced by another, so a user
+    // that already holds one is not re-seeded: rewriting the private half
+    // alone would leave a public key that no longer matches it.
+    if (seeded.rowCount === 0) {
+      throw new Error(
+        `seedUser: user ${options.id} already has an ECDH public key; clean up the previous run before seeding it again`
+      );
+    }
   } else {
-    // Reset all vault fields to NULL so a "fresh" user stays fresh
-    // even if a previous test run set up their vault.
-    await p.query(
+    // Reset all vault fields to NULL so a "fresh" user stays fresh even if a
+    // previous test run set up their vault. A user holding an ECDH public key
+    // is not reset: users_ecdh_key_guard would refuse the UI's later vault
+    // setup over it (P -> P'), so that is refused here instead.
+    const seeded = await p.query(
       `INSERT INTO users (id, email, name, tenant_id, email_verified, created_at, updated_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7)
        ON CONFLICT (id) DO UPDATE SET
@@ -318,9 +329,15 @@ export async function seedUser(options: SeedUserOptions): Promise<void> {
          master_password_server_hash = NULL,
          master_password_server_salt = NULL,
          passphrase_verifier_hmac = NULL,
-         key_version = 0`,
+         key_version = 0
+       WHERE users.ecdh_public_key IS NULL`,
       [options.id, options.email, options.name, tenantId, now, now, now]
     );
+    if (seeded.rowCount === 0) {
+      throw new Error(
+        `seedUser: user ${options.id} already has an ECDH public key and cannot be reset to a fresh user; clean up the previous run before seeding it again`
+      );
+    }
   }
 
   // Ensure tenant_members row exists (required for RLS tenant resolution)

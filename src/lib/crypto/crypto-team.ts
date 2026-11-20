@@ -272,6 +272,19 @@ export interface TeamKeyEscrowResult {
   hkdfSalt: string;
   wrapVersion: number;
   keyVersion: number;
+  /** recipientKeyFingerprint of the public key the team key was wrapped to. */
+  recipientKeyFingerprint: string;
+}
+
+/**
+ * Lowercase hex SHA-256 of the UTF-8 bytes of a member's ECDH public key, as
+ * the exact string the server returned. The server stores it with the wrapped
+ * key, and the database refuses the write unless it matches the member's
+ * current key (team_key_recipient_guard, migration 20261119000000). No JWK
+ * canonicalisation: both sides hash the same stored string.
+ */
+export async function recipientKeyFingerprint(publicKeyJwk: string): Promise<string> {
+  return hexEncode(await crypto.subtle.digest("SHA-256", textEncode(publicKeyJwk)));
 }
 
 /**
@@ -324,6 +337,7 @@ export async function createTeamKeyEscrow(
     hkdfSalt: hexEncode(salt),
     wrapVersion: CURRENT_TEAM_WRAP_VERSION,
     keyVersion,
+    recipientKeyFingerprint: await recipientKeyFingerprint(memberPublicKeyJwk),
   };
 }
 

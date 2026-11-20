@@ -1,0 +1,1 @@
+vault setup no longer maps the ecdh_key_overwrite refusal to 409 VAULT_ALREADY_SETUP.

@@ -59,6 +59,9 @@ Key distribution (per member):
         │
         └── wraps teamKey ──► stored as TeamMemberKey in DB
             (AAD scope "OK": teamId, userId, keyVersion, wrapVersion)
+            + recipientKeyFingerprint = SHA-256(memberPublicKey string)
+              the database refuses the row unless it equals the
+              fingerprint of the member's current public key
 
 Entry encryption:
     teamKey
@@ -322,7 +325,10 @@ Personal vault rotation does NOT defend against this cross-domain backup-
 compromise scenario. A future "compromise rotation" mode that also rotates
 `ecdhPublicKey` and reissues every `TeamMemberKey` row for the user is
 tracked separately (Phase B+). For incident-response scenarios, contact
-your tenant admin.
+your tenant admin. The database refuses replacing a non-NULL
+`ecdhPublicKey` directly and retiring one while any `TeamMemberKey` row or
+distributed flag for the user survives (`#1076`), so such a mode has to clear
+those first, as vault reset does.
 
 ### 6.2 Team Key Rotation
 

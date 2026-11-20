@@ -295,7 +295,7 @@ All password data is encrypted **client-side** before reaching the server. The s
 | `/api/teams/[teamId]/members/[memberId]/reject` | POST | Reject a SCIM-pending membership (step-up) |
 | `/api/teams/[teamId]/members/bulk-approve` | POST | Bulk approve SCIM-pending memberships (step-up; key-holding OWNER/ADMIN) |
 | `/api/teams/[teamId]/members/bulk-reject` | POST | Bulk reject SCIM-pending memberships (step-up) |
-| `/api/teams/[teamId]/member-key` | GET, POST | Get/submit member encryption key |
+| `/api/teams/[teamId]/member-key` | GET | Get own member encryption key |
 | `/api/teams/[teamId]/rotate-key` | POST | Rotate team encryption key |
 | `/api/teams/[teamId]/rotate-key/data` | GET | Bulk fetch entries for team key rotation |
 | `/api/teams/[teamId]/rekey` | GET | List entries pending re-key after a rotation |

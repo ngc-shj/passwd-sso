@@ -36,6 +36,7 @@ import {
   KDF_ARGON2_PARALLELISM_MAX,
 } from "@/lib/validations/common.server";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { TEAM_KEY_RECIPIENT_GUARD_ARM, teamKeyRecipientGuardArm } from "@/lib/team/team-key-recipient-guard";
 import { PBKDF2_ITERATIONS } from "@/lib/crypto/crypto-params";
 
 export const runtime = "nodejs";
@@ -141,44 +142,53 @@ async function handlePOST(request: NextRequest) {
     .update(data.authHash + serverSalt)
     .digest("hex");
 
-  await withUserTenantRls(session.user.id, async () =>
-    prisma.$transaction([
-      prisma.user.update({
-        where: { id: session.user.id },
-        data: {
-          vaultSetupAt: new Date(),
-          accountSalt: data.accountSalt,
-          encryptedSecretKey: data.encryptedSecretKey,
-          secretKeyIv: data.secretKeyIv,
-          secretKeyAuthTag: data.secretKeyAuthTag,
-          masterPasswordServerHash: serverHash,
-          masterPasswordServerSalt: serverSalt,
-          keyVersion: 1,
-          kdfType,
-          kdfIterations,
-          kdfMemory,
-          kdfParallelism,
-          passphraseVerifierHmac: hmacVerifier(data.verifierHash),
-          passphraseVerifierVersion: VERIFIER_VERSION,
-          // ECDH key pair for team E2E encryption
-          ecdhPublicKey: data.ecdhPublicKey,
-          encryptedEcdhPrivateKey: data.encryptedEcdhPrivateKey,
-          ecdhPrivateKeyIv: data.ecdhPrivateKeyIv,
-          ecdhPrivateKeyAuthTag: data.ecdhPrivateKeyAuthTag,
-        },
-      }),
-      prisma.vaultKey.create({
-        data: {
-          userId: session.user.id,
-          tenantId: existingUser.tenantId,
-          version: 1,
-          verificationCiphertext: data.verificationArtifact.ciphertext,
-          verificationIv: data.verificationArtifact.iv,
-          verificationAuthTag: data.verificationArtifact.authTag,
-        },
-      }),
-    ]),
-  );
+  try {
+    await withUserTenantRls(session.user.id, async () =>
+      prisma.$transaction([
+        prisma.user.update({
+          where: { id: session.user.id },
+          data: {
+            vaultSetupAt: new Date(),
+            accountSalt: data.accountSalt,
+            encryptedSecretKey: data.encryptedSecretKey,
+            secretKeyIv: data.secretKeyIv,
+            secretKeyAuthTag: data.secretKeyAuthTag,
+            masterPasswordServerHash: serverHash,
+            masterPasswordServerSalt: serverSalt,
+            keyVersion: 1,
+            kdfType,
+            kdfIterations,
+            kdfMemory,
+            kdfParallelism,
+            passphraseVerifierHmac: hmacVerifier(data.verifierHash),
+            passphraseVerifierVersion: VERIFIER_VERSION,
+            // ECDH key pair for team E2E encryption
+            ecdhPublicKey: data.ecdhPublicKey,
+            encryptedEcdhPrivateKey: data.encryptedEcdhPrivateKey,
+            ecdhPrivateKeyIv: data.ecdhPrivateKeyIv,
+            ecdhPrivateKeyAuthTag: data.ecdhPrivateKeyAuthTag,
+          },
+        }),
+        prisma.vaultKey.create({
+          data: {
+            userId: session.user.id,
+            tenantId: existingUser.tenantId,
+            version: 1,
+            verificationCiphertext: data.verificationArtifact.ciphertext,
+            verificationIv: data.verificationArtifact.iv,
+            verificationAuthTag: data.verificationArtifact.authTag,
+          },
+        }),
+      ]),
+    );
+  } catch (e) {
+    // A concurrent setup committed first (the vaultSetupAt check above is a
+    // plain read): the database refuses overwriting its ECDH public key.
+    if (teamKeyRecipientGuardArm(e) === TEAM_KEY_RECIPIENT_GUARD_ARM.ECDH_KEY_OVERWRITE) {
+      return errorResponse(API_ERROR.VAULT_ALREADY_SETUP);
+    }
+    throw e;
+  }
 
   await logAuditAsync({
     ...personalAuditBase(request, session.user.id),

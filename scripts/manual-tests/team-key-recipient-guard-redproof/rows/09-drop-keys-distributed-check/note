@@ -1,0 +1,1 @@
+C3 key-row / distributed-flag check removed: a key is retired under the user's key rows and flags. Collateral (+): the cross-tenant key-row retirement is refused by the same check and now commits.

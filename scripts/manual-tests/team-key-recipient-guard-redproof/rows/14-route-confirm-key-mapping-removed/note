@@ -1,0 +1,1 @@
+confirm-key no longer maps the recipient guard's refusal to 409 TEAM_KEY_RECIPIENT_CHANGED.

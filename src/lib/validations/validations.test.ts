@@ -162,6 +162,7 @@ describe("teamMemberKeySchema", () => {
     hkdfSalt: HEX_SALT,
     keyVersion: 1,
     wrapVersion: 1,
+    recipientKeyFingerprint: "d".repeat(64),
   };
 
   it("accepts valid input", () => {
@@ -199,6 +200,7 @@ describe("createTeamE2ESchema", () => {
       hkdfSalt: HEX_SALT,
       keyVersion: 1,
       wrapVersion: 1,
+      recipientKeyFingerprint: "d".repeat(64),
     },
   };
 

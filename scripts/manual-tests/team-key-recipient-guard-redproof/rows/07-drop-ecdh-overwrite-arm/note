@@ -1,0 +1,1 @@
+C3 ecdh_key_overwrite arm removed: P -> P' commits, and a racing vault setup overwrites the committed key.

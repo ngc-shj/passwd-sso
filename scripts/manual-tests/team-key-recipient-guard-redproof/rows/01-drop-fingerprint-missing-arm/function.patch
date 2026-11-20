@@ -1,0 +1,11 @@
+--- a/function.sql
++++ b/function.sql
+@@ -29,7 +29,7 @@
+   END IF;
+ 
+   IF NEW.recipient_key_fingerprint IS NULL THEN
+-    v_refusal := 'fingerprint_missing';
++    NULL; -- arm removed
+   ELSIF NOT v_wrap_changed THEN
+     -- A fingerprint attached to a wrap nobody rewrote asserts an unchecked binding.
+     v_refusal := 'fingerprint_rebind';

@@ -168,6 +168,7 @@ describe("teamMemberKeySchema", () => {
     hkdfSalt: string;
     keyVersion: number;
     wrapVersion: number;
+    recipientKeyFingerprint: string;
   } => ({
     encryptedTeamKey: "encrypted",
     teamKeyIv: HEX_IV,
@@ -176,6 +177,22 @@ describe("teamMemberKeySchema", () => {
     hkdfSalt: HEX_SALT,
     keyVersion: 1,
     wrapVersion: 1,
+    recipientKeyFingerprint: "d".repeat(64),
+  });
+
+  it("rejects missing recipientKeyFingerprint", () => {
+    const { recipientKeyFingerprint: _, ...rest } = valid();
+    expect(teamMemberKeySchema.safeParse(rest).success).toBe(false);
+  });
+
+  it.each([
+    ["uppercase hex", "D".repeat(64)],
+    ["too short", "d".repeat(63)],
+    ["too long", "d".repeat(65)],
+    ["non-hex", "g".repeat(64)],
+    ["empty", ""],
+  ])("rejects recipientKeyFingerprint that is %s", (_name, recipientKeyFingerprint) => {
+    expect(teamMemberKeySchema.safeParse({ ...valid(), recipientKeyFingerprint }).success).toBe(false);
   });
 
   it("accepts valid input", () => {
@@ -260,6 +277,7 @@ describe("createTeamE2ESchema", () => {
       hkdfSalt: HEX_SALT,
       keyVersion: 1,
       wrapVersion: 1,
+      recipientKeyFingerprint: "d".repeat(64),
     },
   });
 

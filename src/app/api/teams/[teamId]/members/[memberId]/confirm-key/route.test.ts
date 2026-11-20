@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { teamLockQuery, lockQueryCalls } from "@/__tests__/helpers/team-rotation-lock-mock";
+import { databaseGuardError, teamKeyRecipientGuardError } from "@/__tests__/helpers/database-guard-error";
 
 const { mockAuth, mockPrismaTeamMember, mockPrismaUser,
   mockPrismaTeamMemberKey, mockTeamLockQuery, mockWithTeamTenantRls,
@@ -83,6 +84,7 @@ const validBody = {
   ephemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"test","y":"test"}',
   hkdfSalt: "c".repeat(64),
   keyVersion: 1,
+  recipientKeyFingerprint: "d".repeat(64),
 };
 
 const ACTOR_ADMITTED_AT = new Date("2026-03-01T00:00:00.000Z");
@@ -613,6 +615,73 @@ describe("POST /api/teams/[teamId]/members/[memberId]/confirm-key", () => {
     await expect(
       POST(createRequest("POST", URL, { body: validBody }), { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) }),
     ).rejects.toThrow(/key_leftover/);
+  });
+
+  it("passes the recipient key fingerprint into both the create and the update of the key row", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow());
+    mockPrismaTeamMember.findUnique
+      .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
+      .mockResolvedValueOnce(lockedTarget());
+
+    const res = await POST(
+      createRequest("POST", URL, { body: validBody }),
+      { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+    );
+
+    expect(res.status).toBe(200);
+    const arg = mockPrismaTeamMemberKey.upsert.mock.calls[0][0];
+    expect(arg.create.recipientKeyFingerprint).toBe(validBody.recipientKeyFingerprint);
+    expect(arg.update.recipientKeyFingerprint).toBe(validBody.recipientKeyFingerprint);
+  });
+
+  it("returns 400 when the fingerprint is missing", async () => {
+    mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow());
+    mockPrismaTeamMember.findUnique.mockResolvedValueOnce({ teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null });
+    const { recipientKeyFingerprint: _omitted, ...withoutFingerprint } = validBody;
+    const res = await POST(
+      createRequest("POST", URL, { body: withoutFingerprint }),
+      { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) },
+    );
+    expect(res.status).toBe(400);
+    expect(mockPrismaTeamMemberKey.upsert).not.toHaveBeenCalled();
+  });
+
+  describe("a TEAM_KEY_RECIPIENT_GUARD refusal of the key write", () => {
+    const refuseWith = (err: Error) => {
+      mockPrismaTeamMember.findFirst.mockResolvedValueOnce(actorRow());
+      mockPrismaTeamMember.findUnique
+        .mockResolvedValueOnce({ id: "member-1", teamId: "team-1", userId: "target-user", keyDistributed: false, deactivatedAt: null })
+        .mockResolvedValueOnce(lockedTarget());
+      mockPrismaTeamMemberKey.upsert.mockRejectedValueOnce(err);
+    };
+    const post = () =>
+      POST(createRequest("POST", URL, { body: validBody }), { params: Promise.resolve({ teamId: "team-1", memberId: "member-1" }) });
+
+    it.each(["recipient_key_changed", "recipient_no_key"])("maps %s to 409 TEAM_KEY_RECIPIENT_CHANGED", async (arm) => {
+      refuseWith(teamKeyRecipientGuardError(arm));
+
+      const res = await post();
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("TEAM_KEY_RECIPIENT_CHANGED");
+      expect(mockPrismaTeamMember.updateMany).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    });
+
+    it.each(["fingerprint_missing", "fingerprint_rebind"])("rethrows %s", async (arm) => {
+      refuseWith(teamKeyRecipientGuardError(arm));
+
+      await expect(post()).rejects.toThrow(/invocation/);
+    });
+
+    it("still answers the departed guard's key_inactive as 404 MEMBER_NOT_FOUND", async () => {
+      refuseWith(databaseGuardError("DEPARTED_MEMBER_GUARD", "key_inactive"));
+
+      const res = await post();
+
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toBe("MEMBER_NOT_FOUND");
+    });
   });
 
   it("returns 409 when key already distributed (TOCTOU race)", async () => {

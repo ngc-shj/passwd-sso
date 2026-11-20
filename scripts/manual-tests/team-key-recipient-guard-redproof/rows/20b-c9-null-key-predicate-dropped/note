@@ -1,0 +1,1 @@
+C9 ecdh_public_key IS NULL predicate dropped: the repair also strips a keyed user's key rows and flag.

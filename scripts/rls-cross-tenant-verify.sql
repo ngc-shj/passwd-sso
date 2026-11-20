@@ -60,8 +60,12 @@ SET app.expected_tables TO :'expected_tables';
 --                                 by passwd_app is an RLS-bypass surface
 --   10b. [E-RLS-BYPASS-ROUTINE]   no routine sets an app.bypass_* setting in
 --                                 its body or its SET clause, except the
---                                 allowlisted share_creator_admitted (#990)
---                                 and departed_member_guard (#1060)
+--                                 allowlisted share_creator_admitted (#990),
+--                                 departed_member_guard (#1060),
+--                                 team_key_recipient_guard and
+--                                 users_ecdh_key_guard (#1076); every
+--                                 routine that grants itself the bypass pins
+--                                 its search_path
 -- =====================================================================
 DO $$
 DECLARE
@@ -425,6 +429,15 @@ BEGIN
   --       only; grants itself exactly teams, team_members, tenant_members,
   --       tenant_member_departures for its reads, saves and restores the
   --       caller's settings before any RAISE, EXECUTE revoked from PUBLIC.
+  --   - team_key_recipient_guard() (#1076, 20261119000000)
+  --       Trigger function on team_member_keys. Reads the recipient's users row
+  --       FOR KEY SHARE; grants itself exactly users, restores before any RAISE,
+  --       EXECUTE revoked from PUBLIC.
+  --   - users_ecdh_key_guard() (#1076, 20261119000000)
+  --       Trigger function on users. On retiring a key, locks the user's own row
+  --       FOR UPDATE and reads their team_member_keys / team_members rows; grants
+  --       itself exactly users, team_members, team_member_keys, restores before
+  --       any RAISE, EXECUTE revoked from PUBLIC.
   -- A review tripwire for accidents, not a boundary — any role may set these
   -- settings itself. Known bypasses: dynamic names (EXECUTE, variables), a
   -- double-quoted setting name, E'' / dollar-quoted literals, concatenation.
@@ -439,6 +452,8 @@ BEGIN
            OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
       AND pr.oid <> 'public.share_creator_admitted(uuid)'::regprocedure
       AND pr.oid <> 'public.departed_member_guard()'::regprocedure
+      AND pr.oid <> 'public.team_key_recipient_guard()'::regprocedure
+      AND pr.oid <> 'public.users_ecdh_key_guard()'::regprocedure
   ),
     format('[E-RLS-BYPASS-ROUTINE] routines set an app.bypass_* setting: %s — each reads past RLS for every caller. Add an allowlist entry + justification next to this ASSERT before merging.', (
       SELECT string_agg(pr.oid::regprocedure::text, ',')
@@ -450,6 +465,8 @@ BEGIN
              OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
         AND pr.oid <> 'public.share_creator_admitted(uuid)'::regprocedure
         AND pr.oid <> 'public.departed_member_guard()'::regprocedure
+        AND pr.oid <> 'public.team_key_recipient_guard()'::regprocedure
+        AND pr.oid <> 'public.users_ecdh_key_guard()'::regprocedure
     ));
   -- The allowlisted routine's bypass stays exactly its seven tables: it writes
   -- app.bypass_tables exactly twice, and those two writes are the grant of this
@@ -469,6 +486,44 @@ BEGIN
             FROM pg_catalog.pg_proc pr
            WHERE pr.oid = 'public.departed_member_guard()'::regprocedure),
     '[E-RLS-BYPASS-ROUTINE] departed_member_guard no longer sets exactly teams,team_members,tenant_members,tenant_member_departures';
+  -- The team-key recipient guards (#1076): each grants its tables once and
+  -- restores once.
+  ASSERT (SELECT regexp_count(pr.prosrc, $re$set_config\s*\(\s*'app\.bypass_tables'$re$, 1, 'i') = 2
+                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', 'users', true)$t$) > 0
+                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true)$t$) > 0
+            FROM pg_catalog.pg_proc pr
+           WHERE pr.oid = 'public.team_key_recipient_guard()'::regprocedure),
+    '[E-RLS-BYPASS-ROUTINE] team_key_recipient_guard no longer sets exactly users';
+  ASSERT (SELECT regexp_count(pr.prosrc, $re$set_config\s*\(\s*'app\.bypass_tables'$re$, 1, 'i') = 2
+                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', 'users,team_members,team_member_keys', true)$t$) > 0
+                 AND strpos(pr.prosrc, $t$set_config('app.bypass_tables', COALESCE(v_prev_tables, ''), true)$t$) > 0
+            FROM pg_catalog.pg_proc pr
+           WHERE pr.oid = 'public.users_ecdh_key_guard()'::regprocedure),
+    '[E-RLS-BYPASS-ROUTINE] users_ecdh_key_guard no longer sets exactly users,team_members,team_member_keys';
+  -- A routine that grants itself the bypass (in its body or its SET clause, the
+  -- forms counted above) and resolves names through the caller's search_path reads a caller's TEMP table in place of the real one
+  -- (pg_temp is searched first): every such routine pins search_path. Readers
+  -- of the setting (enforce_tenant_id_from_context) grant nothing and are not
+  -- in the class.
+  ASSERT NOT EXISTS (
+    SELECT 1 FROM pg_catalog.pg_proc pr
+    JOIN pg_catalog.pg_namespace n ON n.oid = pr.pronamespace
+    WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+      AND (pr.prosrc ~* $re$set_config\s*\(\s*'app\.bypass_$re$
+           OR pr.prosrc ~* $re$\mSET\s+((LOCAL|SESSION)\s+)?app\.bypass_$re$
+           OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
+      AND NOT EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'search\_path=%')
+  ),
+    format('[E-RLS-BYPASS-ROUTINE] routines grant themselves an app.bypass_* setting without a pinned search_path: %s', (
+      SELECT string_agg(pr.oid::regprocedure::text, ',')
+      FROM pg_catalog.pg_proc pr
+      JOIN pg_catalog.pg_namespace n ON n.oid = pr.pronamespace
+      WHERE n.nspname NOT IN ('pg_catalog', 'information_schema')
+        AND (pr.prosrc ~* $re$set_config\s*\(\s*'app\.bypass_$re$
+             OR pr.prosrc ~* $re$\mSET\s+((LOCAL|SESSION)\s+)?app\.bypass_$re$
+             OR EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'app.bypass\_%'))
+        AND NOT EXISTS (SELECT 1 FROM unnest(pr.proconfig) c WHERE c LIKE 'search\_path=%')
+    ));
 END $$;
 
 -- =====================================================================

@@ -1,0 +1,1 @@
+C9 bypass grant dropped entirely (no bypass_rls, no bypass_tables): a NOBYPASSRLS owner runs the repair under the caller's RLS and the nil tenant, sees no row, and silently repairs nothing; the cell reds at its first per-user assertion.

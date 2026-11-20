@@ -1,0 +1,1 @@
+C9 bypass_tables grant dropped (bypass_rls kept on): the block's DELETE reads users under bypass_rls=on with the caller's tables, which enforce mode refuses loudly (RLS_BYPASS_NOT_GRANTED: users) inside the block; the silent no-op the plan names is row 21b.

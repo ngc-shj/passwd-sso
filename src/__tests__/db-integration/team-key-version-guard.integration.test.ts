@@ -33,6 +33,7 @@ import {
   assertRlsApplies,
   createTestContext,
   createPrismaForRole,
+  recipientKey,
   setBypassRlsGucs,
   type TestContext,
 } from "./helpers";
@@ -101,6 +102,8 @@ type Seed = {
   /** MEMBER whose key has not been distributed yet. */
   pendingId: string;
   pendingRowId: string;
+  /** recipientKeyFingerprint of each seeded user's ECDH public key. */
+  fingerprints: Record<string, string>;
   existingEntryId: string;
   existingBlobIv: string;
   existingOverviewIv: string;
@@ -118,6 +121,10 @@ async function seedTeam(ctx: TestContext, tenantId: string, teamKeyVersion: numb
   const existingBlobIv = hex(12);
   const existingOverviewIv = hex(12);
   const tagId = randomUUID();
+  const fingerprints: Record<string, string> = {};
+  for (const userId of [ownerId, memberId, pendingId]) {
+    fingerprints[userId] = (await recipientKey(ctx.su, userId)).fingerprint;
+  }
   await ctx.su.prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
     await tx.$executeRawUnsafe(
@@ -141,15 +148,11 @@ async function seedTeam(ctx: TestContext, tenantId: string, teamKeyVersion: numb
       await tx.$executeRawUnsafe(
         `INSERT INTO team_member_keys (
            id, team_id, tenant_id, user_id, encrypted_team_key, team_key_iv, team_key_auth_tag,
-           ephemeral_public_key, hkdf_salt, key_version, wrap_version, created_at, updated_at
-         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, now(), now())`,
-        randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), teamKeyVersion,
+           ephemeral_public_key, hkdf_salt, key_version, wrap_version, recipient_key_fingerprint, created_at, updated_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, 1, $11, now(), now())`,
+        randomUUID(), teamId, tenantId, userId, hex(32), hex(12), hex(16), hex(32), hex(32), teamKeyVersion, fingerprints[userId],
       );
     }
-    await tx.$executeRawUnsafe(
-      `UPDATE users SET ecdh_public_key = $2 WHERE id = $1::uuid`,
-      pendingId, hex(32),
-    );
     await tx.$executeRawUnsafe(
       `INSERT INTO team_password_entries (
          id, team_id, tenant_id, created_by_id, updated_by_id,
@@ -172,11 +175,11 @@ async function seedTeam(ctx: TestContext, tenantId: string, teamKeyVersion: numb
   });
   return {
     teamId, ownerId, memberId, memberRowId, pendingId, pendingRowId,
-    existingEntryId, existingBlobIv, existingOverviewIv, tagId,
+    fingerprints, existingEntryId, existingBlobIv, existingOverviewIv, tagId,
   };
 }
 
-function memberKey(userId: string, keyVersion: number) {
+function memberKey(seed: Seed, userId: string, keyVersion: number) {
   return {
     userId,
     encryptedTeamKey: hex(32),
@@ -185,6 +188,7 @@ function memberKey(userId: string, keyVersion: number) {
     ephemeralPublicKey: hex(32),
     hkdfSalt: hex(32),
     keyVersion,
+    recipientKeyFingerprint: seed.fingerprints[userId],
   };
 }
 
@@ -206,7 +210,7 @@ function callRotate(seed: Seed, snapshotIv = seed.existingBlobIv) {
         encryptedOverview: encryptedField(),
         aadVersion: 1,
       }],
-      memberKeys: [memberKey(seed.ownerId, 2), memberKey(seed.memberId, 2)],
+      memberKeys: [memberKey(seed, seed.ownerId, 2), memberKey(seed, seed.memberId, 2)],
     }),
     { params: Promise.resolve({ teamId: seed.teamId }) },
   );
@@ -775,7 +779,7 @@ describe("team key rotation serialisation — real-DB integration", () => {
           jsonRequest(
             `http://localhost/api/teams/${seed.teamId}/members/${seed.pendingRowId}/confirm-key`,
             "POST",
-            { ...memberKey(seed.pendingId, 1), userId: undefined },
+            { ...memberKey(seed, seed.pendingId, 1), userId: undefined },
           ),
           { params: Promise.resolve({ teamId: seed.teamId, memberId: seed.pendingRowId }) },
         ),
@@ -875,7 +879,7 @@ describe("team key rotation serialisation — real-DB integration", () => {
           jsonRequest(
             `http://localhost/api/teams/${seed.teamId}/members/${seed.pendingRowId}/confirm-key`,
             "POST",
-            { ...memberKey(seed.pendingId, 1), userId: undefined },
+            { ...memberKey(seed, seed.pendingId, 1), userId: undefined },
           ),
           { params: Promise.resolve({ teamId: seed.teamId, memberId: seed.pendingRowId }) },
         ),

@@ -1,0 +1,1 @@
+C2 refuses an UPDATE that rewrites the wrap and inherits the fingerprint unchanged (recipient_key_changed before the users lookup): every allow cell for a judged rewrite keeping a matching fingerprint, and confirm-key's update branch over a row already bound to the current key (409), go red; no deny cell moves.

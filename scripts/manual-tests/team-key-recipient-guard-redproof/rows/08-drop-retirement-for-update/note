@@ -1,0 +1,1 @@
+C3 FOR UPDATE upgrade removed: a retirement no longer conflicts with a writer's FOR KEY SHARE, so neither race waits and the retirement completes under the holder.

@@ -1,0 +1,14 @@
+actual=committed	team-key recipient binding — real-DB integration C2: team_key_recipient_guard arms recipient_key_changed: an INSERT whose fingerprint names another key is refused; no row
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of user_id is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of encrypted_team_key is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of team_key_iv is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of team_key_auth_tag is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of ephemeral_public_key is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of hkdf_salt is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of wrap_version is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2: the judged column list, on a row whose recipient's key no longer matches an UPDATE of key_version is judged and refused; the row is unchanged
++-	team-key recipient binding — real-DB integration C2/C3: the scoped bypass and the pinned search_path a TEMP TABLE users holding a matching key does not shadow the guard's read: the write is still refused
++-	team-key recipient binding — real-DB integration twin vector: the production fingerprint of a non-ASCII key is the trigger's; one flipped nibble is refused
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints confirm-key with a mismatching fingerprint: 409 TEAM_KEY_RECIPIENT_CHANGED, no key row, still pending, no audit
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints rotate-key after reset -> set up -> redistribute between data and POST: 409 for the whole rotation, nothing written
++-	team-key recipient binding — real-DB integration writer routes and serving endpoints teams POST with a mismatching creator fingerprint: 409 TEAM_KEY_RECIPIENT_CHANGED, no team, membership or key row

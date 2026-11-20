@@ -1,0 +1,1 @@
+C2 restores bypass_rls but not bypass_tables / bypass_purpose: after a guarded write the transaction keeps tables=users, purpose team_key_recipient_guard (rls is the caller's off, so the INSERT's own RLS check passes and the readGucs assertion is what reds).

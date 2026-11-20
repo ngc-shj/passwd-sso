@@ -1,0 +1,10 @@
+--- a/function.sql
++++ b/function.sql
+@@ -19,7 +19,6 @@
+       OR NEW.team_key_iv IS DISTINCT FROM OLD.team_key_iv
+       OR NEW.team_key_auth_tag IS DISTINCT FROM OLD.team_key_auth_tag
+       OR NEW.ephemeral_public_key IS DISTINCT FROM OLD.ephemeral_public_key
+-      OR NEW.hkdf_salt IS DISTINCT FROM OLD.hkdf_salt
+       OR NEW.wrap_version IS DISTINCT FROM OLD.wrap_version
+       OR NEW.key_version IS DISTINCT FROM OLD.key_version;
+     IF NOT v_wrap_changed

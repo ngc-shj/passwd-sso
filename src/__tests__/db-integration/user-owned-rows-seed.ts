@@ -13,7 +13,7 @@
  */
 import { randomUUID, randomBytes } from "node:crypto";
 import type { PrismaClient } from "@prisma/client";
-import { setBypassRlsGucs } from "./helpers";
+import { recipientKey, setBypassRlsGucs, type PrismaWithPool } from "./helpers";
 
 const hex64 = () => randomBytes(32).toString("hex");
 
@@ -45,7 +45,7 @@ export const USER_OWNED_MODELS = [
 
 export type SeededUserOwnedRows = { mcpClientId: string; teamId: string };
 
-export async function seedUserOwnedRows(su: PrismaClient, tenantId: string, userId: string): Promise<SeededUserOwnedRows> {
+export async function seedUserOwnedRows(su: PrismaWithPool, tenantId: string, userId: string): Promise<SeededUserOwnedRows> {
   const mcpClientId = randomUUID();
   const teamId = randomUUID();
   const mcpAccessTokenId = randomUUID();
@@ -53,7 +53,8 @@ export async function seedUserOwnedRows(su: PrismaClient, tenantId: string, user
   const soon = new Date(Date.now() + 60 * 60 * 1000);
   const blob = { encryptedBlob: "b", blobIv: "iv", blobAuthTag: "tag", encryptedOverview: "o", overviewIv: "iv", overviewAuthTag: "tag" };
 
-  await su.$transaction(async (tx) => {
+  const { fingerprint } = await recipientKey(su, userId);
+  await su.prisma.$transaction(async (tx) => {
     await setBypassRlsGucs(tx);
     await tx.account.create({
       data: { userId, tenantId, type: "oidc", provider: "google", providerAccountId: `subject-${randomUUID()}` },
@@ -125,7 +126,7 @@ export async function seedUserOwnedRows(su: PrismaClient, tenantId: string, user
       teamId, tenantId, `seed-${teamId.slice(0, 8)}`,
     );
     await tx.teamMemberKey.create({
-      data: { teamId, userId, tenantId, encryptedTeamKey: "k", teamKeyIv: "iv", teamKeyAuthTag: "tag", ephemeralPublicKey: "epk", hkdfSalt: "salt" },
+      data: { teamId, userId, tenantId, encryptedTeamKey: "k", teamKeyIv: "iv", teamKeyAuthTag: "tag", ephemeralPublicKey: "epk", hkdfSalt: "salt", recipientKeyFingerprint: fingerprint },
     });
     await tx.teamPasswordEntry.create({
       data: { id: teamEntryId, ...blob, teamId, tenantId, createdById: userId, updatedById: userId },

@@ -3,8 +3,9 @@
 # departed-member guard (migration 20261117000100_departed_member_guard;
 # docs/archive/review/departed-member-db-invariants-plan.md C7 "Red-proofs").
 #
-# A manual tool, not CI. Each row under departed-member-guard-redproof/rows/ is
-# one mutation. For each row the runner:
+# A manual tool, not CI. Each row under departed-member-guard-redproof/rows/
+# (or under $REDPROOF_SET/rows/, a second row set such as
+# team-key-recipient-guard-redproof/) is one mutation. For each row the runner:
 #
 #   1. asserts the template database has no other connection;
 #   2. CREATE DATABASE <unique> TEMPLATE <template> as the superuser, then
@@ -17,8 +18,10 @@
 #      expected cell present and passing (a cell that is already red, or a name
 #      that matches nothing, pins nothing);
 #   6. applies ONE mutation:
-#        function.patch  a patch to departed_member_guard() as the migration
-#                        defines it, applied with CREATE OR REPLACE;
+#        function.patch  a patch to a guard function as its migration defines
+#                        it (departed_member_guard() unless the row's
+#                        `function` file names another), applied with
+#                        CREATE OR REPLACE;
 #        mutation.sql    SQL run as the superuser (a trigger recreated or
 #                        renamed, the index dropped);
 #        source.patch    a patch to a scratch copy of the tree (source mode);
@@ -38,13 +41,17 @@
 #              "+" is a collateral cell the mutation may also redden (allowed,
 #              not required)
 #   tests      optional; lines "<integration|unit> <path>"; default the C7 file
+#   function   optional, with function.patch; one line "<migration dir> <name>"
+#              naming the function the patch applies to; default
+#              "20261117000100_departed_member_guard departed_member_guard"
 #   setup.sql  optional; superuser SQL applied before the unmutated run
 #   add/       optional; files copied into the tree copy (forces source mode)
 #   note       optional; one line printed with the result
 #
 # Usage:
-#   scripts/manual-tests/departed-member-guard-redproof.sh [row ...]
-#     (default: every row). Results: $REDPROOF_OUT (default a mktemp dir),
+#   [REDPROOF_SET=<set dir>] scripts/manual-tests/departed-member-guard-redproof.sh [row ...]
+#     (default: every row of the set; the set defaults to
+#     departed-member-guard-redproof/). Results: $REDPROOF_OUT (default a mktemp dir),
 #     summary.tsv plus per-row JSON reports and logs.
 # Environment: .env's MIGRATION_DATABASE_URL names the superuser and the
 # template database (override the template with REDPROOF_TEMPLATE_DB). The
@@ -55,9 +62,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-DATA="$ROOT/scripts/manual-tests/departed-member-guard-redproof"
+DATA="$(cd "${REDPROOF_SET:-$ROOT/scripts/manual-tests/departed-member-guard-redproof}" && pwd)"
 DEFAULT_TEST="src/__tests__/db-integration/departed-member-db-invariants.integration.test.ts"
-MIGRATION="$ROOT/prisma/migrations/20261117000100_departed_member_guard/migration.sql"
+DEFAULT_FUNCTION="20261117000100_departed_member_guard departed_member_guard"
 OUT="${REDPROOF_OUT:-$(mktemp -d "${TMPDIR:-/tmp}/dmg-redproof.XXXXXX")}"
 mkdir -p "$OUT"
 cd "$ROOT"
@@ -115,9 +122,13 @@ pg_exec() {
   ' "$SUPER_URL" "$db" "$@"
 }
 
-# The guard function as the migration defines it.
+# extract_function <migration dir> <name>: public.<name>() as the migration
+# defines it, from its CREATE OR REPLACE line to the closing $$;.
 extract_function() {
-  awk '/^CREATE OR REPLACE FUNCTION public.departed_member_guard\(\)/ { on = 1 } on { print } on && /^\$\$;$/ { exit }' "$MIGRATION"
+  local qualified="public.$2" head
+  head="CREATE OR REPLACE FUNCTION ${qualified}()"
+  awk -v head="$head" 'index($0, head) == 1 { on = 1 } on { print } on && /^\$\$;$/ { exit }' \
+    "$ROOT/prisma/migrations/$1/migration.sql"
 }
 
 SCRATCH_DB=""
@@ -304,8 +315,11 @@ run_row() {
   fi
 
   if [[ -f "$dir/function.patch" ]]; then
-    local fn="$rowout/function.sql"
-    extract_function >"$rowout/function.orig.sql"
+    local fn="$rowout/function.sql" target="$DEFAULT_FUNCTION"
+    [[ -f "$dir/function" ]] && target="$(head -n1 "$dir/function")"
+    # shellcheck disable=SC2086
+    extract_function $target >"$rowout/function.orig.sql"
+    [[ -s "$rowout/function.orig.sql" ]] || { echo "row $row: no function '$target'" >&2; cleanup; return 1; }
     patch --quiet --fuzz=0 --no-backup-if-mismatch -o "$fn" "$rowout/function.orig.sql" <"$dir/function.patch" \
       && pg_exec "$db" "$fn" >/dev/null || { echo "row $row: mutation did not apply" >&2; cleanup; return 1; }
   elif [[ -f "$dir/mutation.sql" ]]; then
