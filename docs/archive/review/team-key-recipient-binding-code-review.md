@@ -150,3 +150,40 @@ mutation-caused (failure messages read).
 - **T-R2-1** Comment on both savepoint cells and a note in D16: the restore assertions pin
   PostgreSQL's rule the removal relies on; the guard-sensitive parts are the preconditions
   (rows 06 and 08); the guards' own restores are the C2/C3 restore cells (rows 11a/11a2/11b).
+
+## Round 3 (fix commit 98a738635)
+### Functionality Findings
+No findings. The raw token after FUNCTION is `${qualified}` for the runner's line; named entries,
+the prefix entry and the code-file path are unaffected; the stale-entry message still reads
+"dynamic name". The users-guard cell's lock-mode premise holds (`ecdh_public_key` is not a key
+column, so the UPDATE takes FOR NO KEY UPDATE).
+
+### Security Findings
+S1 and S2 closed (spellings probed against the gate's regex: every admitted one creates the routine
+`$qualified` names or is a SQL syntax error). No R43 widening (strict subset of Round 2).
+- **MIN-1 [Minor] R51/R49** The `dynamic` entry admitted any number of `${qualified}` CREATEs in the
+  runner, and its `why` overstated what the match is: the matched line is `extract_function`'s awk
+  key, not a creation.
+- **MIN-2 [Minor] R55/R47** A file entry with neither `routine` nor `dynamic` (a typo) would compare
+  `undefined` to every unread name and admit it.
+
+### Testing Findings
+T-R2-1, S1/S2 pins and row 08's required cell verified (deterministic: holder committed before the
+statement, `SET LOCAL` in a rolled-back transaction).
+- **T-R3-1 [Minor] RT7** The "exact spelling" claim was not pinned against a prefix/suffix/substring
+  comparison.
+
+### Recurring Issue Check
+- Functionality: R3, R17, R29, R42, R43, R47, R48, R52, R55 OK; others N/A for the delta.
+- Security: R3, R29, R43, R54 OK; R47/R49/R51/R55 → MIN-1/MIN-2; RS1–RS3, RS5, RS6 N/A; RS4 OK.
+- Testing: R44, R50 OK; RT1, RT2, RT4, RT5, RT8, RT10, RT11 OK; RT3, RT6, RT9 N/A; RT7 → T-R3-1.
+
+### Resolution Status — Round 3
+- **T-R3-1** Refused cells for `${qualified}_evil()` and `/**/${qualified}()`; red-proved with the
+  comparison mutated to `includes` (both red, the other three green).
+- **MIN-1** A `dynamic` entry admits one site: a second match is a violation naming the first line.
+  The entry's `why` now says the match is the awk key. Self-test appends a second
+  `${qualified}` CREATE (exit 1); red-proved by disabling the count.
+- **MIN-2** The allowlist's shape is checked at load: each file entry names exactly one non-empty
+  `routine` or `dynamic`, else the gate throws. Self-test runs a copy of the gate with the runner
+  entry's key misspelt (refused); red-proved by disabling the check.

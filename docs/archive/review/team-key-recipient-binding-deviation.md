@@ -196,3 +196,8 @@ key write, refuse them too); row 06 gains the savepoint cell (without the guard'
   FUNCTION is exactly that spelling. Self-tests for three other unreadable spellings, red-proved.
 - `users_ecdh_key_guard` savepoint twin cell, with a FOR KEY SHARE holder (a FOR UPDATE holder
   blocks the UPDATE before the trigger fires); row 08 requires it.
+
+## D18 — Phase 3 Round 3 fixes
+`check-bypass-rls`'s `dynamic` entry admits one site, the allowlist's shape is checked at load, and
+the self-tests pin exact (not prefix/suffix/substring) matching; each red-proved by mutating the
+gate.
