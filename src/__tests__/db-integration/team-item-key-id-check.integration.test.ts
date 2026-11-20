@@ -342,7 +342,7 @@ describe("team item key id CHECKs (#1011) — real-DB integration", () => {
     const ids: Record<string, string> = {};
     for (const name of [
       "X0", "Xh0", "Y1", "Y2", "Z2", "X5", "Y5", "X6", "Y6", "X7", "Xhw", "Yhw", "X8", "Y8", "X9", "Ytkv", "Yikv", "Ynull",
-      "Xa", "Xae", "Xaz", "Xc1", "Xc1t", "Xc2", "Xc2t", "Xb1", "Yb1", "Xb2", "Yb2", "Xb3", "Yb3",
+      "Xa", "Xaf", "Xae", "Xaz", "Xc1", "Xc1b", "Xc1t", "Xc2", "Xc2b", "Xc2t", "Xb1", "Yb1", "Xb2", "Yb2", "Xb3", "Yb3",
     ]) ids[name] = randomUUID();
     const entries: Record<string, string> = {};
     const histories: Record<string, string> = {};
@@ -425,9 +425,6 @@ describe("team item key id CHECKs (#1011) — real-DB integration", () => {
     const w10 = newWrap();
     await entry("ctlTeamKeyVersion", { itemKeyVersion: 1, itemKeyId: null, marker: 3, highWater: 0, wrap: w10 });
     await history("ctlTeamKeyVersion_Y", "ctlTeamKeyVersion", { itemKeyVersion: 1, itemKeyId: ids.Ytkv, teamKeyVersion: 2, wrap: w10 });
-    // High-water of a minted entry: a mode-0 attachment (NULL CEK version) and a CEK above its version and history.
-    await attachment("ctlTeamKeyVersion_mode0", "ctlTeamKeyVersion", { cekKeyVersion: null, cekItemKeyId: null, mode: 0 });
-    await attachment("ctlTeamKeyVersion_cek3", "ctlTeamKeyVersion", { cekKeyVersion: 3, cekItemKeyId: null });
     const w11 = newWrap();
     await entry("ctlItemKeyVersion", { itemKeyVersion: 1, itemKeyId: null, marker: 3, highWater: 0, wrap: w11 });
     await history("ctlItemKeyVersion_Y", "ctlItemKeyVersion", { itemKeyVersion: 2, itemKeyId: ids.Yikv, wrap: w11 });
@@ -437,22 +434,37 @@ describe("team item key id CHECKs (#1011) — real-DB integration", () => {
     // Link control: both rows hold NULL in item_key_auth_tag, so the NULL-id row is not linked.
     await history("ctlNullColumn_link", "ctlNullColumn", { itemKeyVersion: 1, itemKeyId: null, wrap: w12 });
 
+    // Repaired: minted; a mode-0 attachment (NULL CEK version) and a CEK above the entry's version
+    // and its history max raise the high-water.
+    const w16 = newWrap();
+    await entry("mintAttachments", { itemKeyVersion: 1, itemKeyId: null, marker: 3, highWater: 0, wrap: w16 });
+    await history("mintAttachments_link", "mintAttachments", { itemKeyVersion: 1, itemKeyId: null, wrap: w16 });
+    await attachment("mintAttachments_mode0", "mintAttachments", { cekKeyVersion: null, cekItemKeyId: null, mode: 0 });
+    await attachment("mintAttachments_cek3", "mintAttachments", { cekKeyVersion: 3, cekItemKeyId: null });
+
     // Marker above the wrap's team key version (step 4a): reset, on v1+ and v0 alike; equal, or
     // within GREATEST(team_key_version, 1), untouched.
     await entry("aStale", { itemKeyVersion: 1, itemKeyId: ids.Xa, marker: 3, highWater: 1, teamKeyVersion: 2 });
     await entry("aEqual", { itemKeyVersion: 1, itemKeyId: ids.Xae, marker: 3, highWater: 1, teamKeyVersion: 3 });
+    await entry("aFloorStale", { itemKeyVersion: 1, itemKeyId: ids.Xaf, marker: 2, highWater: 1, teamKeyVersion: 0 });
     await entry("aZeroTkv", { itemKeyVersion: 1, itemKeyId: ids.Xaz, marker: 1, highWater: 1, teamKeyVersion: 0 });
     await entry("v0Stale", { itemKeyVersion: 0, itemKeyId: null, marker: 3, highWater: 0, teamKeyVersion: 2 });
     await entry("v0Equal", { itemKeyVersion: 0, itemKeyId: null, marker: 3, highWater: 0, teamKeyVersion: 3 });
 
-    // The entry's id at another item_key_version (step 4c): on a history row, and on an attachment's
-    // CEK, reset; the same id at the entry's version under another wrap, untouched.
+    // The entry's id at another item_key_version (step 4c), above or below it: on a history row, and
+    // on an attachment's CEK, reset; the same id at the entry's version under another wrap, untouched.
+    // c1Below's row is the 0.5.0 snapshot of a (v0, id) entry 0.4.77 then upgraded: step 4 reads its
+    // id before step 5 clears it.
     await entry("c1", { itemKeyVersion: 1, itemKeyId: ids.Xc1, marker: 3, highWater: 1 });
     await history("c1_v2", "c1", { itemKeyVersion: 2, itemKeyId: ids.Xc1 });
+    await entry("c1Below", { itemKeyVersion: 1, itemKeyId: ids.Xc1b, marker: 3, highWater: 1 });
+    await history("c1Below_v0", "c1Below", { itemKeyVersion: 0, itemKeyId: ids.Xc1b });
     await entry("c1Twin", { itemKeyVersion: 2, itemKeyId: ids.Xc1t, marker: 3, highWater: 2 });
     await history("c1Twin_v2", "c1Twin", { itemKeyVersion: 2, itemKeyId: ids.Xc1t });
     await entry("c2", { itemKeyVersion: 1, itemKeyId: ids.Xc2, marker: 3, highWater: 1 });
     await attachment("c2_cek2", "c2", { cekKeyVersion: 2, cekItemKeyId: ids.Xc2 });
+    await entry("c2Below", { itemKeyVersion: 2, itemKeyId: ids.Xc2b, marker: 3, highWater: 2 });
+    await attachment("c2Below_cek1", "c2Below", { cekKeyVersion: 1, cekItemKeyId: ids.Xc2b });
     await entry("c2Twin", { itemKeyVersion: 1, itemKeyId: ids.Xc2t, marker: 3, highWater: 1 });
     await attachment("c2Twin_cek1", "c2Twin", { cekKeyVersion: 1, cekItemKeyId: ids.Xc2t });
 
@@ -472,7 +484,7 @@ describe("team item key id CHECKs (#1011) — real-DB integration", () => {
   }
 
   type Shapes = Awaited<ReturnType<typeof seedRepairShapes>>;
-  const MINTED = ["mintEmpty", "mintTwo", "ctlTeamKeyVersion", "ctlItemKeyVersion", "ctlNullColumn"] as const;
+  const MINTED = ["mintEmpty", "mintTwo", "mintAttachments", "ctlTeamKeyVersion", "ctlItemKeyVersion", "ctlNullColumn"] as const;
 
   /**
    * The seeded rows as a map with every id spelled as the seeded name it
@@ -536,17 +548,21 @@ describe("team item key id CHECKs (#1011) — real-DB integration", () => {
       hwAttachment: { id: "Xhw", marker: 3, hw: 4 },
       doubleLabel: { id: "X8", marker: 0, hw: 1 },
       unlinked: { id: "X9", marker: 3, hw: 1 },
-      ctlTeamKeyVersion: { id: "minted(ctlTeamKeyVersion)", marker: 0, hw: 3 },
+      ctlTeamKeyVersion: { id: "minted(ctlTeamKeyVersion)", marker: 0, hw: 1 },
       ctlItemKeyVersion: { id: "minted(ctlItemKeyVersion)", marker: 0, hw: 2 },
       ctlNullColumn: { id: "minted(ctlNullColumn)", marker: 0, hw: 1 },
+      mintAttachments: { id: "minted(mintAttachments)", marker: 0, hw: 3 },
       aStale: { id: "Xa", marker: 0, hw: 1 },
+      aFloorStale: { id: "Xaf", marker: 0, hw: 1 },
       aEqual: { id: "Xae", marker: 3, hw: 1 },
       aZeroTkv: { id: "Xaz", marker: 1, hw: 1 },
       v0Stale: { id: null, marker: 0, hw: 0 },
       v0Equal: { id: null, marker: 3, hw: 0 },
       c1: { id: "Xc1", marker: 0, hw: 2 },
+      c1Below: { id: "Xc1b", marker: 0, hw: 1 },
       c1Twin: { id: "Xc1t", marker: 3, hw: 2 },
       c2: { id: "Xc2", marker: 0, hw: 2 },
+      c2Below: { id: "Xc2b", marker: 0, hw: 2 },
       c2Twin: { id: "Xc2t", marker: 3, hw: 1 },
       bCtlTeamKeyVersion: { id: "Xb1", marker: 3, hw: 1 },
       bCtlItemKeyVersion: { id: "Xb2", marker: 3, hw: 2 },
@@ -564,13 +580,14 @@ describe("team item key id CHECKs (#1011) — real-DB integration", () => {
       doubleLabel_Y: "Y8",
       unlinked_null: null,
       ctlTeamKeyVersion_Y: "Ytkv", ctlItemKeyVersion_Y: "Yikv", ctlNullColumn_Y: "Ynull", ctlNullColumn_link: null,
-      c1_v2: "Xc1", c1Twin_v2: "Xc1t",
+      mintAttachments_link: "minted(mintAttachments)",
+      c1_v2: "Xc1", c1Below_v0: null, c1Twin_v2: "Xc1t",
       bCtlTeamKeyVersion_Y: "Yb1", bCtlItemKeyVersion_Y: "Yb2", bCtlNullColumn_Y: "Yb3",
     },
     attachments: {
       hwAttachment_cek4: null, doubleLabel_cek: "X8",
-      ctlTeamKeyVersion_mode0: null, ctlTeamKeyVersion_cek3: null,
-      c2_cek2: "Xc2", c2Twin_cek1: "Xc2t",
+      mintAttachments_mode0: null, mintAttachments_cek3: null,
+      c2_cek2: "Xc2", c2Below_cek1: "Xc2b", c2Twin_cek1: "Xc2t",
     },
   };
 
@@ -607,8 +624,8 @@ describe("team item key id CHECKs (#1011) — real-DB integration", () => {
           .toEqual(Object.fromEntries(MINTED.map((n) => [n, { marker: REPAIRED_ROLLOUT_ENTRY.marker, hw: REPAIRED_ROLLOUT_ENTRY.highWater(s.rows[n]) }])));
 
         expect(countsOf(notices.messages)).toEqual({
-          v0_ids_cleared: 1, ids_adopted: 1, ids_minted: 5, stale_pending: 6,
-          history_v0_ids_cleared: 1, history_ids: 3, high_water: 9,
+          v0_ids_cleared: 1, ids_adopted: 1, ids_minted: 6, stale_pending: 9,
+          history_v0_ids_cleared: 2, history_ids: 4, high_water: 10,
         });
 
         for (const statement of [...alterStatements(TEAM_ITEM_KEY_ID_CHECK_DIR), ...alterStatements(VALIDATE_DIR)]) {

@@ -130,3 +130,68 @@ N/A — no environment constraints declared in Phase 1.
   new step-4 arms with their allow twins. Each wrap-equality mutation at steps 4 and 6 now fails
   the cell (deviation D9).
 - Modified file: `src/__tests__/db-integration/team-item-key-id-check.integration.test.ts`
+
+# Round 2
+
+## Changes from Previous Round
+- Step 4 now carries arms (a) and (c).
+- The backfill cell has seeds for them and wrap controls for steps 4 and 6.
+- The doc fixes from round 1 are in (commit `a3d1d4f34`).
+
+## Findings
+- **Security:**
+  - S1 is resolved.
+  - **SN1 [Minor] (new):** the rollout paragraph's operator step checked only that the entry opens,
+    while the new sentence says its attachments may fail.
+- **Functionality:**
+  - F1–F4 are resolved. Every 0.5.0 writer and earlier backfill satisfies both invariants, and the
+    attachment arm cannot fire on clean data.
+  - **FN1 [Minor] (new):** the rollout paragraph omitted arm (b) and overstated what cannot be
+    detected.
+  - **FN2 [Minor] (new) [Adjacent, pre-existing]:** in a team still at `team_key_version` 0,
+    `isRekeyPending` and `rekeyPendingWhere` compare the marker with the raw version, so a repaired
+    entry (marker 0) is not counted.
+- **Testing:**
+  - T1–T3 are resolved.
+  - **T4 [Major] (new):** arm (a)'s `GREATEST` floor had no deny seed; `GREATEST(…, 2)` survived.
+  - **T5 [Major] (new):** (c1) and (c2) were seeded only with the other version above the entry's,
+    so `<>` → `>` survived. So did moving step 5 before step 4.
+  - **T6 [Minor] (new):** D9 said no existing seed changed state; `ctlTeamKeyVersion` did, and it
+    carried two concepts.
+
+## Resolution Status (round 2)
+### SN1, FN1 [Minor]
+- **Action:** the operator step now opens each entry and its attachments. The detection list names
+  arm (b), and "cannot be detected" is limited to the case where no such row remains.
+- **Modified file:** `docs/operations/deployment.md`.
+
+### FN2 [Minor] — not fixed in this PR; deploy guide qualified
+- **Anti-Deferral check:** this is a pre-existing defect outside #1011, and fixing it needs a design
+  decision.
+- **What a team at `team_key_version` 0 is:** one that existed at 20260223053433, which added the
+  column with DEFAULT 0, and was never rotated.
+- **Such a team takes no team entry writes in 0.5.0:**
+  - create and full update require a `teamKeyVersion` ≥ 1, but compare it with the raw 0;
+  - the re-key POST is refused the same way;
+  - rotation requires a new version of team + 1 = 1, but `TEAM_KEY_VERSION_MIN` is 2.
+- **Why normalising the comparison was tried and reverted:** a sub-agent normalised every reader
+  and writer of the marker (`isRekeyPending`, `rekeyPendingWhere`, the re-key route's write,
+  `rekey-consistency`), with red-proved unit tests. That made the entries count as pending, but
+  the pass still cannot complete them, so the count could never clear. The change was reverted;
+  the patch is kept in the session scratchpad.
+- **What the real fix must decide:** the version stored in, and bound into the AAD of, entries and
+  member keys of such a team. That belongs in its own change.
+- **Worst case:** the repaired entries of such a team are not counted. They stay as inert as every
+  other entry of that team, which no request can write, until the team can rotate.
+- **Likelihood:** low. The dev database has no team at 0. A team at 0 cannot have been written to
+  since 0.5.0, so the rollout window's writes are not expected there.
+- **Cost to fix:** a design change to team key version 0 handling across the entry, member-key and
+  rotation paths.
+- **Modified file:** `docs/operations/deployment.md`. It now says the count applies to a team whose
+  key version is 1 or more.
+
+### T4, T5, T6
+- Action: seeds `aFloorStale`, `c1Below`, `c2Below`, and `mintAttachments` (attachments moved off
+  `ctlTeamKeyVersion`); D9 corrected. All 37 SQL mutants fail the cell (deviation D10).
+- Modified files: `src/__tests__/db-integration/team-item-key-id-check.integration.test.ts`,
+  `docs/archive/review/team-item-key-id-check-deviation.md`

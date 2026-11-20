@@ -67,8 +67,9 @@
 
   The backfill cell seeds a case each arm moves and an allow twin for each, plus the testing
   review's wrap-equality controls for steps 4(b) and 6 and two attachments on a minted entry. Its
-  counts are now `stale_pending` 6 and `high_water` 9; the rest are unchanged. No existing seed
-  changed state.
+  counts are now `stale_pending` 6 and `high_water` 9; the rest are unchanged. Only one existing seed changed
+  state: `ctlTeamKeyVersion`'s high-water, raised by the two attachments added to it. D10 moves
+  those attachments to a seed of their own.
 
   All mutants were regenerated from the widened file (`mutants-r3`): the 17 old ones (07–09
   re-targeted, keeping their meaning) and 15 new ones:
@@ -87,3 +88,23 @@
     whose max is already at least 1.
 
   `npm run test:integration` passes in full: 173 files, 2396 tests.
+- D10 (code review round 2, testing T4–T6): the backfill cell gains three seeds.
+  - `aFloorStale` (marker 2, `team_key_version` 0) is the deny case at arm (a)'s `GREATEST` floor.
+    `aZeroTkv` is its allow twin.
+  - `c1Below` and `c2Below` carry the entry's id at a lower version. `c1Below`'s carrier is a v0
+    history row with the entry's id, which also pins step 4 running before step 5.
+  - The attachments that covered the `highWater` term moved from `ctlTeamKeyVersion` to a minted
+    seed of their own, `mintAttachments`.
+
+  The counts are now `ids_minted` 6, `stale_pending` 9, `history_v0_ids_cleared` 2,
+  `history_ids` 4 and `high_water` 10.
+
+  Every mutant was re-run against the final file (`mutants-r4`, 37 SQL mutants), and each failed in
+  the cell named in D8/D9. The new ones failed only on their target seed:
+  - `GREATEST(…, 2)`;
+  - `<>` → `>` in (c1);
+  - `<>` → `>` in (c2);
+  - step 5 moved before step 4.
+
+  The `highWater` attachment-term mutants fail on `mintAttachments`. `?? 1` stays the equivalent
+  survivor (D9).
