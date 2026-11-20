@@ -88,7 +88,7 @@
     whose max is already at least 1.
 
   `npm run test:integration` passes in full: 173 files, 2396 tests.
-- D10 (code review round 2, testing T4–T6): the backfill cell gains three seeds.
+- D10 (code review round 2, testing T4–T6): the backfill cell gains four seeds.
   - `aFloorStale` (marker 2, `team_key_version` 0) is the deny case at arm (a)'s `GREATEST` floor.
     `aZeroTkv` is its allow twin.
   - `c1Below` and `c2Below` carry the entry's id at a lower version. `c1Below`'s carrier is a v0
@@ -108,3 +108,5 @@
 
   The `highWater` attachment-term mutants fail on `mintAttachments`. `?? 1` stays the equivalent
   survivor (D9).
+
+  `npm run test:integration` passes in full: 173 files, 2396 tests.

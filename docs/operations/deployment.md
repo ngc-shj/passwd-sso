@@ -243,8 +243,9 @@ serve, and their team entry creates, edits and history restores would fail with
 
 The migration repairs what 0.4.x instances wrote during the 0.5.0 rollout before
 it adds the constraint, and puts every repaired entry back in the team's re-key
-count (for a team whose key version is 1 or more; a team still at version 0 takes
-no team entry writes in this release). It holds an exclusive lock on the team entry and history tables while it
+count (for a team whose key version is 1 or more; a team still at version 0 has
+never accepted a create, edit or re-key that gives an entry an ItemKey, so the
+migration has nothing to repair there). It holds an exclusive lock on the team entry and history tables while it
 runs, so team entry requests wait for it. Its counts
 (`team-item-key-id-check backfill: …`) are not in the deploy output, and reach the
 PostgreSQL server log only where `log_min_messages` is `notice` or lower (the

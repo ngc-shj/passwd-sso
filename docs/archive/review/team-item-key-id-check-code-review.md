@@ -170,21 +170,29 @@ N/A — no environment constraints declared in Phase 1.
   decision.
 - **What a team at `team_key_version` 0 is:** one that existed at 20260223053433, which added the
   column with DEFAULT 0, and was never rotated.
-- **Such a team takes no team entry writes in 0.5.0:**
-  - create and full update require a `teamKeyVersion` ≥ 1, but compare it with the raw 0;
+- **Such a team refuses every writer that gives an entry an ItemKey:**
+  - create and bulk import require a `teamKeyVersion` ≥ 1 but compare it with the raw 0;
+  - so does the v0→v1 upgrade by full update;
   - the re-key POST is refused the same way;
   - rotation requires a new version of team + 1 = 1, but `TEAM_KEY_VERSION_MIN` is 2.
+
+  Writers that never give an entry an ItemKey still run there: history restore, metadata edits,
+  trash, delete, archive, favorites and attachment delete. A team at 0 therefore cannot hold a v1+
+  entry. `teamKeyVersion` has been `min(1)` since end-to-end team keys were introduced (f83e78c09);
+  the ItemKey hierarchy came later (20260307143637). 20261104000000 step 1 also set the marker to
+  1 on every entry of a team at version ≤ 1.
 - **Why normalising the comparison was tried and reverted:** a sub-agent normalised every reader
   and writer of the marker (`isRekeyPending`, `rekeyPendingWhere`, the re-key route's write,
-  `rekey-consistency`), with red-proved unit tests. That made the entries count as pending, but
-  the pass still cannot complete them, so the count could never clear. The change was reverted;
-  the patch is kept in the session scratchpad.
+  `rekey-consistency`), with red-proved unit tests. That made such entries count as pending, but
+  the pass still cannot complete them in a team at 0, so the count could never clear. The change
+  was reverted; the patch is kept in the session scratchpad.
 - **What the real fix must decide:** the version stored in, and bound into the AAD of, entries and
   member keys of such a team. That belongs in its own change.
-- **Worst case:** the repaired entries of such a team are not counted. They stay as inert as every
-  other entry of that team, which no request can write, until the team can rotate.
-- **Likelihood:** low. The dev database has no team at 0. A team at 0 cannot have been written to
-  since 0.5.0, so the rollout window's writes are not expected there.
+- **Worst case:** none reachable through this migration. A team at 0 holds no v1+ entry, so steps
+  2–4(b)/(c) find nothing there. The marker there is 1, so arm (a) cannot fire either. The
+  team-at-0 write refusal predates #1011.
+- **Likelihood:** effectively nil, by the impossibility above. The 0.4.77 history restore, the
+  rollout-window writer that does run in such a team, only moves that entry's v0 history rows.
 - **Cost to fix:** a design change to team key version 0 handling across the entry, member-key and
   rotation paths.
 - **Modified file:** `docs/operations/deployment.md`. It now says the count applies to a team whose
@@ -195,3 +203,32 @@ N/A — no environment constraints declared in Phase 1.
   `ctlTeamKeyVersion`); D9 corrected. All 37 SQL mutants fail the cell (deviation D10).
 - Modified files: `src/__tests__/db-integration/team-item-key-id-check.integration.test.ts`,
   `docs/archive/review/team-item-key-id-check-deviation.md`
+
+# Round 3
+
+## Findings
+- **Testing:** T4–T6 are resolved; the counts were re-derived and the mutant set re-checked.
+  **TN1 [Minor] (new):** D10 said "three seeds" (four were added) and omitted the full-suite
+  result.
+- **Functionality:** FN1 is resolved. **F1 [Minor] (new):** the deploy-guide qualifier "takes no
+  team entry writes" was false; restore, metadata edits, trash and similar operations run in a
+  team at 0. **F2 [Minor] (new):** the FN2 Anti-Deferral entry repeated that claim, and gave a
+  likelihood reason that does not exclude the 0.4.77 restore.
+- **Security:** SN1 is resolved, and the operator action was checked safe. No findings.
+
+## Resolution Status (round 3)
+- **TN1:** D10 now says four seeds and records the full-suite result.
+- **F1:** the qualifier now gives the real reason: a team at 0 never accepted a write that gives an
+  entry an ItemKey, so the migration has nothing to repair there.
+- **F2:** the FN2 entry is rewritten with the writer split, the citations (f83e78c09,
+  20260307143637, 20261104000000 step 1), and the unreachable worst case.
+
+## Tightening-only skip — Round 3
+Findings applied directly (no Round 4 review):
+- [TN1] [Minor] D10 wording — `docs/archive/review/team-item-key-id-check-deviation.md` — applied
+- [F1] [Minor] qualifier wording — `docs/operations/deployment.md` — applied
+- [F2] [Minor] Anti-Deferral wording — `docs/archive/review/team-item-key-id-check-code-review.md` —
+  applied
+
+Justification: every finding is within the round-2 fix scope (the same doc sentences and log
+entries), is wording only with no behaviour change, and touches no security boundary.
