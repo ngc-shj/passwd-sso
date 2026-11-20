@@ -4132,6 +4132,8 @@ describe("function rule: routines are created in migrations", () => {
     it.each([
       ["names neither routine nor dynamic (a typo)", 'dynamc: "${qualified}", why:'],
       ["names both, one empty", 'routine: "x", dynamic: "", why:'],
+      // A prefix beside a file would let the matcher's prefix branch admit the whole prefix.
+      ["adds a prefix to a file entry", 'prefix: "scripts/", dynamic: "${qualified}", why:'],
     ])("refuses to load an allowlist entry that %s", (_label, replacement) => {
       // Run against a copy of the gate whose runner entry is ill-formed.
       const gateDir = mkdtempSync(join(tmpdir(), "bypass-gate-"));

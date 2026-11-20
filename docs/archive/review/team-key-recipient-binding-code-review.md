@@ -208,3 +208,28 @@ statement, `SET LOCAL` in a rolled-back transaction).
   `routine: "x", dynamic: ""`; the latter red-proved against the Round 3 check.
 - **T-R4-1** The second-site cell asserts the full detail including `(first at line N)`, N derived
   from the runner text; red-proved by reporting the current line instead.
+
+## Round 5 (fix commit 2e23cbace)
+Functionality: No findings (shape check, matcher and counter agree on every entry that loads; extra
+keys such as `why` are not read by the matcher and are correctly outside the checked set).
+Security: No findings (the Round 4 fail-open entry and prefix-with-file entries are refused at
+load; no R43 widening).
+Testing: **T-R5-1 [Minor] RT7/RT10** — the shape-check self-test did not cover a prefix beside a
+file entry (the widening direction).
+
+### Recurring Issue Check
+- Functionality: R3, R17, R29, R42, R44, R47–R49, R51, R52, R55 OK. Security: R43, R47, R48 OK;
+  RS1–RS6 N/A. Testing: RT1, RT2, RT5, RT8, RT9, RT11 OK; RT3, RT4, RT6 N/A; RT7/RT10 → T-R5-1.
+
+## Tightening-only skip — Round 5
+Findings applied directly (no Round 6 review):
+- [T-R5-1] [Minor] shape-check self-test lacked the prefix-with-file row —
+  `scripts/__tests__/check-bypass-rls.test.mjs` (the shape-check `it.each`) — row added; red-proved
+  by relaxing `keys.join() === "prefix"` to `keys[0] === "prefix"` in the gate (the row reds, the
+  others stay green); the gate itself is unchanged.
+Justification: the finding is within Round 4's fix scope, a test-only row that changes no gate
+behaviour or boundary, and it is proven able to fail.
+
+## Termination
+Rounds: 5. Every Critical/Major resolved (Round 1 Testing F1, F2); every Minor resolved; no
+skipped or accepted findings. Accepted plan-level deviation: D11 (R24, rollout window).
