@@ -1116,7 +1116,7 @@ export async function expectSwallowedBypassRefusal(
   fn: () => Promise<unknown>,
 ): Promise<{ warnings: BypassReport[]; refusals: BypassReport[] }> {
   const take = markReports();
-  let reports: { warnings: BypassReport[]; refusals: BypassReport[] } = { warnings: [], refusals: [] };
+  let reports: { warnings: BypassReport[]; refusals: BypassReport[] };
   try {
     await fn();
   } finally {
