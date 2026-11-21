@@ -50,8 +50,10 @@ export function isAesGcmAuthFailure(e: unknown): boolean {
 /**
  * Whether an entry awaits the re-key pass: its ItemKey was created under an
  * older team key, or it holds an ItemKey of unknown identity (v1+ with a
- * NULL id — written by an instance of the previous release during rollout,
- * which neither mints the id nor sets the marker). The re-key mints the id.
+ * NULL id). The database refuses that second shape since
+ * 20261120000000_team_item_key_id_check, which repaired the rows 0.4.77
+ * instances wrote during the 0.5.0 rollout; the check stays as a defensive
+ * arm because the column's type is still nullable.
  */
 export function isRekeyPending(
   entry: { itemKeyVersion: number; itemKeyId?: string | null; itemKeyTeamKeyVersion: number },

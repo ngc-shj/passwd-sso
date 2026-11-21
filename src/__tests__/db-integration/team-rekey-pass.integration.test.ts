@@ -34,7 +34,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { NextRequest } from "next/server";
-import { createTestContext, recipientKey, setBypassRlsGucs, writeRefusedState, type TestContext } from "./helpers";
+import { createTestContext, recipientKey, REPAIRED_ROLLOUT_ENTRY, setBypassRlsGucs, writeRefusedState, type TestContext } from "./helpers";
 import {
   deriveItemCekWrapKey,
   deriveItemEncryptionKey,
@@ -562,7 +562,7 @@ describe("team re-key pass — real-DB integration", () => {
 
   type EntryRow = {
     team_key_version: number; item_key_version: number; item_key_team_key_version: number;
-    item_key_id: string | null; aad_version: number;
+    item_key_id: string | null; item_key_version_high_water: number; aad_version: number;
     encrypted_blob: string; blob_iv: string; blob_auth_tag: string;
     encrypted_overview: string; overview_iv: string; overview_auth_tag: string;
     encrypted_item_key: string | null; item_key_iv: string | null; item_key_auth_tag: string | null;
@@ -1413,35 +1413,21 @@ describe("team re-key pass — real-DB integration", () => {
   // ── Rollout window: rows written by an instance of the previous release ──
   //
   // Deploy migrates before the services roll, so for a while instances of the
-  // previous release (main) write to the migrated schema. They never write
+  // previous release (0.4.77) write to the migrated schema. They never write
   // item_key_id, the re-key marker or the high-water: create leaves them at
   // their defaults (NULL, 0, 0), and the full-update PUT replaces the wrap it
   // is sent while keeping all three, writing a history row without an id.
+  // 20261120000000 repairs the v1+ entries this leaves without an id before
+  // its CHECK binds, so the cells seed what it makes of them.
 
-  /** The previous release's entry create: the three columns at their defaults. */
-  async function seedPreviousReleaseEntry(team: Team, itemKey: ItemKey): Promise<{ entryId: string; plain: Plain }> {
-    const entryId = randomUUID();
-    const plain = plainFor("previous-release create");
-    const contentKey = await deriveItemEncryptionKey(itemKey.raw);
-    const blob = await encryptData(plain.blob, contentKey, buildTeamEntryAAD(team.teamId, entryId, "blob", itemKey.version));
-    const overview = await encryptData(plain.overview, contentKey, buildTeamEntryAAD(team.teamId, entryId, "overview", itemKey.version));
-    const wrap = await wrapUnder(team, entryId, team.version, itemKey.raw);
-    await sql(
-      `INSERT INTO team_password_entries (
-         id, team_id, tenant_id, created_by_id, updated_by_id,
-         encrypted_blob, blob_iv, blob_auth_tag, encrypted_overview, overview_iv, overview_auth_tag,
-         aad_version, team_key_version, item_key_version,
-         encrypted_item_key, item_key_iv, item_key_auth_tag,
-         entry_type, created_at, updated_at
-       ) VALUES (
-         $1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid,
-         $5, $6, $7, $8, $9, $10, 1, $11, $12, $13, $14, $15, 'LOGIN', now(), now()
-       )`,
-      entryId, team.teamId, tenantId, firstMember(team),
-      blob.ciphertext, blob.iv, blob.authTag, overview.ciphertext, overview.iv, overview.authTag,
-      team.version, itemKey.version, wrap.ciphertext, wrap.iv, wrap.authTag,
-    );
-    return { entryId, plain };
+  /** The previous release's entry create, as 20261120000000 repairs it. */
+  async function seedRepairedRolloutCreate(team: Team, itemKey: ItemKey): Promise<{ entryId: string; plain: Plain }> {
+    return seedEntry(team, {
+      teamKeyVersion: team.version,
+      itemKey: { ...itemKey, id: REPAIRED_ROLLOUT_ENTRY.mintItemKeyId() },
+      marker: REPAIRED_ROLLOUT_ENTRY.marker,
+      highWater: REPAIRED_ROLLOUT_ENTRY.highWater({ itemKeyVersion: itemKey.version }),
+    });
   }
 
   /**
@@ -1449,14 +1435,21 @@ describe("team re-key pass — real-DB integration", () => {
    * upgrade, or any client sending `encryptedItemKey`): the locked row goes
    * to a history row WITHOUT item_key_id, and the entry takes the new blob,
    * overview and wrap of `itemKey` at the team's current version, keeping its
-   * item_key_id, marker and high-water.
+   * item_key_id, marker and high-water. With `repaired`, the entry is
+   * committed as 20261120000000 repairs an upgrade that left it without an id.
    */
-  async function previousReleasePut(team: Team, entryId: string, itemKey: ItemKey): Promise<{ plain: Plain }> {
+  async function previousReleasePut(
+    team: Team,
+    entryId: string,
+    itemKey: ItemKey,
+    opts: { repaired?: boolean } = {},
+  ): Promise<{ plain: Plain; mintedId: string | null }> {
     const plain = plainFor("previous-release update");
     const contentKey = await deriveItemEncryptionKey(itemKey.raw);
     const blob = await encryptData(plain.blob, contentKey, buildTeamEntryAAD(team.teamId, entryId, "blob", itemKey.version));
     const overview = await encryptData(plain.overview, contentKey, buildTeamEntryAAD(team.teamId, entryId, "overview", itemKey.version));
     const wrap = await wrapUnder(team, entryId, team.version, itemKey.raw);
+    const mintedId = opts.repaired ? REPAIRED_ROLLOUT_ENTRY.mintItemKeyId() : null;
     await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       await tx.$executeRawUnsafe(
@@ -1471,18 +1464,38 @@ describe("team re-key pass — real-DB integration", () => {
            FROM team_password_entries WHERE id = $1::uuid`,
         entryId, firstMember(team),
       );
+      let highWater: number | null = null;
+      if (opts.repaired) {
+        const [rows] = await tx.$queryRawUnsafe<{ high_water: number; history: number[]; attachments: (number | null)[] }[]>(
+          `SELECT e.item_key_version_high_water AS high_water,
+                  ARRAY(SELECT item_key_version FROM team_password_entry_histories WHERE entry_id = e.id) AS history,
+                  ARRAY(SELECT cek_key_version FROM attachments WHERE team_password_entry_id = e.id) AS attachments
+             FROM team_password_entries e WHERE e.id = $1::uuid`,
+          entryId,
+        );
+        highWater = REPAIRED_ROLLOUT_ENTRY.highWater({
+          itemKeyVersion: itemKey.version,
+          highWater: rows.high_water,
+          historyItemKeyVersions: rows.history,
+          attachmentCekKeyVersions: rows.attachments,
+        });
+      }
       await tx.$executeRawUnsafe(
         `UPDATE team_password_entries
             SET encrypted_blob = $2, blob_iv = $3, blob_auth_tag = $4,
                 encrypted_overview = $5, overview_iv = $6, overview_auth_tag = $7,
                 aad_version = 1, team_key_version = $8, item_key_version = $9,
-                encrypted_item_key = $10, item_key_iv = $11, item_key_auth_tag = $12, updated_at = now()
+                encrypted_item_key = $10, item_key_iv = $11, item_key_auth_tag = $12, updated_at = now(),
+                item_key_id = COALESCE($13::uuid, item_key_id),
+                item_key_team_key_version = COALESCE($14::int, item_key_team_key_version),
+                item_key_version_high_water = COALESCE($15::int, item_key_version_high_water)
           WHERE id = $1::uuid`,
         entryId, blob.ciphertext, blob.iv, blob.authTag, overview.ciphertext, overview.iv, overview.authTag,
         team.version, itemKey.version, wrap.ciphertext, wrap.iv, wrap.authTag,
+        mintedId, opts.repaired ? REPAIRED_ROLLOUT_ENTRY.marker : null, highWater,
       );
     });
-    return { plain };
+    return { plain, mintedId };
   }
 
   // ── Restores of legacy rows, end to end (F2, T7) ─────────────────────────
@@ -1673,12 +1686,14 @@ describe("team re-key pass — real-DB integration", () => {
     await expectOnCurrentKey(team, e.entryId, { plain: { blob: rowPlain.blob, overview: restoredOverview(rowPlain.blob) } });
   });
 
-  it("rollout: a v1 entry the previous release created (NULL id, marker 0, high-water 0) is pending; the pass re-keys it past its own version and mints the id", async () => {
+  it("rollout: a v1 entry the previous release created, as 20261120000000 repairs it (minted id, marker 0, high-water 1), is pending; the pass re-keys it past its own version under a new id", async () => {
     const team = await seedTeam(2);
     const admin = await seedMember(team, "OWNER", [1, 2]);
     const created = newItemKey(1);
-    const e = await seedPreviousReleaseEntry(team, created);
-    expect(await entryRow(e.entryId)).toMatchObject({ item_key_version: 1, item_key_id: null, item_key_team_key_version: 0 });
+    const e = await seedRepairedRolloutCreate(team, created);
+    const minted = (await entryRow(e.entryId)).item_key_id;
+    expect(minted).not.toBeNull();
+    expect(await entryRow(e.entryId)).toMatchObject({ item_key_version: 1, item_key_team_key_version: 0, item_key_version_high_water: 1 });
     expect(await rekeyList(team, admin)).toMatchObject({ pendingCount: 1, entryIds: [e.entryId] });
     expect((await rekeyData(team, admin, e.entryId)).nextItemKeyVersion).toBe(2);
 
@@ -1688,17 +1703,20 @@ describe("team re-key pass — real-DB integration", () => {
     const row = await entryRow(e.entryId);
     expect(row.item_key_version).toBe(2);
     expect(row.item_key_id).not.toBeNull();
+    expect(row.item_key_id).not.toBe(minted);
     expect(await rowsOffCurrentVersion(team.teamId)).toEqual([]);
     expect((await rekeyList(team, admin)).pendingCount).toBe(0);
   });
 
-  it("rollout: the previous release's v0→v1 upgrade of an entry marked current leaves a NULL id; a reuse PUT is refused ITEM_KEY_CHANGED, the entry is pending, the pass re-keys it and edits work again", async () => {
+  it("rollout: the previous release's v0→v1 upgrade of an entry marked current, as 20261120000000 repairs it (minted id, marker 0), is pending; a reuse PUT with no id is refused ITEM_KEY_CHANGED, the pass re-keys it and edits work again", async () => {
     const team = await seedTeam(1);
     const admin = await seedMember(team, "OWNER", [1]);
     const v0 = await seedEntry(team, { teamKeyVersion: 1, marker: 1 });
     const upgraded = newItemKey(1);
-    const put = await previousReleasePut(team, v0.entryId, upgraded);
-    expect(await entryRow(v0.entryId)).toMatchObject({ item_key_version: 1, item_key_id: null, item_key_team_key_version: 1 });
+    const put = await previousReleasePut(team, v0.entryId, upgraded, { repaired: true });
+    expect(await entryRow(v0.entryId)).toMatchObject({
+      item_key_version: 1, item_key_id: put.mintedId, item_key_team_key_version: 0, item_key_version_high_water: 1,
+    });
     const [historyId] = [...(await historyRows(v0.entryId)).keys()];
 
     mockAuth.mockResolvedValue({ user: { id: admin } });
@@ -1736,13 +1754,16 @@ describe("team re-key pass — real-DB integration", () => {
     expect(again.status).toBe(200);
   });
 
-  it("rollout: a previous-release upgrade of a v0 entry holding a mode-0 attachment → the pass migrates it under the unknown ItemKey, then re-keys; the attachment ends under the new ItemKey", async () => {
+  it("rollout: a previous-release upgrade of a v0 entry holding a mode-0 attachment, as 20261120000000 repairs it (minted id, marker 0) → the pass migrates the attachment under the v1 ItemKey, then re-keys; the attachment ends under the new ItemKey", async () => {
     const team = await seedTeam(1);
     const admin = await seedMember(team, "OWNER", [1]);
     const v0 = await seedEntry(team, { teamKeyVersion: 1, marker: 1 });
     const legacy = await seedMode0Attachment(team, v0.entryId, 1);
     const upgraded = newItemKey(1);
-    const put = await previousReleasePut(team, v0.entryId, upgraded);
+    const put = await previousReleasePut(team, v0.entryId, upgraded, { repaired: true });
+    expect(await entryRow(v0.entryId)).toMatchObject({
+      item_key_version: 1, item_key_id: put.mintedId, item_key_team_key_version: 0, item_key_version_high_water: 1,
+    });
     const [historyId] = [...(await historyRows(v0.entryId)).keys()];
 
     const { result, requests } = await runPass(team, admin);

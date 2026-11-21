@@ -25,9 +25,9 @@ export function rekeyPendingWhere(teamKeyVersion: number): Prisma.TeamPasswordEn
 
 /**
  * The version a new ItemKey of the entry takes. The high-water covers every
- * version this release wrote; the entry's own version also covers a v1 entry
- * an instance of the previous release created or upgraded during rollout,
- * which left the high-water at 0.
+ * version this release wrote. An entry an instance of an older release created
+ * or upgraded during the 0.5.0 rollout left it at 0; 20261120000000 raised it,
+ * and the entry's own version stays in the max as a defensive floor.
  */
 export function nextItemKeyVersion(highWater: number, itemKeyVersion: number): number {
   return Math.max(highWater, itemKeyVersion) + 1;

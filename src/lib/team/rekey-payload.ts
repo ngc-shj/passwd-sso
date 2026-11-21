@@ -670,7 +670,10 @@ export async function encryptUpgrade(
 
 /** PUT /api/teams/[teamId]/passwords/[id]/attachments/[attachmentId]/migrate body. */
 export interface AttachmentMigrateBody {
-  /** null for an entry whose ItemKey has no id yet (written by a previous release). */
+  /**
+   * null for an entry whose ItemKey has no id (written by an older release; the
+   * server refuses that shape since 20261120000000, so a null now never matches).
+   */
   itemKeyId: string | null;
   cekKeyVersion: number;
   snapshot: { iv: string; authTag: string };

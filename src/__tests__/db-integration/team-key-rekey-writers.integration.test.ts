@@ -35,10 +35,15 @@ import {
   setBypassRlsGucs,
   setGucs,
   setTestBypass,
+  TEAM_ENTRY_ITEM_KEY_ID_CHECK,
+  TEAM_HISTORY_ITEM_KEY_ID_CHECK,
+  TEAM_ITEM_KEY_ID_CHECK_DIR,
+  teamItemKeyIdCheckAlters,
   writeRefusedState,
   type TestContext,
 } from "./helpers";
 import { createPool } from "@/lib/db/pool-factory";
+import { SQLSTATE_CHECK_VIOLATION } from "@/lib/prisma/prisma-error";
 import { createRaceHelpers } from "./race-helpers";
 
 const mockAuth = vi.fn();
@@ -362,9 +367,20 @@ describe("team entry key identity writers — real-DB integration", () => {
     return { status: res.status, error: res.status === 200 ? undefined : (await res.json()).error };
   }
 
+  /** Drops the two CHECKs 20261120000000 adds, inside the caller's transaction, so pre-change shapes can be set up. */
+  async function dropItemKeyIdChecks(client: pg.PoolClient): Promise<void> {
+    await client.query(`ALTER TABLE team_password_entries DROP CONSTRAINT ${TEAM_ENTRY_ITEM_KEY_ID_CHECK}`);
+    await client.query(`ALTER TABLE team_password_entry_histories DROP CONSTRAINT ${TEAM_HISTORY_ITEM_KEY_ID_CHECK}`);
+  }
+
+  /** Re-adds them with 20261120000000's own statements. */
+  async function addItemKeyIdChecks(client: pg.PoolClient): Promise<void> {
+    for (const statement of teamItemKeyIdCheckAlters(TEAM_ITEM_KEY_ID_CHECK_DIR)) await client.query(statement);
+  }
+
   // ── A10: the backfill block ──────────────────────────────────────────────
 
-  it("A10: the backfill block sets the marker, the high-water and the item_key_id, and adds no CHECK (it ships in the next release)", async () => {
+  it("A10: the backfill block sets the marker, the high-water and the item_key_id; the CHECK added after it (20261120000000) refuses a v1 entry without an id", async () => {
     const owner1 = await ctx.createUser(tenantId);
     const teamV0 = await seedTeam(0);
     const teamV1 = await seedTeam(1);
@@ -389,6 +405,8 @@ describe("team entry key identity writers — real-DB integration", () => {
     const client = await ctx.su.pool.connect();
     try {
       await client.query("BEGIN");
+      // The pre-change shapes predate the CHECKs 20261120000000 adds; they come back after the block.
+      await dropItemKeyIdChecks(client);
       await client.query(
         `UPDATE team_password_entries
             SET item_key_team_key_version = 0, item_key_version_high_water = 0, item_key_id = NULL
@@ -433,20 +451,23 @@ describe("team entry key identity writers — real-DB integration", () => {
       });
       expect(nullVariants.map((id) => histId.get(id))).toEqual([null, null, null]);
 
-      // A previous-release instance writes a v1 entry without an id during
-      // rollout; this release accepts the row (and treats it as pending).
+      // 20261120000000 adds the CHECK once no release writes a v1 entry without an id.
+      await addItemKeyIdChecks(client);
       const constraint = await client.query(
-        `SELECT 1 FROM pg_constraint WHERE conname = 'team_password_entries_item_key_id_iff_item_key'`,
+        `SELECT 1 FROM pg_constraint WHERE conname = $1`,
+        [TEAM_ENTRY_ITEM_KEY_ID_CHECK],
       );
-      expect(constraint.rowCount).toBe(0);
-      await client.query(
+      expect(constraint.rowCount).toBe(1);
+      // The last statement of the transaction: the refusal aborts it, and the finally rolls back.
+      const refused = await client.query(
         `INSERT INTO team_password_entries (
            id, team_id, tenant_id, created_by_id, updated_by_id,
            encrypted_blob, blob_iv, blob_auth_tag, encrypted_overview, overview_iv, overview_auth_tag,
            item_key_version, created_at, updated_at
          ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $4::uuid, 'b', $5, $6, 'o', $5, $6, 1, now(), now())`,
         [randomUUID(), teamV3, tenantId, owner1, hex(12), hex(16)],
-      );
+      ).then(() => null, (e: unknown) => e as { code?: string; constraint?: string });
+      expect(refused).toMatchObject({ code: SQLSTATE_CHECK_VIOLATION, constraint: TEAM_ENTRY_ITEM_KEY_ID_CHECK });
     } finally {
       await client.query("ROLLBACK");
       client.release();
@@ -828,12 +849,17 @@ describe("team entry key identity writers — real-DB integration", () => {
       histories: Record<string, { id: string; entry: string }>;
       /** item_key_id of the app-written entries, as seeded: no step may replace one. */
       appItemKeyIds: Record<string, string>;
+      /** Entries setUpPreChange returns to the pre-change state (marker 0, high-water 0, no ids, nor on their history). */
+      preChange: string[];
+      /** An app-written entry setUpPreChange leaves without an id. */
+      stragglerNoId: string;
     };
 
     /**
-     * Pre-change rows (marker 0, high-water 0, no ids) of every shape the steps move, beside
-     * app-written rows the steps must leave: one that a real history restore left at marker 0
-     * with a high-water of 1 on a team at version 1.
+     * Rows of every shape the steps move, beside app-written rows the steps must leave: one that
+     * a real history restore left at marker 0 with a high-water of 1 on a team at version 1. They
+     * are committed in a shape the CHECKs of 20261120000000 accept; setUpPreChange gives each
+     * cell, inside its transaction, the pre-change state the steps read.
      */
     async function seedFixtures(): Promise<Fx> {
       const teamV0 = await seedTeam(0);
@@ -868,18 +894,12 @@ describe("team entry key identity writers — real-DB integration", () => {
       );
       histories.v0WithWrap = { id: await seedHistory(entries.v0WithWrap, owner, { teamKeyVersion: 3, itemKeyVersion: 0, wrap: strayWrap }), entry: "v0WithWrap" };
 
-      // The pre-change state: what the columns held before the key-identity release.
-      await sql(
-        `UPDATE team_password_entries SET item_key_team_key_version = 0, item_key_version_high_water = 0, item_key_id = NULL WHERE id = ANY($1::uuid[])`,
-        [Object.values(entries)],
-      );
-      await sql(`UPDATE team_password_entry_histories SET item_key_id = NULL WHERE entry_id = ANY($1::uuid[])`, [Object.values(entries)]);
+      const preChange = Object.values(entries);
 
       // App-written rows.
       entries.appCurrent = await seedEntry(teamV1, owner, { teamKeyVersion: 1, itemKeyVersion: 1, marker: 1, highWater: 1 });
       entries.appPending = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1, marker: 0, highWater: 1 });
       entries.stragglerNoId = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1, marker: 0, highWater: 1 });
-      await sql(`UPDATE team_password_entries SET item_key_id = NULL WHERE id = $1::uuid`, entries.stragglerNoId);
 
       // An app-written entry whose high-water sits above everything its own rows hold: the raise-only guard must keep it.
       entries.appHighWaterAbove = await seedEntry(teamV3, owner, { teamKeyVersion: 3, itemKeyVersion: 1, marker: 0, highWater: 5 });
@@ -894,7 +914,23 @@ describe("team entry key identity writers — real-DB integration", () => {
         .toEqual({ marker: 0, hw: 1, hasId: true });
       const appItemKeyIds: Fx["appItemKeyIds"] = {};
       for (const name of APP_WRITTEN) appItemKeyIds[name] = (await entry(entries[name])).item_key_id!;
-      return { teamV1, entries, histories, appItemKeyIds };
+      return { teamV1, entries, histories, appItemKeyIds, preChange, stragglerNoId: entries.stragglerNoId };
+    }
+
+    /**
+     * On a superuser client inside the cell's transaction: drop the CHECKs of 20261120000000
+     * (they refuse a v1 entry without an id) and put the fixtures in the state of the release
+     * before key identity: what the columns held then, and a straggler a previous-release
+     * instance wrote without an id.
+     */
+    async function setUpPreChange(client: pg.PoolClient, f: Fx): Promise<void> {
+      await dropItemKeyIdChecks(client);
+      await client.query(
+        `UPDATE team_password_entries SET item_key_team_key_version = 0, item_key_version_high_water = 0, item_key_id = NULL WHERE id = ANY($1::uuid[])`,
+        [f.preChange],
+      );
+      await client.query(`UPDATE team_password_entry_histories SET item_key_id = NULL WHERE entry_id = ANY($1::uuid[])`, [f.preChange]);
+      await client.query(`UPDATE team_password_entries SET item_key_id = NULL WHERE id = $1::uuid`, [f.stragglerNoId]);
     }
 
     async function readState(client: pg.PoolClient, fx: Fx) {
@@ -968,15 +1004,18 @@ describe("team entry key identity writers — real-DB integration", () => {
       },
     };
 
+    /** setUpPreChange on the superuser client, then the rest of the transaction as passwd_app. */
     async function asApp<T>(fn: (client: pg.PoolClient, notices: string[]) => Promise<T>): Promise<T> {
-      const client = await appPool.connect();
+      const client = await ctx.su.pool.connect();
       const collected = collectNotices(client);
       try {
-        const [principal] = (await client.query<{ rolsuper: boolean; rolbypassrls: boolean }>(
-          `SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
-        )).rows;
-        expect(principal).toEqual({ rolsuper: false, rolbypassrls: false });
         await client.query("BEGIN");
+        await setUpPreChange(client, fx);
+        await client.query("SET LOCAL ROLE passwd_app");
+        const [principal] = (await client.query<{ name: string; rolsuper: boolean; rolbypassrls: boolean }>(
+          `SELECT rolname AS name, rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user`,
+        )).rows;
+        expect(principal).toEqual({ name: "passwd_app", rolsuper: false, rolbypassrls: false });
         return await fn(client, collected.messages);
       } finally {
         collected.stop();
@@ -1070,6 +1109,7 @@ describe("team entry key identity writers — real-DB integration", () => {
         const client = await ctx.su.pool.connect();
         try {
           await client.query("BEGIN");
+          await setUpPreChange(client, fx);
           return await fn(client);
         } finally {
           await client.query("ROLLBACK");
