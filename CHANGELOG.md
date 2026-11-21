@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.1](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.5.0...passwd-sso-v0.5.1) (2026-11-21)
+
+
+### Features
+
+* **teams:** bind wrapped team keys to the recipient's current ECDH public key ([#1078](https://github.com/ngc-shj/passwd-sso/issues/1078)) ([a7f7fcc](https://github.com/ngc-shj/passwd-sso/commit/a7f7fccdd76576a8a50caeb6d67b66a80d502388))
+* **teams:** enforce the ItemKey id invariant in the database ([#1080](https://github.com/ngc-shj/passwd-sso/issues/1080)) ([69c7546](https://github.com/ngc-shj/passwd-sso/commit/69c754654352ce4694193f818691384286d8f1e6))
+
+
+### Bug Fixes
+
+* **test:** drop the unused initial value in expectSwallowedBypassRefusal ([#1081](https://github.com/ngc-shj/passwd-sso/issues/1081)) ([35e9806](https://github.com/ngc-shj/passwd-sso/commit/35e9806298ca845ef905de732b397eb56555ba7a))
+
 ## [0.5.0](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.4.77...passwd-sso-v0.5.0) (2026-11-19)
 
 
