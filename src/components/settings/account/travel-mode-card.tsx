@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { useTravelMode } from "@/hooks/use-travel-mode";
 import { useVault } from "@/lib/vault/vault-context";
 import { computePassphraseVerifier } from "@/lib/crypto/crypto-client";
@@ -29,9 +30,15 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Plane, AlertTriangle } from "lucide-react";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { formatLockedUntil } from "@/components/vault/vault-lock-screen";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 
 export function TravelModeCard() {
   const t = useTranslations("TravelMode");
+  // The disable route shares the vault-unlock lockout, so its lockout copy
+  // comes from the Vault namespace that formatLockedUntil reads.
+  const tVault = useTranslations("Vault");
+  const tAuth = useTranslations("Auth");
   const travelMode = useTravelMode();
   const { active, loading, enable } = travelMode;
   const { getAccountSalt } = useVault();
@@ -40,6 +47,7 @@ export function TravelModeCard() {
   const [passphrase, setPassphrase] = useState("");
   const [disableError, setDisableError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const handleEnable = async () => {
     setBusy(true);
@@ -47,7 +55,7 @@ export function TravelModeCard() {
     setBusy(false);
     setShowEnableConfirm(false);
     if (!ok) {
-      // toast or inline error could be added here
+      toast.error(t("enableFailed"));
     }
   };
 
@@ -73,6 +81,13 @@ export function TravelModeCard() {
         setPassphrase("");
       } else if (result.error === API_ERROR.INVALID_PASSPHRASE) {
         setDisableError(t("passphraseIncorrect"));
+      } else if (result.error === API_ERROR.ACCOUNT_LOCKED) {
+        setDisableError(formatLockedUntil(result.lockedUntil, tVault));
+      } else if (result.error === API_ERROR.UNAUTHORIZED) {
+        // The session expired: no passphrase can succeed, so leave the
+        // dialog for a fresh sign-in.
+        handleDisableDialogChange(false);
+        setSessionExpired(true);
       } else {
         setDisableError(t("disableFailed"));
       }
@@ -186,6 +201,15 @@ export function TravelModeCard() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <RecentSessionRequiredDialog
+        actionLabel={tAuth("recentSessionAction")}
+        cancelLabel={t("cancel")}
+        description={tAuth("reauthSessionExpired")}
+        onOpenChange={setSessionExpired}
+        open={sessionExpired}
+        title={tAuth("recentSessionTitle")}
+      />
     </>
   );
 }

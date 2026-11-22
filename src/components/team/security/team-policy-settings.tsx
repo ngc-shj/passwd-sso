@@ -33,6 +33,7 @@ import {
 } from "@/lib/validations";
 
 import { bindRangeNullableInput } from "@/lib/ui/input-range";
+import { parseLines } from "@/lib/format/parse-lines";
 
 interface PolicyData {
   minPasswordLength: number;
@@ -67,14 +68,6 @@ const DEFAULT_POLICY: PolicyData = {
   inheritTenantCidrs: true,
   teamAllowedCidrs: [],
 };
-
-/** One CIDR per line; blank lines and surrounding whitespace are dropped. */
-function parseCidrsText(text: string): string[] {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line.length > 0);
-}
 
 /** Validate policy fields. Returns a map of field name → error key (i18n). */
 export function validatePolicy(
@@ -476,7 +469,7 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
                 // validate() see what Save will send.
                 const text = e.target.value;
                 setTeamCidrsText(text);
-                setPolicy((p) => ({ ...p, teamAllowedCidrs: parseCidrsText(text) }));
+                setPolicy((p) => ({ ...p, teamAllowedCidrs: parseLines(text) }));
                 setFieldErrors((prev) => {
                   const { teamAllowedCidrs: _, ...rest } = prev;
                   return rest;

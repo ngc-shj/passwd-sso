@@ -5,14 +5,30 @@ import "@testing-library/jest-dom/vitest";
 
 const SENTINEL_NOT_A_SECRET_ZJYK = "SENTINEL_NOT_A_SECRET_ZJYK";
 
-const { mockUseTravelMode, mockUseVault } = vi.hoisted(() => ({
+const { mockUseTravelMode, mockUseVault, mockSignOut, mockToast } = vi.hoisted(() => ({
   mockUseTravelMode: vi.fn(),
   mockUseVault: vi.fn(),
+  mockSignOut: vi.fn(),
+  mockToast: { error: vi.fn() },
 }));
 
 vi.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => key,
+  useTranslations: () => (key: string, values?: Record<string, string>) =>
+    values ? `${key}:${JSON.stringify(values)}` : key,
+  useLocale: () => "en",
 }));
+
+vi.mock("sonner", () => ({ toast: mockToast }));
+
+vi.mock("next-auth/react", () => ({
+  signOut: mockSignOut,
+}));
+
+// formatLockedUntil's module (the vault lock screen) imports the locale router.
+vi.mock("@/i18n/navigation", async () => {
+  const { mockI18nNavigation } = await import("@/__tests__/helpers/mock-app-navigation");
+  return mockI18nNavigation();
+});
 
 vi.mock("@/hooks/use-travel-mode", () => ({
   useTravelMode: () => mockUseTravelMode(),
@@ -139,6 +155,34 @@ describe("TravelModeCard flows", () => {
     await waitFor(() => expect(screen.queryByText("enableConfirm")).not.toBeInTheDocument());
   });
 
+  function confirmEnable() {
+    fireEvent.click(screen.getByRole("button", { name: /^enable$/ }));
+    const buttons = screen.getAllByRole("button", { name: /^enable$/ });
+    fireEvent.click(buttons[buttons.length - 1]);
+  }
+
+  it("reports a failed enable with the translated error toast", async () => {
+    const enable = vi.fn().mockResolvedValue(false);
+    mockUseTravelMode.mockReturnValue({ active: false, loading: false, enable, disable: vi.fn() });
+    render(<TravelModeCard />);
+
+    confirmEnable();
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("enableFailed"));
+  });
+
+  it("shows no error toast when enabling succeeds", async () => {
+    const enable = vi.fn().mockResolvedValue(true);
+    mockUseTravelMode.mockReturnValue({ active: false, loading: false, enable, disable: vi.fn() });
+    render(<TravelModeCard />);
+
+    confirmEnable();
+
+    await waitFor(() => expect(enable).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.queryByText("enableConfirm")).not.toBeInTheDocument());
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
   it("requires a non-blank passphrase before disabling", () => {
     const disable = renderActive();
     fireEvent.change(screen.getByLabelText("passphrasePlaceholder"), { target: { value: "   " } });
@@ -193,6 +237,46 @@ describe("TravelModeCard flows", () => {
 
     expect(await screen.findByText("disableFailed")).toBeInTheDocument();
     expect(screen.queryByText("passphraseIncorrect")).not.toBeInTheDocument();
+  });
+
+  it("shows the lockout with its remaining time on ACCOUNT_LOCKED", async () => {
+    const lockedUntil = new Date(Date.now() + 29.5 * 60 * 1000).toISOString();
+    renderActive(vi.fn().mockResolvedValue({ success: false, error: "ACCOUNT_LOCKED", lockedUntil }));
+    fireEvent.change(screen.getByLabelText("passphrasePlaceholder"), { target: { value: "pw" } });
+
+    submitDisable();
+
+    expect(
+      await screen.findByText(
+        `accountLockedWithTime:${JSON.stringify({ time: `minutes:${JSON.stringify({ count: "30" })}` })}`,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("disableFailed")).not.toBeInTheDocument();
+  });
+
+  it("shows the plain lockout message on ACCOUNT_LOCKED without lockedUntil", async () => {
+    renderActive(vi.fn().mockResolvedValue({ success: false, error: "ACCOUNT_LOCKED" }));
+    fireEvent.change(screen.getByLabelText("passphrasePlaceholder"), { target: { value: "pw" } });
+
+    submitDisable();
+
+    expect(await screen.findByText("accountLocked")).toBeInTheDocument();
+  });
+
+  it("sends an expired session (UNAUTHORIZED) to sign in again instead of blaming the passphrase", async () => {
+    renderActive(vi.fn().mockResolvedValue({ success: false, error: "UNAUTHORIZED" }));
+    fireEvent.change(screen.getByLabelText("passphrasePlaceholder"), {
+      target: { value: SENTINEL_NOT_A_SECRET_ZJYK },
+    });
+
+    submitDisable();
+
+    expect(await screen.findByText("reauthSessionExpired")).toBeInTheDocument();
+    expect(screen.queryByText("passphraseIncorrect")).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByText("disableTitle")).not.toBeInTheDocument());
+
+    fireEvent.click(screen.getByRole("button", { name: "recentSessionAction" }));
+    await waitFor(() => expect(mockSignOut).toHaveBeenCalledTimes(1));
   });
 
   it("shows disableFailed when the disable request throws", async () => {

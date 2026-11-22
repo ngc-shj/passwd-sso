@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -408,5 +408,37 @@ describe("VaultLockScreen auto-unlock outcomes", () => {
 
     await waitFor(() => expect(mockUnlockWithStoredPrf).toHaveBeenCalledTimes(1));
     expect(mockFetchApi).not.toHaveBeenCalled();
+  });
+});
+
+describe("VaultLockScreen with blocked sessionStorage", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockHasPrf.mockReturnValue(true);
+    mockIsWebAuthnSupported.mockReturnValue(true);
+    noPasskeys();
+    // A sandboxed iframe or disabled site data makes every storage access throw.
+    vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
+      throw new DOMException("The operation is insecure.", "SecurityError");
+    });
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("still renders the passphrase form", () => {
+    render(<VaultLockScreen />);
+    expect(passphraseInput()).toBeInTheDocument();
+  });
+
+  it("unlocks with the passphrase and does not auto-unlock", async () => {
+    mockUnlock.mockResolvedValue(true);
+    render(<VaultLockScreen />);
+
+    submitPassphrase("my passphrase");
+
+    await waitFor(() => expect(mockUnlock).toHaveBeenCalledWith("my passphrase"));
+    expect(mockUnlockWithStoredPrf).not.toHaveBeenCalled();
   });
 });

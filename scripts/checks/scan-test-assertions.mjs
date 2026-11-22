@@ -15,6 +15,9 @@
  *     `.rejects`/`.resolves` chain);
  *   - a call to a helper named `expect*`/`assert*` that is imported, or that is
  *     declared in the same file and itself asserts (an expect, or a throw);
+ *   - a call to any other helper declared in the same file whose body asserts,
+ *     directly or through further local helpers (a throw alone does not count
+ *     here: an unnamed helper's throw is as likely a fixture guard);
  *   - a Testing Library `getBy*`/`getAllBy*`/`findBy*`/`findAllBy*` call, which
  *     throws when the element is absent.
  *
@@ -23,7 +26,9 @@
  *   - `it.skip`/`it.todo`/`test.skip`/`test.todo` (with --base <ref>, only when
  *     the file has more of them than at <ref>);
  *   - a test whose only assertions are `toBeDefined()`/`toBeTruthy()`/
- *     `not.toThrow()`;
+ *     `not.toThrow()`. Not weak: the same matcher after `.resolves` (a
+ *     rejection fails the test), or `toBeDefined()`/`toBeTruthy()` on a
+ *     `find`/`findLast` result (absence is `undefined`);
  *   - `vi.mock`/`vi.doMock` of the test's own subject (the co-located file the
  *     test is named after).
  *
@@ -49,6 +54,7 @@ const SNAPSHOT_MATCHERS = new Set([
   "toThrowErrorMatchingInlineSnapshot",
 ]);
 const QUERY_THROWS = /^(getBy|getAllBy|findBy|findAllBy)/;
+const ABSENCE_IS_UNDEFINED = new Set(["find", "findLast"]);
 const HELPER_NAME = /^(expect|assert)/;
 
 /** `it.only.each` → ["it", "only", "each"]; null when the callee is not a property chain on an identifier. */
@@ -124,6 +130,28 @@ function collectLocalFunctions(sf) {
   return fns;
 }
 
+/** Property names between the matcher and its `expect(...)` root: `expect(p).resolves.not.toBe` → ["resolves", "not"]. */
+function matcherModifiers(chain) {
+  const names = [];
+  let cur = chain;
+  while (ts.isPropertyAccessExpression(cur)) {
+    names.push(cur.name.text);
+    cur = cur.expression;
+  }
+  return names;
+}
+
+/** `expect(items.find(...))` — the subject is a find/findLast result, so toBeDefined pins presence. */
+function subjectIsFindResult(root) {
+  const subject = root.arguments[0];
+  return (
+    subject !== undefined &&
+    ts.isCallExpression(subject) &&
+    ts.isPropertyAccessExpression(subject.expression) &&
+    ABSENCE_IS_UNDEFINED.has(subject.expression.name.text)
+  );
+}
+
 function containsThrow(node) {
   if (ts.isThrowStatement(node)) return true;
   return ts.forEachChild(node, containsThrow) ?? false;
@@ -139,31 +167,34 @@ function classify(body, ctx, visiting = new Set()) {
   const visit = (node) => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
-      if (ts.isPropertyAccessExpression(callee) && expectRoot(callee.expression)) {
+      const root = ts.isPropertyAccessExpression(callee) ? expectRoot(callee.expression) : null;
+      if (root) {
         const matcher = callee.name.text;
-        const negated =
-          ts.isPropertyAccessExpression(callee.expression) && callee.expression.name.text === "not";
-        if ((!negated && (matcher === "toBeDefined" || matcher === "toBeTruthy")) || (negated && matcher === "toThrow")) {
-          weak++;
-        } else {
-          strong++;
-        }
+        const modifiers = matcherModifiers(callee.expression);
+        const negated = modifiers[0] === "not";
+        const presence = !negated && (matcher === "toBeDefined" || matcher === "toBeTruthy");
+        const isWeak =
+          !modifiers.includes("resolves") &&
+          ((presence && !subjectIsFindResult(root)) || (negated && matcher === "toThrow"));
+        if (isWeak) weak++;
+        else strong++;
       } else if (ts.isPropertyAccessExpression(callee) && QUERY_THROWS.test(callee.name.text)) {
         strong++;
       } else if (ts.isIdentifier(callee)) {
         const name = callee.text;
+        const named = HELPER_NAME.test(name) && name !== "expect";
         if (QUERY_THROWS.test(name)) {
           strong++;
-        } else if (HELPER_NAME.test(name) && name !== "expect") {
-          if (ctx.imports.has(name)) {
-            strong++;
-          } else if (ctx.locals.has(name) && !visiting.has(name)) {
-            const helperBody = ctx.locals.get(name);
-            const inner = classify(helperBody, ctx, new Set([...visiting, name]));
-            // A local helper asserts by calling expect or by throwing on failure.
-            if (inner.strong > 0 || containsThrow(helperBody)) strong++;
-            else if (inner.weak > 0) weak++;
-          }
+        } else if (named && ctx.imports.has(name)) {
+          strong++;
+        } else if (ctx.locals.has(name) && !visiting.has(name)) {
+          const helperBody = ctx.locals.get(name);
+          const inner = classify(helperBody, ctx, new Set([...visiting, name]));
+          // A local helper asserts by calling expect (directly or through
+          // another local helper); an expect/assert-named one may also assert
+          // by throwing on failure.
+          if (inner.strong > 0 || (named && containsThrow(helperBody))) strong++;
+          else if (inner.weak > 0) weak++;
         }
       }
     }

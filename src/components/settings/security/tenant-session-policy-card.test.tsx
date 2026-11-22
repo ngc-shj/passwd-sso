@@ -183,4 +183,35 @@ describe("TenantSessionPolicyCard", () => {
     expect(await screen.findByTestId("recent-session-dialog")).toBeInTheDocument();
     expect(mockToast.error).not.toHaveBeenCalled();
   });
+  it("shows only the translated failure, never the server's diagnostic text, when a save is refused", async () => {
+    const SERVER_TEXT = "vaultAutoLockMinutes (60) must be <= sessionIdleTimeoutMinutes";
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(DEFAULT_DATA),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 400,
+        json: () =>
+          Promise.resolve({ error: "VALIDATION_ERROR", details: { message: SERVER_TEXT } }),
+      });
+    });
+    render(<TenantSessionPolicyCard />);
+    const save = await screen.findByRole("button", {
+      name: "sessionPolicySave",
+    });
+
+    const idle = document.getElementById("idle-timeout") as HTMLInputElement;
+    fireEvent.change(idle, { target: { value: "120" } });
+    fireEvent.click(save);
+
+    expect(await screen.findByText("sessionPolicySaveFailed")).toBeInTheDocument();
+    expect(mockToast.error).toHaveBeenCalledWith("sessionPolicySaveFailed");
+    expect(screen.queryByText(SERVER_TEXT)).not.toBeInTheDocument();
+    expect(mockToast.error).not.toHaveBeenCalledWith(SERVER_TEXT);
+  });
 });

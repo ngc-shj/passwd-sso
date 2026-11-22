@@ -6,9 +6,11 @@ import { aadGatedDecrypt, aadModelDecrypt } from "@/__tests__/helpers/aad-model-
 // ─── Minimal localStorage mock for Node/jsdom environment ────
 
 const storageMap = new Map<string, string>();
+const readStorage = (key: string) => storageMap.get(key) ?? null;
+const writeStorage = (key: string, value: string) => { storageMap.set(key, String(value)); };
 const mockLocalStorage = {
-  getItem: vi.fn((key: string) => storageMap.get(key) ?? null),
-  setItem: vi.fn((key: string, value: string) => { storageMap.set(key, String(value)); }),
+  getItem: vi.fn(readStorage),
+  setItem: vi.fn(writeStorage),
   removeItem: vi.fn((key: string) => { storageMap.delete(key); }),
   clear: vi.fn(() => storageMap.clear()),
 };
@@ -270,6 +272,44 @@ describe("useWatchtower", () => {
     // getCooldownState should have been called with a numeric lastAnalyzedAt
     expect(mockGetCooldownState).toHaveBeenCalled();
     // The first call during render may have null, but after the effect runs it'll update
+  });
+
+  // ─── Unavailable localStorage ───────────────────────────
+
+  describe("when localStorage throws", () => {
+    afterEach(() => {
+      mockLocalStorage.getItem.mockImplementation(readStorage);
+      mockLocalStorage.setItem.mockImplementation(writeStorage);
+    });
+
+    it("renders with no stored analysis time when reads throw", () => {
+      mockLocalStorage.getItem.mockImplementation(() => {
+        throw new DOMException("The operation is insecure.", "SecurityError");
+      });
+
+      const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
+
+      expect(result.current.report).toBeNull();
+      expect(result.current.loading).toBe(false);
+    });
+
+    it("still completes the analysis when writes throw", async () => {
+      mockLocalStorage.setItem.mockImplementation(() => {
+        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      });
+      fetchSpy
+        .mockResolvedValueOnce(jsonResponse({ ok: true })) // POST /api/watchtower/start
+        .mockResolvedValueOnce(jsonResponse([])); // GET /api/passwords?include=blob
+
+      const { result } = renderHook(() => useWatchtower(undefined, { passwordMaxAgeDays: null, passwordExpiryWarningDays: 14 }));
+
+      await act(async () => {
+        await result.current.analyze();
+      });
+
+      expect(result.current.report?.overallScore).toBe(100);
+      expect(result.current.loading).toBe(false);
+    });
   });
 
   // ─── Analyze: empty passwords → score 100 ───────────────

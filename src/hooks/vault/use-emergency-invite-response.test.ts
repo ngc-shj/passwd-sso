@@ -37,6 +37,8 @@ let encryptionKey: CryptoKey;
 describe("useEmergencyInviteResponse", () => {
   beforeEach(async () => {
     mockFetchApi.mockReset();
+    mockToast.error.mockReset();
+    mockPush.mockReset();
     encryptionKey = await deriveEncryptionKey(new Uint8Array(32).fill(3));
     mockUseVault.mockReturnValue({ status: VAULT_STATUS.UNLOCKED, encryptionKey });
   });
@@ -99,5 +101,33 @@ describe("useEmergencyInviteResponse", () => {
 
     expect(mockFetchApi).toHaveBeenCalledWith(API_PATH.EMERGENCY_ACCESS_REJECT, expect.objectContaining({ method: "POST" }));
     expect(mockPush).toHaveBeenCalledWith("/dashboard/emergency-access");
+  });
+
+  it("maps a non-NOT_FOUND accept error through the emergency-access error keys", async () => {
+    mockFetchApi.mockImplementation(async () => json({ error: "INVITATION_EXPIRED" }, 410));
+    const { result } = renderHook(() => useEmergencyInviteResponse("tok"));
+
+    await act(() => result.current.handleAccept());
+
+    expect(mockToast.error).toHaveBeenCalledWith("invitationExpired");
+    expect(mockPush).not.toHaveBeenCalled();
+  });
+
+  it("reports an invalid invitation when decline gets NOT_FOUND", async () => {
+    mockFetchApi.mockImplementation(async () => json({ error: "NOT_FOUND" }, 404));
+    const { result } = renderHook(() => useEmergencyInviteResponse("tok"));
+
+    await act(() => result.current.handleDecline());
+
+    expect(mockToast.error).toHaveBeenCalledWith("invalidInvitation");
+  });
+
+  it("maps a non-NOT_FOUND decline error through the emergency-access error keys", async () => {
+    mockFetchApi.mockImplementation(async () => json({ error: "INVITATION_ALREADY_USED" }, 409));
+    const { result } = renderHook(() => useEmergencyInviteResponse("tok"));
+
+    await act(() => result.current.handleDecline());
+
+    expect(mockToast.error).toHaveBeenCalledWith("invitationAlreadyUsed");
   });
 });

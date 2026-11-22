@@ -195,11 +195,11 @@ export function OperatorTokenCard() {
     try {
       const result = await reauthenticateWithPasskey();
       if (!result.ok) {
-        // Neither code can ever be resolved by retrying the ceremony (no
-        // binding, the bound credential is gone, or the wrong key was
-        // presented) — staying in this dialog would strand the user, so
-        // route them to a fresh sign-in instead, same as the retry path
-        // below does when it hits a second stale-session response.
+        // None of these can ever be resolved by retrying the ceremony (the
+        // session expired, has no binding, the bound credential is gone, or
+        // the wrong key was presented) — staying in this dialog would strand
+        // the user, so route them to a fresh sign-in instead, same as the
+        // retry path below does when it hits a second stale-session response.
         const deadEndKey = passkeyReauthDeadEndKey(result.error);
         if (deadEndKey) {
           toast.error(tAuth(deadEndKey));

@@ -4,7 +4,6 @@ import { createContext, useContext, useState, useEffect, useCallback } from "rea
 import type { ReactNode } from "react";
 import { fetchApi } from "@/lib/url-helpers";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
-import { API_ERROR } from "@/lib/http/api-error-codes";
 
 interface TravelModeState {
   active: boolean;
@@ -13,9 +12,19 @@ interface TravelModeState {
   error: string | null;
 }
 
+/**
+ * `error` is the route's error code (or NETWORK_ERROR / `HTTP <status>` when
+ * the body carries none). `lockedUntil` accompanies ACCOUNT_LOCKED.
+ */
+export interface TravelModeDisableResult {
+  success: boolean;
+  error?: string;
+  lockedUntil?: string | null;
+}
+
 interface TravelModeContextValue extends TravelModeState {
   enable: () => Promise<boolean>;
-  disable: (verifierHash: string) => Promise<{ success: boolean; error?: string }>;
+  disable: (verifierHash: string) => Promise<TravelModeDisableResult>;
   refresh: () => Promise<void>;
 }
 
@@ -73,7 +82,7 @@ export function TravelModeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const disable = useCallback(
-    async (verifierHash: string): Promise<{ success: boolean; error?: string }> => {
+    async (verifierHash: string): Promise<TravelModeDisableResult> => {
       try {
         const res = await fetchApi("/api/travel-mode/disable", {
           method: "POST",
@@ -81,15 +90,12 @@ export function TravelModeProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({ verifierHash }),
         });
 
+        // Read the code, not the status: 401 is both a wrong passphrase
+        // (INVALID_PASSPHRASE) and an expired session (UNAUTHORIZED).
         if (!res.ok) {
-          if (res.status === 401) {
-            return { success: false, error: API_ERROR.INVALID_PASSPHRASE };
-          }
-          if (res.status === 403) {
-            return { success: false, error: "ACCOUNT_LOCKED" };
-          }
           const body = await readApiErrorBody(res);
-          return { success: false, error: body?.error ?? `HTTP ${res.status}` };
+          if (!body) return { success: false, error: `HTTP ${res.status}` };
+          return { success: false, error: body.error, lockedUntil: body.lockedUntil };
         }
 
         const data = await res.json();

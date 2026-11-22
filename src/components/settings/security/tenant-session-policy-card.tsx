@@ -16,7 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { Separator } from "@/components/ui/separator";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
-import { readApiErrorBody, getApiErrorMessage } from "@/lib/http/read-api-error-body";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
@@ -260,23 +260,15 @@ export function TenantSessionPolicyCard() {
         toast.success(t("sessionPolicySaved"));
         setInitialPolicy({ ...currentPolicy });
       } else {
-        // Single read of the response body — it shares the parsed envelope
-        // between the step-up check and the cross-field message extraction
-        // below, since `res.json()` can only be consumed once.
         const errBody = await readApiErrorBody(res);
         if (errBody?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
           await inlineReauth.triggerOnStaleError();
           return;
         }
-        // Surface the server-side validation message so cross-field
-        // errors (e.g. "vaultAutoLockMinutes (60) must be <= ...") are
-        // visible instead of a generic "failed to update".
-        // C2/C4 envelope: error context is wrapped under `details: { message }`.
-        // `getApiErrorMessage` walks the typed envelope safely; accessing
-        // `body.message` directly would be a TypeScript error.
-        const detail = getApiErrorMessage(errBody);
-        setError(detail ?? t("sessionPolicySaveFailed"));
-        toast.error(detail ?? t("sessionPolicySaveFailed"));
+        // The server's `details.message` is untranslated diagnostic text;
+        // the client-side validate() above already names each bad field.
+        setError(t("sessionPolicySaveFailed"));
+        toast.error(t("sessionPolicySaveFailed"));
       }
     } catch {
       toast.error(t("sessionPolicySaveFailed"));

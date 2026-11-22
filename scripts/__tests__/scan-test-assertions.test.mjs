@@ -96,6 +96,58 @@ describe("weak assertions", () => {
   });
 });
 
+describe("local helpers", () => {
+  it("accepts a local helper of any name whose body calls expect", () => {
+    const source = `function checkRow(r) { expect(r.id).toBe(1); }\nit("reads the row", () => { checkRow(get()); });`;
+    expect(scan(source)).toEqual([]);
+  });
+
+  it("accepts a helper that asserts through another local helper", () => {
+    const source = `const checkId = (r) => { expect(r.id).toBe(1); };\nfunction checkRow(r) { checkId(r); }\nit("reads the row", () => { checkRow(get()); });`;
+    expect(scan(source)).toEqual([]);
+  });
+
+  it("refuses a test whose local helper only throws and is not expect/assert-named", () => {
+    const source = `function setup() { if (!env) throw new Error("no env"); return 1; }\nit("runs", () => { setup(); });`;
+    expect(scan(source)).toEqual([`${PATH}:2: NO_ASSERTION: "runs"`]);
+  });
+
+  it("refuses a test whose recursive local helper asserts nothing", () => {
+    const source = `function walk(n) { if (n > 0) walk(n - 1); }\nit("walks", () => { walk(3); });`;
+    expect(scan(source)).toEqual([`${PATH}:2: NO_ASSERTION: "walks"`]);
+  });
+
+  it("keeps a weak-only local helper weak", () => {
+    const source = `function present(x) { expect(x).toBeDefined(); }\nit("is present", () => { present(make()); });`;
+    expect(scan(source)).toEqual([
+      `${PATH}:2: WEAK_ASSERTIONS_ONLY: "is present" asserts only toBeDefined/toBeTruthy/not.toThrow`,
+    ]);
+  });
+});
+
+describe("presence matchers that do pin behaviour", () => {
+  it("accepts toBeDefined after .resolves, where a rejection fails the test", () => {
+    expect(scan(`it("loads", async () => { await expect(load()).resolves.toBeDefined(); });`)).toEqual([]);
+  });
+
+  it("refuses toBeDefined on an awaited value without .resolves", () => {
+    expect(scan(`it("loads", async () => { expect(await load()).toBeDefined(); });`)).toEqual([
+      `${PATH}:1: WEAK_ASSERTIONS_ONLY: "loads" asserts only toBeDefined/toBeTruthy/not.toThrow`,
+    ]);
+  });
+
+  it.each([["find"], ["findLast"]])("accepts toBeDefined on a %s result, which is undefined when absent", (method) => {
+    const source = `it("has the row", () => { expect(rows.${method}((r) => r.id === 1)).toBeDefined(); });`;
+    expect(scan(source)).toEqual([]);
+  });
+
+  it("refuses toBeDefined on a filter result, which is always defined", () => {
+    expect(scan(`it("has rows", () => { expect(rows.filter((r) => r.id === 1)).toBeDefined(); });`)).toEqual([
+      `${PATH}:1: WEAK_ASSERTIONS_ONLY: "has rows" asserts only toBeDefined/toBeTruthy/not.toThrow`,
+    ]);
+  });
+});
+
 describe("snapshots, skips and self-mocks", () => {
   it("refuses a snapshot", () => {
     expect(scan(`it("renders", () => { expect(render(<Widget />).container).toMatchSnapshot(); });`)).toEqual([

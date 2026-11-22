@@ -71,6 +71,17 @@ export function resolveUnlockError(
   }
 }
 
+// Blocked storage (sandboxed iframe, disabled site data) throws on access; a
+// missing flag only means no auto-unlock, so it must not take the screen down.
+function readWebAuthnSignInFlag(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return sessionStorage.getItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function VaultLockScreen() {
   const t = useTranslations("Vault");
   const tw = useTranslations("WebAuthn");
@@ -85,6 +96,18 @@ export function VaultLockScreen() {
   const [hasPrfPasskeys, setHasPrfPasskeys] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
 
+  const showUnlockError = useCallback(
+    (err: unknown, msgs: Parameters<typeof resolveUnlockError>[1]) => {
+      const resolved = resolveUnlockError(err, msgs);
+      if (resolved.kind === "sessionExpired") {
+        setSessionExpired(true);
+      } else {
+        setError(resolved.message);
+      }
+    },
+    [],
+  );
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passphrase) return;
@@ -98,17 +121,12 @@ export function VaultLockScreen() {
         setPassphrase("");
       }
     } catch (err) {
-      const resolved = resolveUnlockError(err, {
+      showUnlockError(err, {
         lockedUntil: (lockedUntil) => formatLockedUntil(lockedUntil, t),
         rateLimited: t("rateLimited"),
         unavailable: t("retryLater"),
         fallback: t("unlockError"),
       });
-      if (resolved.kind === "sessionExpired") {
-        setSessionExpired(true);
-      } else {
-        setError(resolved.message);
-      }
       setPassphrase("");
     } finally {
       setLoading(false);
@@ -134,24 +152,16 @@ export function VaultLockScreen() {
         setError(tw("unlockError"));
       }
     } catch (err) {
-      const resolved = resolveUnlockError(err, passkeyUnlockMessages);
-      if (resolved.kind === "sessionExpired") {
-        setSessionExpired(true);
-      } else {
-        setError(resolved.message);
-      }
+      showUnlockError(err, passkeyUnlockMessages);
     } finally {
       setPasskeyLoading(false);
     }
-  }, [unlockWithPasskey, tw, passkeyUnlockMessages]);
+  }, [unlockWithPasskey, tw, passkeyUnlockMessages, showUnlockError]);
 
   // Track whether we arrived via WebAuthn sign-in.
   // The ref persists across renders so we don't lose the flag while
   // waiting for the hasPrfPasskeys query to resolve.
-  const webauthnSignInRef = useRef(
-    typeof window !== "undefined" &&
-      sessionStorage.getItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN) === "1",
-  );
+  const webauthnSignInRef = useRef(readWebAuthnSignInFlag());
 
   // Auto-unlock vault after WebAuthn sign-in, once the PRF passkey check below
   // has settled. If PRF output was captured during sign-in (single-ceremony
@@ -173,21 +183,14 @@ export function VaultLockScreen() {
           .then((ok) => {
             if (!ok) setError(tw("unlockError"));
           })
-          .catch((err) => {
-            const resolved = resolveUnlockError(err, passkeyUnlockMessages);
-            if (resolved.kind === "sessionExpired") {
-              setSessionExpired(true);
-            } else {
-              setError(resolved.message);
-            }
-          })
+          .catch((err) => showUnlockError(err, passkeyUnlockMessages))
           .finally(() => setPasskeyLoading(false));
       }
       // If sign-in did not produce PRF output (authenticator doesn't support PRF),
       // do NOT auto-trigger a separate ceremony — the user can manually unlock
       // with passphrase or click the passkey unlock button.
     };
-  }, [unlockWithStoredPrf, tw, passkeyUnlockMessages]);
+  }, [unlockWithStoredPrf, tw, passkeyUnlockMessages, showUnlockError]);
 
   // Check if user has a passkey that can unlock now: PRF-capable AND holding
   // the server-side wrapping. A passkey registered while the vault was locked,

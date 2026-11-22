@@ -875,7 +875,7 @@ export function ServiceAccountCard() {
             <Button variant="outline" onClick={() => handleCreateOpenChange(false)}>
               {tCommon("cancel")}
             </Button>
-            <Button onClick={handleCreate}disabled={creating || !createName.trim()}>
+            <Button onClick={handleCreate} disabled={creating || !createName.trim()}>
               {creating && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
               {tCommon("create")}
             </Button>

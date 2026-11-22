@@ -423,6 +423,46 @@ describe("OperatorTokenCard", () => {
     expect(mockToastError).toHaveBeenCalledWith("reauthCredentialMismatch");
   });
 
+  it("routes to RecentSessionRequiredDialog when the session expired before the ceremony (UNAUTHORIZED)", async () => {
+    mockFetchApi
+      .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+      .mockResolvedValueOnce({
+        ok: false,
+        json: async () => ({ error: "OPERATOR_TOKEN_STALE_SESSION" }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ canPasskeyReauth: true }),
+      });
+    mockReauthenticateWithPasskey.mockResolvedValueOnce({
+      ok: false,
+      error: "UNAUTHORIZED",
+    });
+
+    render(<OperatorTokenCard />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+
+    const input = await screen.findByPlaceholderText("tokenNamePlaceholder");
+    fireEvent.change(input, { target: { value: "expired-test" } });
+
+    const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+    fireEvent.click(createButtons[createButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByText("reauthTitle")).toBeInTheDocument();
+    });
+
+    const reauthButtons = await screen.findAllByText("reauthAction");
+    fireEvent.click(reauthButtons[reauthButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("reauthTitle")).not.toBeInTheDocument();
+    expect(mockToastError).toHaveBeenCalledWith("reauthSessionExpired");
+  });
+
   it("falls back to local networkError for an unrecognized API error code", async () => {
     mockFetchApi
       .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })

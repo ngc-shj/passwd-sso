@@ -39,6 +39,7 @@ import { MCP_SCOPES, isAcceptableRedirectUri } from "@/lib/constants/auth/mcp";
 import { fetchApi } from "@/lib/url-helpers";
 import { readApiErrorBody, getApiErrorDetail } from "@/lib/http/read-api-error-body";
 import { formatDateTime } from "@/lib/format/format-datetime";
+import { parseLines } from "@/lib/format/parse-lines";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
@@ -170,13 +171,7 @@ export function McpClientCard() {
     fetchClients();
   }, [fetchClients]);
 
-  const parseUris = (raw: string): string[] =>
-    raw
-      .split("\n")
-      .map((u) => u.trim())
-      .filter(Boolean);
-
-  const createUris = parseUris(createRedirectUris);
+  const createUris = parseLines(createRedirectUris);
   const createFormReady =
     !!createName.trim() &&
     createUris.length > 0 &&
@@ -198,7 +193,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
       setCreateNameError(t("mcpNameRequired"));
       valid = false;
     }
-    const uris = parseUris(createRedirectUris);
+    const uris = parseLines(createRedirectUris);
     if (uris.length === 0) {
       setCreateUriError(t("mcpRedirectUriRequired"));
       valid = false;
@@ -297,7 +292,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
       setEditNameError(t("mcpNameRequired"));
       valid = false;
     }
-    const uris = parseUris(editRedirectUris);
+    const uris = parseLines(editRedirectUris);
     if (uris.length > 0 && !validateRedirectUris(uris)) {
       setEditUriError(t("mcpRedirectUriInvalid"));
       valid = false;

@@ -23,6 +23,16 @@ export function useEmergencyInviteResponse(token: string) {
   const { status: vaultStatus, encryptionKey } = useVault();
   const [loading, setLoading] = useState(false);
 
+  const showResponseError = async (res: Response) => {
+    const body = await readApiErrorBody(res);
+    // Token-based NOT_FOUND means invalid/expired invitation (better UX message)
+    if (body?.error === API_ERROR.NOT_FOUND) {
+      toast.error(t("invalidInvitation"));
+    } else {
+      toast.error(t(eaErrorToI18nKey(body?.error)));
+    }
+  };
+
   const handleAccept = async () => {
     if (!encryptionKey) {
       toast.error(t("vaultUnlockRequired"));
@@ -54,13 +64,7 @@ export function useEmergencyInviteResponse(token: string) {
       });
 
       if (!res.ok) {
-        const body = await readApiErrorBody(res);
-        // Token-based NOT_FOUND means invalid/expired invitation (better UX message)
-        if (body?.error === API_ERROR.NOT_FOUND) {
-          toast.error(t("invalidInvitation"));
-        } else {
-          toast.error(t(eaErrorToI18nKey(body?.error)));
-        }
+        await showResponseError(res);
         return;
       }
 
@@ -83,12 +87,7 @@ export function useEmergencyInviteResponse(token: string) {
       });
 
       if (!res.ok) {
-        const body = await readApiErrorBody(res);
-        if (body?.error === API_ERROR.NOT_FOUND) {
-          toast.error(t("invalidInvitation"));
-        } else {
-          toast.error(t(eaErrorToI18nKey(body?.error)));
-        }
+        await showResponseError(res);
         return;
       }
 

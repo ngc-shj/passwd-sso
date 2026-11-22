@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Lock, Loader2, AlertTriangle } from "lucide-react";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { SHARE_PASSWORD_MAX_ATTEMPTS } from "@/lib/validations/common";
 import { fetchApi } from "@/lib/url-helpers";
@@ -24,8 +24,8 @@ export function SharePasswordGate({
   onVerified,
   error: externalError,
 }: SharePasswordGateProps) {
+  // Share only: the public /s/ layout loads no other namespace (NS_PUBLIC_SHARE).
   const t = useTranslations("Share");
-  const tApi = useTranslations("ApiErrors");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,11 +57,18 @@ export function SharePasswordGate({
 
       if (!res.ok) {
         const err = await readApiErrorBody(res);
-        setAttempts((a) => a + 1);
-        if (err?.error === "RATE_LIMIT_EXCEEDED") {
-          setError(t("tooManyAttempts"));
-        } else {
+        // Only a refused password or the rate limit counts toward the cap; a
+        // gone link or a server fault says nothing about the password.
+        if (err?.error === API_ERROR.SHARE_PASSWORD_INCORRECT) {
+          setAttempts((a) => a + 1);
           setError(t("wrongPassword"));
+        } else if (err?.error === API_ERROR.RATE_LIMIT_EXCEEDED) {
+          setAttempts((a) => a + 1);
+          setError(t("tooManyAttempts"));
+        } else if (res.status === 404) {
+          setError(t("linkUnavailable"));
+        } else {
+          setError(t("verifyRetryLater"));
         }
         return;
       }
@@ -75,7 +82,7 @@ export function SharePasswordGate({
       }
       onVerified(data.accessToken);
     } catch {
-      setError(tApi(apiErrorToI18nKey("unknownError")));
+      setError(t("verifyRetryLater"));
     } finally {
       setLoading(false);
     }

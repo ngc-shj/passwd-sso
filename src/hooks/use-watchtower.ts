@@ -152,7 +152,19 @@ function toWatchtowerEntryRef(entry: DecryptedEntry): WatchtowerEntryRef {
 // ─── Hook ────────────────────────────────────────────────────
 
 function readStoredLastAnalyzedAt(): string | null {
-  return window.localStorage.getItem(LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT);
+  try {
+    return window.localStorage.getItem(LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT);
+  } catch {
+    return null;
+  }
+}
+
+function storeLastAnalyzedAt(startedAt: number): void {
+  try {
+    window.localStorage.setItem(LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT, String(startedAt));
+  } catch {
+    // localStorage unavailable
+  }
 }
 
 function parseStoredLastAnalyzedAt(stored: string | null): number | null {
@@ -280,10 +292,7 @@ export function useWatchtower(
               ? Date.now() + retryAfterSec * MS_PER_SECOND - WATCHTOWER_COOLDOWN_MS
               : Date.now();
           setLastAnalyzedAt(startedAt);
-          window.localStorage.setItem(
-            LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-            String(startedAt)
-          );
+          storeLastAnalyzedAt(startedAt);
         }
         return;
       }
@@ -292,10 +301,7 @@ export function useWatchtower(
     if (!bypassCooldown) {
       const startedAt = Date.now();
       setLastAnalyzedAt(startedAt);
-      window.localStorage.setItem(
-        LOCAL_STORAGE_KEY.WATCHTOWER_LAST_ANALYZED_AT,
-        String(startedAt)
-      );
+      storeLastAnalyzedAt(startedAt);
     }
 
     setLoading(true);

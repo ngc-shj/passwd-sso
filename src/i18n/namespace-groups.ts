@@ -120,6 +120,9 @@ export const NS_RECOVERY: readonly Namespace[] = [
 export const NS_VAULT_RESET: readonly Namespace[] = [
   ...NS_GLOBAL,
   "VaultReset",
+  // Auth is required for the inline step-up reauth dialogs (useInlineReauth):
+  // the reset route is step-up-gated.
+  "Auth",
 ];
 
 /** Privacy policy page namespaces. */

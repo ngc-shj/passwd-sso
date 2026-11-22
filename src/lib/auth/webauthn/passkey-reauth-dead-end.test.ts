@@ -3,6 +3,10 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { passkeyReauthDeadEndKey } from "./passkey-reauth-dead-end";
 
 describe("passkeyReauthDeadEndKey", () => {
+  it("names the sign-in-again message for a session that has expired", () => {
+    expect(passkeyReauthDeadEndKey(API_ERROR.UNAUTHORIZED)).toBe("reauthSessionExpired");
+  });
+
   it("names the sign-in-again message for a session without a usable binding", () => {
     expect(passkeyReauthDeadEndKey(API_ERROR.PASSKEY_REAUTH_UNAVAILABLE)).toBe("reauthUnavailable");
   });
