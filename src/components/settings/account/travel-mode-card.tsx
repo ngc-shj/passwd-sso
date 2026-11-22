@@ -51,10 +51,14 @@ export function TravelModeCard() {
 
   const handleEnable = async () => {
     setBusy(true);
-    const ok = await enable();
+    const result = await enable();
     setBusy(false);
     setShowEnableConfirm(false);
-    if (!ok) {
+    if (result.success) return;
+    if (result.error === API_ERROR.UNAUTHORIZED) {
+      // The session expired: retrying cannot succeed without a fresh sign-in.
+      setSessionExpired(true);
+    } else {
       toast.error(t("enableFailed"));
     }
   };

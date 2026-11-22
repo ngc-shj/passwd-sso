@@ -42,6 +42,22 @@ const CLIPBOARD_RESTRICTIONS = [
   "CallExpression[callee.object.property.name='clipboardData'][callee.property.name='setData']",
 ].map((selector) => ({ selector, message: CLIPBOARD_MESSAGE }));
 
+// copySecretWithoutClear is restricted by import name under
+// no-restricted-imports, which a dynamic import() or a require() of the module
+// gets past — so those forms of the module are refused outright. The `.` in the
+// pattern stands for the path separator (esquery regexes cannot contain `/`).
+// A string-literal and a static template-literal specifier are matched; a
+// computed specifier is not, and stays with review.
+const COPY_SECRET_MODULE = "/lib.clipboard.copy-secret(\\.ts)?$/";
+const COPY_SECRET_DYNAMIC_MESSAGE =
+  "Import @/lib/clipboard/copy-secret statically: a dynamic import() or require() reaches " +
+  "copySecretWithoutClear past its import restriction.";
+const COPY_SECRET_DYNAMIC_RESTRICTIONS = [
+  `ImportExpression[source.value=${COPY_SECRET_MODULE}]`,
+  `ImportExpression[source.quasis.length=1][source.quasis.0.value.cooked=${COPY_SECRET_MODULE}]`,
+  `CallExpression[callee.name='require'][arguments.0.value=${COPY_SECRET_MODULE}]`,
+].map((selector) => ({ selector, message: COPY_SECRET_DYNAMIC_MESSAGE }));
+
 // A toast is user-facing text, so its first argument must come from a
 // translator: a string or template literal there — directly, or as an arm of a
 // `?:`, `??` or `||` — ships untranslated.
@@ -102,11 +118,13 @@ const eslintConfig = defineConfig([
   // one's for every file both match, so each block below restates every set
   // that must still apply to its files:
   //   1. src/** and scripts/**, tests included: INSENSITIVE_EQUALS.
-  //   2. Non-test src/** outside src/lib/clipboard/**, plus the root runtime
-  //      files: INSENSITIVE_EQUALS + clipboard + toast.
+  //   2. Non-test src/** except copy-secret.ts, plus the root runtime files:
+  //      INSENSITIVE_EQUALS + clipboard + copy-secret dynamic import + toast.
   //   3. Non-test components/hooks: fetch + INSENSITIVE_EQUALS + clipboard +
-  //      toast.
-  // src/lib/clipboard/** is the one sanctioned writer, so it keeps block 1 only.
+  //      copy-secret dynamic import + toast.
+  // src/lib/clipboard/copy-secret.ts is the one sanctioned writer, so it keeps
+  // block 1 only. The rest of src/lib/clipboard/ (the outcome reporter, the
+  // cancellation sentinel) writes nothing and gets the full set like any file.
   // copySecretWithoutClear is restricted under no-restricted-imports — a
   // different rule key, so it does not take part in this replacement.
   // scripts/__tests__/eslint-clipboard-and-toast.test.mjs pins every set on
@@ -119,12 +137,13 @@ const eslintConfig = defineConfig([
   },
   {
     files: ["src/**/*.{ts,tsx}", ...ROOT_RUNTIME_FILES],
-    ignores: [...NON_TEST_IGNORES, "src/lib/clipboard/**"],
+    ignores: [...NON_TEST_IGNORES, "src/lib/clipboard/copy-secret.ts"],
     rules: {
       "no-restricted-syntax": [
         "error",
         INSENSITIVE_EQUALS_RESTRICTION,
         ...CLIPBOARD_RESTRICTIONS,
+        ...COPY_SECRET_DYNAMIC_RESTRICTIONS,
         TOAST_LITERAL_RESTRICTION,
       ],
     },
@@ -157,6 +176,7 @@ const eslintConfig = defineConfig([
         },
         INSENSITIVE_EQUALS_RESTRICTION,
         ...CLIPBOARD_RESTRICTIONS,
+        ...COPY_SECRET_DYNAMIC_RESTRICTIONS,
         TOAST_LITERAL_RESTRICTION,
       ],
     },
@@ -164,8 +184,9 @@ const eslintConfig = defineConfig([
   {
     // The non-clearing copy is for a value the user is told to keep. Restricted
     // by import name, so an alias (`as c`) and a namespace import are caught
-    // too; the `**/` group catches relative specifiers. A dynamic import() is
-    // not visible to this rule.
+    // too; the `**/` group catches relative specifiers. A dynamic import() or
+    // require() is not visible to this rule; COPY_SECRET_DYNAMIC_RESTRICTIONS
+    // refuses those forms under no-restricted-syntax instead.
     files: ["src/**/*.{ts,tsx}", ...ROOT_RUNTIME_FILES],
     ignores: NON_TEST_IGNORES,
     rules: {

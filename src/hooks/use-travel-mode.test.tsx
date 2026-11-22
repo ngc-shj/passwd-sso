@@ -8,7 +8,12 @@ vi.mock("@/lib/url-helpers", () => ({
   fetchApi: vi.fn(),
 }));
 
-import { TravelModeProvider, useTravelMode, type TravelModeDisableResult } from "@/hooks/use-travel-mode";
+import {
+  TravelModeProvider,
+  useTravelMode,
+  type TravelModeDisableResult,
+  type TravelModeEnableResult,
+} from "@/hooks/use-travel-mode";
 import { fetchApi } from "@/lib/url-helpers";
 
 const fetchApiMock = vi.mocked(fetchApi);
@@ -77,12 +82,12 @@ describe("useTravelMode", () => {
     const { result } = renderHook(() => useTravelMode(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    let ok = false;
+    let outcome: TravelModeEnableResult = { success: false };
     await act(async () => {
-      ok = await result.current.enable();
+      outcome = await result.current.enable();
     });
 
-    expect(ok).toBe(true);
+    expect(outcome).toEqual({ success: true });
     expect(fetchApiMock).toHaveBeenLastCalledWith(
       "/api/travel-mode/enable",
       expect.objectContaining({ method: "POST" }),
@@ -91,7 +96,24 @@ describe("useTravelMode", () => {
     expect(result.current.activatedAt).not.toBeNull();
   });
 
-  it("enable() returns false on non-ok response without throwing", async () => {
+  it("enable() returns the route's error code on a refusal without throwing", async () => {
+    fetchApiMock
+      .mockResolvedValueOnce(mockResponse({ active: false, activatedAt: null }))
+      .mockResolvedValueOnce(mockResponse({ error: "UNAUTHORIZED" }, { ok: false, status: 401 }));
+
+    const { result } = renderHook(() => useTravelMode(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let outcome: TravelModeEnableResult = { success: true };
+    await act(async () => {
+      outcome = await result.current.enable();
+    });
+
+    expect(outcome).toEqual({ success: false, error: "UNAUTHORIZED" });
+    expect(result.current.active).toBe(false);
+  });
+
+  it("enable() reports the HTTP status when the refusal carries no error code", async () => {
     fetchApiMock
       .mockResolvedValueOnce(mockResponse({ active: false, activatedAt: null }))
       .mockResolvedValueOnce(mockResponse({}, { ok: false, status: 500 }));
@@ -99,16 +121,16 @@ describe("useTravelMode", () => {
     const { result } = renderHook(() => useTravelMode(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    let ok = true;
+    let outcome: TravelModeEnableResult = { success: true };
     await act(async () => {
-      ok = await result.current.enable();
+      outcome = await result.current.enable();
     });
 
-    expect(ok).toBe(false);
+    expect(outcome).toEqual({ success: false, error: "HTTP 500" });
     expect(result.current.active).toBe(false);
   });
 
-  it("enable() returns false on network error", async () => {
+  it("enable() returns NETWORK_ERROR on a network failure", async () => {
     fetchApiMock
       .mockResolvedValueOnce(mockResponse({ active: false, activatedAt: null }))
       .mockRejectedValueOnce(new Error("offline"));
@@ -116,12 +138,12 @@ describe("useTravelMode", () => {
     const { result } = renderHook(() => useTravelMode(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    let ok = true;
+    let outcome: TravelModeEnableResult = { success: true };
     await act(async () => {
-      ok = await result.current.enable();
+      outcome = await result.current.enable();
     });
 
-    expect(ok).toBe(false);
+    expect(outcome).toEqual({ success: false, error: "NETWORK_ERROR" });
   });
 
   it("disable() returns success and clears active on 200", async () => {

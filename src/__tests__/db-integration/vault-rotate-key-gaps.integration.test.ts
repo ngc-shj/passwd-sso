@@ -307,8 +307,9 @@ describe("vault rotation gaps — invalidateUserSessions(KEY_ROTATION) (real DB 
       );
     });
 
+    // Same options as POST /api/vault/rotate-key.
     const result = await invalidateUserSessions(userId, {
-      tenantId,
+      allTenants: true,
       reason: "KEY_ROTATION",
     });
 

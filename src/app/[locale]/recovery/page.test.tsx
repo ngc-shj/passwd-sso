@@ -218,6 +218,24 @@ describe("RecoveryPage", () => {
     expect(mockSetHasRecoveryKey).not.toHaveBeenCalled();
   }, 15_000);
 
+  it("tells the user the reset succeeded but other devices stay signed in on SESSION_INVALIDATE_FAILED", async () => {
+    await reachNewPassphraseStep();
+    mockFetchApi.mockResolvedValueOnce(json({ error: "SESSION_INVALIDATE_FAILED" }, 500));
+
+    fillPassphrases(NEW_PASSPHRASE, NEW_PASSPHRASE);
+    fireEvent.click(screen.getByRole("button", { name: "resetPassphrase" }));
+
+    expect(await screen.findByRole("alert", {}, { timeout: 8000 })).toHaveTextContent(
+      "sessionInvalidateFailed",
+    );
+    expect(screen.queryByRole("button", { name: "resetPassphrase" })).not.toBeInTheDocument();
+    expect(mockSetHasRecoveryKey).toHaveBeenCalledWith(true);
+    expect(mockHardNavigate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "continueToDashboard" }));
+    expect(mockHardNavigate).toHaveBeenCalledWith("/ja/dashboard");
+  }, 15_000);
+
   it("shows the unknown error when the wrapped key cannot be unwrapped", async () => {
     mockFetchApi.mockResolvedValueOnce(
       json({ ...JSON.parse(await verifyResponse().text()), authTag: "00".repeat(16) }),

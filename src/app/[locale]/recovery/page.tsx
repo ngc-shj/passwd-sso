@@ -8,12 +8,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { STRENGTH_COLORS } from "@/components/vault/passphrase-strength";
 import { Link } from "@/i18n/navigation";
-import { ArrowLeft, Loader2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Loader2, ShieldCheck } from "lucide-react";
 
 export default function RecoveryPage() {
   const tCommon = useTranslations("Common");
   const t = useTranslations("Recovery");
   const tVault = useTranslations("Vault");
+  const tApi = useTranslations("ApiErrors");
   const {
     step,
     recoveryKeyInput,
@@ -28,6 +29,7 @@ export default function RecoveryPage() {
     isValid,
     handleVerify,
     handleReset,
+    continueToDashboard,
   } = useRecoveryFlow();
 
   return (
@@ -140,6 +142,21 @@ export default function RecoveryPage() {
               {loading ? t("resetting") : t("resetPassphrase")}
             </Button>
           </form>
+        )}
+
+        {step === "reset-invalidation-failed" && (
+          <div className="space-y-4 rounded-lg border bg-card p-6 shadow-sm">
+            <div
+              role="alert"
+              className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200"
+            >
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>{tApi("sessionInvalidateFailed")}</span>
+            </div>
+            <Button type="button" className="w-full" onClick={continueToDashboard}>
+              {t("continueToDashboard")}
+            </Button>
+          </div>
         )}
       </div>
     </div>

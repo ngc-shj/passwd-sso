@@ -6,6 +6,7 @@ import { CopyCancelledError } from "./copy-cancelled-error";
 import { installClipboard, uninstallClipboard } from "@/__tests__/helpers/mock-clipboard";
 import {
   COPY_OUTCOME,
+  REFOCUS_RETRY_WINDOW_MS,
   copySecretToClipboard,
   copySecretWithoutClear,
 } from "./copy-secret";
@@ -344,5 +345,49 @@ describe("copySecretToClipboard — the refocus retry after a failed clear", () 
     await vi.advanceTimersByTimeAsync(0);
     expect(clip.writeText).toHaveBeenCalledTimes(1);
     expect(clip.readText).toHaveBeenCalledTimes(1);
+  });
+
+  describe("the retry window", () => {
+    it("still blanks on a focused return inside the window", async () => {
+      const { state } = await copyAndFailTheTimedClear();
+
+      // Not `- 1`: under fake timers vi.waitFor advances the clock on each poll,
+      // so the helper's wait has already spent part of the window.
+      await vi.advanceTimersByTimeAsync(REFOCUS_RETRY_WINDOW_MS - CLIPBOARD_CLEAR_TIMEOUT_MS);
+      window.dispatchEvent(new Event("focus"));
+
+      await vi.waitFor(() => expect(state.content).toBe(""));
+    });
+
+    it("makes no attempt on a focused return after the window has passed", async () => {
+      const { state, clip } = await copyAndFailTheTimedClear();
+
+      await vi.advanceTimersByTimeAsync(REFOCUS_RETRY_WINDOW_MS);
+      window.dispatchEvent(new Event("focus"));
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(clip.readText).not.toHaveBeenCalled();
+      expect(clip.writeText).not.toHaveBeenCalled();
+      expect(state.content).toBe(SECRET);
+    });
+
+    it("removes the focus listener it registered when the window closes", async () => {
+      const removeSpy = vi.spyOn(window, "removeEventListener");
+      await copyAndFailTheTimedClear();
+      const registered = addSpy.mock.calls.find(([type]) => type === "focus")?.[1];
+
+      await vi.advanceTimersByTimeAsync(REFOCUS_RETRY_WINDOW_MS);
+
+      expect(registered).toEqual(expect.any(Function));
+      expect(removeSpy).toHaveBeenCalledWith("focus", registered);
+    });
+
+    it("leaves no expiry timer behind once the retry has run", async () => {
+      const { state } = await copyAndFailTheTimedClear();
+      window.dispatchEvent(new Event("focus"));
+      await vi.waitFor(() => expect(state.content).toBe(""));
+
+      expect(vi.getTimerCount()).toBe(0);
+    });
   });
 });

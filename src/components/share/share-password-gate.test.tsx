@@ -66,6 +66,48 @@ describe("SharePasswordGate", () => {
     );
   });
 
+  it("masks the pasted access password", () => {
+    render(<SharePasswordGate token="t1" onVerified={vi.fn()} />);
+    const input = screen.getByPlaceholderText("pasteOnly") as HTMLInputElement;
+    fireEvent.paste(input, pasteEvent("correct-password"));
+
+    expect(input).toHaveValue("correct-password");
+    expect(input).toHaveAttribute("type", "password");
+  });
+
+  it("clears the access password once it is verified", async () => {
+    const onVerified = vi.fn();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ accessToken: "at-1" }),
+    } as unknown as Response);
+    render(<SharePasswordGate token="t1" onVerified={onVerified} />);
+    const input = screen.getByPlaceholderText("pasteOnly") as HTMLInputElement;
+    fireEvent.paste(input, pasteEvent("correct-password"));
+    expect(input).toHaveValue("correct-password");
+
+    fireEvent.click(screen.getByRole("button", { name: /unlock/ }));
+
+    await waitFor(() => expect(onVerified).toHaveBeenCalledWith("at-1"));
+    expect(input).toHaveValue("");
+  });
+
+  it("keeps a password the server could not check, so the visitor can retry it", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 503,
+      json: () => Promise.resolve({ error: "SERVICE_UNAVAILABLE" }),
+    } as unknown as Response);
+    render(<SharePasswordGate token="t1" onVerified={vi.fn()} />);
+    const input = screen.getByPlaceholderText("pasteOnly") as HTMLInputElement;
+    fireEvent.paste(input, pasteEvent("correct-password"));
+
+    fireEvent.click(screen.getByRole("button", { name: /unlock/ }));
+
+    await waitFor(() => expect(screen.getByText("verifyRetryLater")).toBeInTheDocument());
+    expect(input).toHaveValue("correct-password");
+  });
+
   it("§Sec-2: a refused password renders wrongPassword key only (sentinel never echoed)", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,

@@ -135,6 +135,12 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
             />
             <CopyButton getValue={() => issuedLink.url} />
           </div>
+          {/* The field is the recovery path when the auto-copy was refused, so
+              it stays until the user says they are done with it rather than
+              on a timer that could hide it before it is copied. */}
+          <Button variant="outline" size="sm" onClick={() => setIssuedLink(null)}>
+            {t("inviteLinkDone")}
+          </Button>
         </div>
       )}
     </section>

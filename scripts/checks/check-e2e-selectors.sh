@@ -136,7 +136,7 @@ if [ -n "$e2e_class_selectors" ]; then
           # Verify it's actually gone (not just moved)
           added_with_class=$(git diff "${BASE}...HEAD" -- $changed_src \
             | grep -E '^\+.*className=.*\b'"${cls}"'\b' \
-            | grep -v '^\+\+\+' || true)
+            | grep -vE '^\+\+\+' || true)
           if [ -z "$added_with_class" ]; then
             ref_files=$(grep -rl "\\.$cls" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
             warn "CSS class '$cls' removed from source but used in E2E selector '$selector' in: $ref_files"
@@ -166,7 +166,7 @@ if [ -n "$e2e_testids" ]; then
     if [ -n "$removed" ]; then
       added=$(git diff "${BASE}...HEAD" \
         | grep -E '^\+.*data-testid=.*'"$testid" \
-        | grep -v '^\+\+\+' || true)
+        | grep -vE '^\+\+\+' || true)
       if [ -z "$added" ]; then
         ref_files=$(grep -rl "$testid" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
         warn "data-testid='$testid' removed from source but used in E2E: $ref_files"
@@ -259,7 +259,7 @@ if [ -n "$e2e_aria_names" ] && [ -n "$changed_src" ]; then
       if grep -qi "$name" 2>/dev/null <<<"$removed_aria"; then
         added_aria=$(git diff "${BASE}...HEAD" -- $changed_src \
           | grep -E '^\+.*aria-label=.*'"$name" \
-          | grep -v '^\+\+\+' || true)
+          | grep -vE '^\+\+\+' || true)
         if [ -z "$added_aria" ]; then
           ref_files=$(grep -ril "$name" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
           warn "aria-label containing '$name' removed from source but used in E2E: $ref_files"
@@ -292,7 +292,7 @@ if [ -n "$e2e_ids" ] && [ -n "$changed_src" ]; then
       if grep -q "\"${id}\"" 2>/dev/null <<<"$removed_ids"; then
         added_id=$(git diff "${BASE}...HEAD" -- $changed_src \
           | grep -E '^\+.*\bid=.*"'"${id}"'"' \
-          | grep -v '^\+\+\+' || true)
+          | grep -vE '^\+\+\+' || true)
         if [ -z "$added_id" ]; then
           ref_files=$(grep -rl "#${id}" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
           warn "id='$id' removed from source but used as #$id in E2E: $ref_files"
@@ -321,7 +321,7 @@ if [ -n "$e2e_slots" ]; then
     if [ -n "$removed" ]; then
       added=$(git diff "${BASE}...HEAD" \
         | grep -E '^\+.*data-slot=.*'"$slot" \
-        | grep -v '^\+\+\+' || true)
+        | grep -vE '^\+\+\+' || true)
       if [ -z "$added" ]; then
         ref_files=$(grep -rl "data-slot.*$slot" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
         warn "data-slot='$slot' removed from source but used in E2E: $ref_files"

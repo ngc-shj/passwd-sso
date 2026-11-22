@@ -8,18 +8,19 @@
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import {
   MEMBER_PATHSPECS,
+  checkMemberImports,
   checkScope,
   checkSummary,
   checkThresholdKeys,
   listMembers,
   scopeMatcher,
 } from "../checks/lib/coverage-members.mjs";
-import { checkCoverageSummaryFile } from "../checks/check-coverage-scope.mjs";
+import { checkCoverageScope, checkCoverageSummaryFile } from "../checks/check-coverage-scope.mjs";
 
 const REPO = resolve(import.meta.dirname, "../..");
 const GATE = resolve(REPO, "scripts/checks/check-coverage-scope.mjs");
@@ -164,6 +165,10 @@ describe("config layer: the real vitest.config.ts", () => {
     }
   });
 
+  it("has no member importing an unmeasured file outside src/", () => {
+    expect(checkMemberImports(realMembers)).toEqual([]);
+  });
+
   it("drops thresholds on a coverage shard, so the checks must not read that view", async () => {
     const cfg = await loadConfig("1");
     expect(cfg.default.test.coverage.thresholds).toBeUndefined();
@@ -218,6 +223,92 @@ describe("checkThresholdKeys", () => {
 
   it("refuses an empty thresholds object", () => {
     expect(() => checkThresholdKeys({}, realMembers)).toThrow(/COVERAGE_THRESHOLDS_EMPTY/);
+  });
+});
+
+/** A fixture tree under a fresh tmp root; returns the root. */
+function writeTree(files) {
+  tmp ??= mkdtempSync(join(tmpdir(), "coverage-scope-"));
+  for (const [rel, content] of Object.entries(files)) {
+    mkdirSync(dirname(join(tmp, rel)), { recursive: true });
+    writeFileSync(join(tmp, rel), content);
+  }
+  return tmp;
+}
+
+describe("checkMemberImports", () => {
+  const helper = { "root-helper.ts": "export const h = 1;\n" };
+
+  it("accepts imports of src/, the @/ alias, packages and a listed root member", () => {
+    const root = writeTree({
+      "instrumentation-client.ts":
+        'import * as Sentry from "@sentry/nextjs";\nimport { a } from "@/lib/a";\nimport "./sentry.client.config";\n' +
+        '// import "./root-helper";\nconst s = "import \'./root-helper\'";\n',
+      "sentry.client.config.ts": "export {};\n",
+      "src/lib/a.ts": 'import { b } from "../b";\nexport const a = b;\n',
+      "src/b.ts": "export const b = 1;\n",
+      ...helper,
+    });
+    expect(
+      checkMemberImports(["instrumentation-client.ts", "sentry.client.config.ts", "src/lib/a.ts", "src/b.ts"], root),
+    ).toEqual([]);
+  });
+
+  it.each([
+    ["a static import", 'import { h } from "./root-helper";'],
+    ["a side-effect import", 'import "./root-helper";'],
+    ["a re-export", 'export * from "./root-helper";'],
+    ["a dynamic import", 'export const m = import("./root-helper");'],
+    ["a require", 'export const m = require("./root-helper");'],
+  ])("refuses a root entry pulling in an unlisted root helper through %s", (_label, line) => {
+    const root = writeTree({ "proxy.ts": `${line}\n`, ...helper });
+    expect(checkMemberImports(["proxy.ts"], root)).toEqual([
+      'COVERAGE_IMPORT_UNMEASURED: proxy.ts imports "./root-helper" (root-helper.ts), outside src/ and not a coverage member',
+    ]);
+  });
+
+  it("refuses a src/ member importing an unlisted file above src/", () => {
+    const root = writeTree({ "src/instrumentation.ts": 'import "../root-helper";\n', ...helper });
+    expect(checkMemberImports(["src/instrumentation.ts"], root)).toEqual([
+      'COVERAGE_IMPORT_UNMEASURED: src/instrumentation.ts imports "../root-helper" (root-helper.ts), outside src/ and not a coverage member',
+    ]);
+  });
+
+  it("refuses an @/ specifier that climbs out of src/", () => {
+    const root = writeTree({ "src/a.ts": 'import "@/../root-helper";\n', ...helper });
+    expect(checkMemberImports(["src/a.ts"], root)).toEqual([
+      'COVERAGE_IMPORT_UNMEASURED: src/a.ts imports "@/../root-helper" (root-helper.ts), outside src/ and not a coverage member',
+    ]);
+  });
+
+  it("refuses a relative import outside src/ that resolves to no file", () => {
+    const root = writeTree({ "proxy.ts": 'import "./no-such-helper";\n' });
+    expect(checkMemberImports(["proxy.ts"], root)).toEqual([
+      'COVERAGE_IMPORT_UNRESOLVED: proxy.ts imports "./no-such-helper", which resolves to no file',
+    ]);
+  });
+
+  it("refuses a member it cannot read", () => {
+    const root = writeTree({});
+    expect(checkMemberImports(["proxy.ts"], root)).toEqual([expect.stringMatching(/^COVERAGE_IMPORT_UNREADABLE: proxy\.ts: /)]);
+  });
+
+  // The gate's own entry point, so dropping the import check from it reds here.
+  function gateChecks(proxySource) {
+    const root = writeTree({ "proxy.ts": proxySource, ...helper });
+    const entry = { lines: { total: 1, covered: 1, skipped: 0, pct: 100 } };
+    const summary = writeTmp("summary.json", JSON.stringify({ total: entry, [join(root, "proxy.ts")]: entry }));
+    return checkCoverageScope(summary, ["proxy.ts"], root);
+  }
+
+  it("passes the gate's checks on a measured member importing nothing unlisted", () => {
+    expect(gateChecks('import "./src/proxy";\n')).toEqual([]);
+  });
+
+  it("fails the gate's checks on a measured member importing an unlisted root helper", () => {
+    expect(gateChecks('import "./root-helper";\n')).toEqual([
+      'COVERAGE_IMPORT_UNMEASURED: proxy.ts imports "./root-helper" (root-helper.ts), outside src/ and not a coverage member',
+    ]);
   });
 });
 

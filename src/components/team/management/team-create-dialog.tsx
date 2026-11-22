@@ -73,7 +73,6 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
       const success = await unlock(passphrase);
       if (!success) {
         setUnlockError(tVault("wrongPassphrase"));
-        setPassphrase("");
       }
     } catch (err) {
       const resolved = resolveUnlockError(err, {
@@ -90,9 +89,11 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
         toast.error(tVault("sessionExpired"));
       } else {
         setUnlockError(resolved.message);
-        setPassphrase("");
       }
     } finally {
+      // Every outcome, success included: the dialog stays mounted after an
+      // unlock, so the passphrase would otherwise sit in state until close.
+      setPassphrase("");
       setUnlocking(false);
     }
   };

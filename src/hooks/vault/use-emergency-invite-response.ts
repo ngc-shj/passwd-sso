@@ -46,8 +46,11 @@ export function useEmergencyInviteResponse(token: string) {
       const publicKeyJwk = await exportPublicKey(keyPair.publicKey);
       const privateKeyBytes = await exportPrivateKey(keyPair.privateKey);
 
-      // Encrypt private key with grantee's vault encryption key
-      const encryptedPrivKey = await encryptPrivateKey(privateKeyBytes, encryptionKey);
+      // Encrypt private key with grantee's vault encryption key, then wipe the
+      // plaintext PKCS#8 whether or not encryption succeeded.
+      const encryptedPrivKey = await encryptPrivateKey(privateKeyBytes, encryptionKey).finally(
+        () => privateKeyBytes.fill(0),
+      );
 
       const res = await fetchApi(API_PATH.EMERGENCY_ACCESS_ACCEPT, {
         method: "POST",

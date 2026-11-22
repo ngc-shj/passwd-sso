@@ -1,6 +1,7 @@
 "use client";
 
 import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
+import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { clientLogError } from "@/lib/logger/client";
 import { CLIENT_LOG_EVENT, toClientErrorCode } from "@/lib/logger/client-events";
 import { CopyCancelledError } from "./copy-cancelled-error";
@@ -106,7 +107,21 @@ async function sha256Hex(value: string): Promise<string> {
 }
 
 /**
- * One more attempt at the clear, the next time the document regains focus.
+ * How long, after a failed timed clear, the refocus retry stays armed.
+ *
+ * The digest the listener holds is unsalted SHA-256, and for a CVV or a TOTP
+ * code the whole input space is small enough to hash through: the digest is the
+ * value to anyone who reads this page's heap. Bounding the listener bounds that
+ * too. The cost is that a user who stays away longer than this gets no clear —
+ * the same residual Firefox and Safari have for every copy. It also bounds the
+ * blank-without-compare fallback, which a refocus hours later would mostly spend
+ * wiping something the user copied since.
+ */
+export const REFOCUS_RETRY_WINDOW_MS = 10 * MS_PER_MINUTE;
+
+/**
+ * One more attempt at the clear, the next time the document regains focus
+ * within REFOCUS_RETRY_WINDOW_MS.
  *
  * The listener holds only a digest of the value, never the plaintext, so a
  * failed clear does not also keep the secret alive in this page's heap for as
@@ -131,6 +146,7 @@ async function retryClearOnRefocus(copiedValue: string): Promise<void> {
     // a write then would be refused, so wait for a focus that counts.
     if (!document.hasFocus()) return;
     window.removeEventListener("focus", onFocus);
+    clearTimeout(expiry);
     try {
       let current: string | null = null;
       try {
@@ -147,6 +163,11 @@ async function retryClearOnRefocus(copiedValue: string): Promise<void> {
     }
   };
   window.addEventListener("focus", onFocus);
+  // Dropping the listener releases the only reference to the digest.
+  const expiry = setTimeout(
+    () => window.removeEventListener("focus", onFocus),
+    REFOCUS_RETRY_WINDOW_MS,
+  );
 }
 
 /**

@@ -12,14 +12,17 @@
  * default, a CLI override, a file vitest failed to load — still reds.
  *
  * Fails closed on a missing, unparseable or empty summary and on an empty
- * member set: none of those can prove every member was measured.
+ * member set: none of those can prove every member was measured. Also refuses
+ * a member importing a file outside src/ that is not itself a member
+ * (checkMemberImports): the root runtime files are a literal list, and a
+ * helper they pull in would otherwise run unmeasured.
  *
  * Background: docs/archive/review/close-coverage-and-clipboard-gaps-plan.md, C1(b).
  */
 import { readFileSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { checkSummary, listMembers } from "./lib/coverage-members.mjs";
+import { checkMemberImports, checkSummary, listMembers } from "./lib/coverage-members.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -51,6 +54,14 @@ export function checkCoverageSummaryFile(summaryPath, members, root = REPO_ROOT)
   );
 }
 
+/**
+ * Both layers the gate runs: no member imports an unlisted file outside src/
+ * (a file nothing would measure), and the summary measured every member.
+ */
+export function checkCoverageScope(summaryPath, members, root = REPO_ROOT) {
+  return [...checkMemberImports(members, root), ...checkCoverageSummaryFile(summaryPath, members, root)];
+}
+
 function main() {
   const summaryPath = process.argv[2];
   if (!summaryPath) {
@@ -64,7 +75,7 @@ function main() {
     console.error(`check-coverage-scope: FAIL\n  - ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
   }
-  const failures = checkCoverageSummaryFile(resolve(summaryPath), members);
+  const failures = checkCoverageScope(resolve(summaryPath), members);
   if (failures.length > 0) {
     console.error("check-coverage-scope: FAIL");
     for (const f of failures) console.error(`  - ${f}`);

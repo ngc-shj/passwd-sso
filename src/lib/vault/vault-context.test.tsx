@@ -391,6 +391,99 @@ describe("VaultProvider — setup error path", () => {
   }, 30_000);
 });
 
+describe("VaultProvider — changePassphrase response handling", () => {
+  const NEW_PASSPHRASE = "a different long passphrase";
+
+  /** Set up an unlocked vault whose change-passphrase call gets `response`. */
+  async function setUpWithChangeResponse(response: MockFetchResponse) {
+    const { fetchMock } = makeFetchEnv(null);
+    const sent: { accountSalt?: string } = {};
+    const baseHandler = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url === "/api/vault/change-passphrase") {
+        Object.assign(sent, JSON.parse(init?.body as string));
+        return response;
+      }
+      if (!baseHandler) throw new Error("fetch env has no base handler");
+      return baseHandler(url, init);
+    });
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    const hook = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await hook.result.current.setup(PASSPHRASE);
+    });
+    return { result: hook.result, sent };
+  }
+
+  function hex(bytes: Uint8Array | null): string | undefined {
+    return bytes ? Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("") : undefined;
+  }
+
+  it("adopts the committed wrap and reports invalidationFailed on SESSION_INVALIDATE_FAILED", async () => {
+    const { result, sent } = await setUpWithChangeResponse({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "SESSION_INVALIDATE_FAILED" }),
+    });
+
+    let effects: unknown;
+    await act(async () => {
+      effects = await result.current.changePassphrase(PASSPHRASE, NEW_PASSPHRASE);
+    });
+
+    expect(effects).toEqual({ invalidationFailed: true });
+    expect(hex(result.current.getAccountSalt())).toBe(sent.accountSalt);
+    let newOk = false;
+    await act(async () => {
+      newOk = await result.current.verifyPassphrase(NEW_PASSPHRASE);
+    });
+    expect(newOk).toBe(true);
+  }, 60_000);
+
+  it("adopts the new wrap and reports no invalidation failure on success", async () => {
+    const { result, sent } = await setUpWithChangeResponse({
+      ok: true,
+      json: async () => ({ success: true }),
+    });
+
+    let effects: unknown;
+    await act(async () => {
+      effects = await result.current.changePassphrase(PASSPHRASE, NEW_PASSPHRASE);
+    });
+
+    expect(effects).toEqual({ invalidationFailed: false });
+    expect(hex(result.current.getAccountSalt())).toBe(sent.accountSalt);
+  }, 60_000);
+
+  it("throws and keeps the old wrap when the server refuses the change", async () => {
+    const { result, sent } = await setUpWithChangeResponse({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "INVALID_PASSPHRASE" }),
+    });
+    const saltBefore = hex(result.current.getAccountSalt());
+
+    let caught: unknown;
+    await act(async () => {
+      try {
+        await result.current.changePassphrase(PASSPHRASE, NEW_PASSPHRASE);
+      } catch (e) {
+        caught = e;
+      }
+    });
+
+    expect(caught).toEqual({ error: "INVALID_PASSPHRASE" });
+    expect(sent.accountSalt).not.toBe(saltBefore);
+    expect(hex(result.current.getAccountSalt())).toBe(saltBefore);
+    let oldOk = false;
+    await act(async () => {
+      oldOk = await result.current.verifyPassphrase(PASSPHRASE);
+    });
+    expect(oldOk).toBe(true);
+  }, 60_000);
+});
+
 describe("VaultProvider — verifyPassphrase before unlock", () => {
   it("returns false when called before unlock (no in-memory wrappedKey)", async () => {
     const { fetchMock } = makeFetchEnv(null);

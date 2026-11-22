@@ -15,8 +15,9 @@ const SENTINEL = "SENTINEL_NOT_A_SECRET_ZJYK";
 
 // ── Hoisted mocks ──────────────────────────────────────────
 
-const { mockChangePassphrase } = vi.hoisted(() => ({
+const { mockChangePassphrase, mockToast } = vi.hoisted(() => ({
   mockChangePassphrase: vi.fn(),
+  mockToast: { success: vi.fn(), warning: vi.fn() },
 }));
 
 vi.mock("next-intl", () => ({
@@ -41,7 +42,7 @@ vi.mock("@/lib/ui/ime-guard", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn() },
+  toast: mockToast,
 }));
 
 vi.mock("@/components/ui/dialog", () => ({
@@ -128,7 +129,7 @@ describe("ChangePassphraseDialog", () => {
   });
 
   it("calls changePassphrase with correct args and closes on success", async () => {
-    mockChangePassphrase.mockResolvedValue(undefined);
+    mockChangePassphrase.mockResolvedValue({ invalidationFailed: false });
     render(<ChangePassphraseDialog open={true} onOpenChange={onOpenChange} />);
     fillForm("oldpass", "longenoughpass", "longenoughpass");
     fireEvent.click(screen.getByRole("button", { name: "changePassphraseButton" }));
@@ -139,6 +140,22 @@ describe("ChangePassphraseDialog", () => {
     await waitFor(() => {
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
+    expect(mockToast.success).toHaveBeenCalledWith("passphraseChanged");
+    expect(mockToast.warning).not.toHaveBeenCalled();
+  });
+
+  it("closes with a persistent sign-out-other-devices warning when the change committed but invalidation failed", async () => {
+    mockChangePassphrase.mockResolvedValue({ invalidationFailed: true });
+    render(<ChangePassphraseDialog open={true} onOpenChange={onOpenChange} />);
+    fillForm("oldpass", "longenoughpass", "longenoughpass");
+    fireEvent.click(screen.getByRole("button", { name: "changePassphraseButton" }));
+
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+    expect(mockToast.warning).toHaveBeenCalledWith("sessionInvalidateFailed", { duration: Infinity });
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(screen.queryByText("apiErr:SESSION_INVALIDATE_FAILED")).toBeNull();
   });
 
   it("renders mapped error message on INVALID_PASSPHRASE without leaking sentinel (§Sec-2)", async () => {

@@ -175,6 +175,25 @@ describe("TeamInviteByEmailSection", () => {
       expect(toast.error).not.toHaveBeenCalled();
     });
 
+    it("is removed from the page when the user dismisses it", async () => {
+      await invite();
+      expect(screen.getByLabelText(BOB_LINK_LABEL)).toHaveValue(LINK);
+
+      fireEvent.click(screen.getByText("inviteLinkDone"));
+
+      expect(screen.queryByLabelText(BOB_LINK_LABEL)).not.toBeInTheDocument();
+      expect(screen.queryByDisplayValue(LINK)).not.toBeInTheDocument();
+    });
+
+    it("is still displayed after the clear timeout when not dismissed", async () => {
+      vi.useFakeTimers();
+      await invite();
+
+      await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_TIMEOUT_MS * 10);
+
+      expect(screen.getByLabelText(BOB_LINK_LABEL)).toHaveValue(LINK);
+    });
+
     it("is cleared when the next invite is refused", async () => {
       await invite();
       expect(screen.getByLabelText(BOB_LINK_LABEL)).toHaveValue(LINK);

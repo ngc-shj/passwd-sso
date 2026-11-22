@@ -121,3 +121,42 @@ Every class was swept from a code-derived member set. Each fixed member has a te
   - `passkey-credentials-card` mapped a 429 to "service unavailable".
 - **#12 — tests asserting nothing.** 15 weak or decorative tests across 14 files were fixed. The other 71 scanner hits were triaged as false positives; the scanner-tuning proposals are recorded.
 - **#6, #8, #10, #11 — no new defects.** Each scanner was proven on its pre-fix seed.
+
+## D18 — Codex security review (requested by the user)
+
+The branch diff was reviewed by Codex in three partitions (clipboard and share; auth and vault; CI gates) through `codex exec --sandbox read-only`, because `codex review --base` does not accept a focus prompt. All 16 findings were adjudicated against the code:
+
+- **Fixed:** the rotate-key invalidation scope is now `allTenants`, matching the other four vault-secret flows. Also fixed:
+  - Send and share dialogs: an in-flight create plus close no longer leaks the late result into a closed dialog; share secrets are cleared on close.
+  - Share gate input is masked.
+  - Team invite link has an explicit Done.
+  - The refocus-retry digest is bounded to 10 minutes.
+  - The lint exemption is narrowed to `copy-secret.ts`, and dynamic import/require of it is refused.
+  - The team-create passphrase is cleared on success.
+  - The lock-screen flag removal is guarded.
+  - Key buffers are zeroised in the recovery, emergency invite and emergency vault hooks.
+  - `check-vitest-coverage-include` fails closed on an unparseable config.
+  - The coverage member set rejects imports of unmeasured files.
+- **Rejected:**
+  - "Fail closed when invalidation fails after rotation." Rotation has already committed, and a non-2xx response would leave the client on the old key. The documented policy (whitepaper §6.1.c) is to return 2xx with `invalidationFailed`, write an audit record and show a persistent banner.
+  - Computed or aliased clipboard access. This stays a documented tripwire residual.
+- **Copy wording (user decision):** the copy toast no longer promises a clear. Firefox and Safari never clear the clipboard.
+- **Follow-on fixes found while fixing the above:**
+  - change-passphrase and recover now adopt the committed state when only invalidation failed (`SESSION_INVALIDATE_FAILED`).
+  - Travel-mode enable leads an expired session to sign-in.
+
+## D19 — side-fix: check-e2e-selectors "moved, not removed" detection never worked
+
+- **Defect:** sections 2, 3, 5, 6 and 7 filtered diff headers with BRE `grep -v '^\+\+\+'`. GNU grep reads `\+` as the repetition operator, so the pattern matched every line and emptied the added-line set. Every relocated or re-indented class or id was reported as removed.
+- **Prior partial fix:** the file's own NOTE (section 4) documents this pitfall, but only that one site had been fixed.
+- **Fix:** all five sites now use `grep -vE`.
+- **Self-test:** M1–M4 cover moved versus truly removed, for both class and id. The pre-fix gate fails M1 and M3; the fixed gate passes all 8.
+
+## D20 — Integration suite on the shared dev DB
+
+- `npm run test:integration` ran with the outbox and retention workers stopped and restarted afterwards: 170 of 174 files pass.
+- **4 files fail on pre-existing dev-DB state, not on this change.** This branch touches no anchor or key-provider production code.
+  - audit-anchor ×3: the precondition guard found one foreign published anchor row.
+  - cloud-key-provider-warm: two TeamWebhook rows are encrypted under a key this environment cannot decrypt.
+- **Not cleaned up:** the DB is shared with the :3000 instance, so the rows were left in place pending the user's permission.
+- **Changed rotate-key tests:** the four rotate-key integration files pass (32 tests).

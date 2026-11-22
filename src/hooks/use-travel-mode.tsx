@@ -14,16 +14,20 @@ interface TravelModeState {
 
 /**
  * `error` is the route's error code (or NETWORK_ERROR / `HTTP <status>` when
- * the body carries none). `lockedUntil` accompanies ACCOUNT_LOCKED.
+ * the body carries none).
  */
-export interface TravelModeDisableResult {
+export interface TravelModeEnableResult {
   success: boolean;
   error?: string;
+}
+
+/** `lockedUntil` accompanies ACCOUNT_LOCKED. */
+export interface TravelModeDisableResult extends TravelModeEnableResult {
   lockedUntil?: string | null;
 }
 
 interface TravelModeContextValue extends TravelModeState {
-  enable: () => Promise<boolean>;
+  enable: () => Promise<TravelModeEnableResult>;
   disable: (verifierHash: string) => Promise<TravelModeDisableResult>;
   refresh: () => Promise<void>;
 }
@@ -62,11 +66,12 @@ export function TravelModeProvider({ children }: { children: ReactNode }) {
     void fetchStatus();
   }, [fetchStatus]);
 
-  const enable = useCallback(async (): Promise<boolean> => {
+  const enable = useCallback(async (): Promise<TravelModeEnableResult> => {
     try {
       const res = await fetchApi("/api/travel-mode/enable", { method: "POST" });
       if (!res.ok) {
-        return false;
+        const body = await readApiErrorBody(res);
+        return { success: false, error: body ? body.error : `HTTP ${res.status}` };
       }
       const data = await res.json();
       setState((prev) => ({
@@ -75,9 +80,9 @@ export function TravelModeProvider({ children }: { children: ReactNode }) {
         activatedAt: new Date().toISOString(),
         error: null,
       }));
-      return true;
+      return { success: true };
     } catch {
-      return false;
+      return { success: false, error: "NETWORK_ERROR" };
     }
   }, []);
 

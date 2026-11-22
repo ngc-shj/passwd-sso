@@ -333,6 +333,19 @@ describe("TeamCreateDialog", () => {
       expect(screen.queryByText("wrongPassphrase")).not.toBeInTheDocument();
     });
 
+    it("clears the passphrase after a successful unlock", async () => {
+      const unlock = vi.fn(async () => true);
+      // The mocked vault stays LOCKED, so the form remains rendered and the
+      // retained state is observable through the input.
+      setupVault({ status: VAULT_STATUS.LOCKED, unlock });
+      openDialog();
+
+      submitUnlock("correct horse");
+
+      await waitFor(() => expect(unlock).toHaveBeenCalledWith("correct horse"));
+      await waitFor(() => expect(screen.getByLabelText("passphrase")).toHaveValue(""));
+    });
+
     it("shows the wrong-passphrase error inline and clears the input when unlock returns false", async () => {
       setupVault({ status: VAULT_STATUS.LOCKED, unlock: vi.fn(async () => false) });
       openDialog();

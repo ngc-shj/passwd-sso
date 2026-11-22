@@ -91,8 +91,15 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
     setPasswordCopied(false);
   };
 
+  // Closing while the POST is in flight would let its result — a bearer URL
+  // and possibly an access password — land in a dialog the user has already
+  // dismissed, and surface on the next open. So close is ignored until the
+  // request settles, as in create-grant-dialog.
   const handleOpenChange = (nextOpen: boolean) => {
-    if (!nextOpen) resetForm();
+    if (!nextOpen) {
+      if (creating) return;
+      resetForm();
+    }
     onOpenChange(nextOpen);
   };
 

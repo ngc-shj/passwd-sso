@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, act } from "@testing-library/react";
 import type { FormEvent } from "react";
 import { formatRecoveryKey, wrapSecretKeyWithRecovery } from "@/lib/crypto/crypto-recovery";
@@ -48,6 +48,31 @@ async function verified() {
   act(() => hook.result.current.setRecoveryKeyInput(formatted.toLowerCase()));
   await act(() => hook.result.current.handleVerify(ev()));
   return hook;
+}
+
+/**
+ * Records the raw key buffers handed to WebCrypto as HKDF input while still
+ * running the real import. The verifier hash imports the parsed recovery key
+ * itself (toArrayBuffer passes the same view), so the first capture is the
+ * hook's own buffer. The fixture's RECOVERY_KEY, imported by the test's own
+ * wrapSecretKeyWithRecovery, is skipped.
+ */
+function captureHkdfInputs(): Uint8Array[] {
+  const captured: Uint8Array[] = [];
+  const realImportKey = crypto.subtle.importKey.bind(crypto.subtle);
+  vi.spyOn(crypto.subtle, "importKey").mockImplementation(((...args: Parameters<SubtleCrypto["importKey"]>) => {
+    const [format, keyData, algorithm] = args;
+    if (format === "raw" && algorithm === "HKDF" && keyData instanceof Uint8Array && keyData !== RECOVERY_KEY) {
+      captured.push(keyData);
+    }
+    return realImportKey(...args);
+  }) as SubtleCrypto["importKey"]);
+  return captured;
+}
+
+function isZeroed(bytes: Uint8Array | undefined): boolean {
+  if (!bytes) throw new Error("no recovery-key buffer was captured");
+  return bytes.every((b) => b === 0);
 }
 
 describe("useRecoveryFlow", () => {
@@ -132,4 +157,86 @@ describe("useRecoveryFlow", () => {
     expect(result.current.loading).toBe(false);
     expect(mockHardNavigate).not.toHaveBeenCalled();
   }, 15_000);
+  it("treats SESSION_INVALIDATE_FAILED as a committed reset and holds navigation for the warning", async () => {
+    const { result } = await verified();
+    act(() => {
+      result.current.setNewPassphrase(PASSPHRASE);
+      result.current.setConfirmPassphrase(PASSPHRASE);
+    });
+    mockSetHasRecoveryKey.mockClear();
+    mockFetchApi.mockResolvedValueOnce(json({ error: "SESSION_INVALIDATE_FAILED" }, 500));
+
+    await act(() => result.current.handleReset(ev()));
+
+    expect(result.current.step).toBe("reset-invalidation-failed");
+    expect(result.current.error).toBe("");
+    expect(mockSetHasRecoveryKey).toHaveBeenCalledWith(true);
+    expect(mockHardNavigate).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it("continues to the dashboard from the invalidation warning", async () => {
+    const { result } = await verified();
+    act(() => {
+      result.current.setNewPassphrase(PASSPHRASE);
+      result.current.setConfirmPassphrase(PASSPHRASE);
+    });
+    mockFetchApi.mockResolvedValueOnce(json({ error: "SESSION_INVALIDATE_FAILED" }, 500));
+    await act(() => result.current.handleReset(ev()));
+
+    act(() => result.current.continueToDashboard());
+
+    expect(mockHardNavigate).toHaveBeenCalledWith("/en/dashboard");
+  }, 15_000);
+
+  describe("recovery-key buffer wiping", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("wipes the parsed recovery key when the server refuses verification", async () => {
+      const captured = captureHkdfInputs();
+      mockFetchApi.mockResolvedValueOnce(json({ error: "INVALID_RECOVERY_KEY" }, 400));
+      const { result } = renderHook(() => useRecoveryFlow());
+      const formatted = await formatRecoveryKey(RECOVERY_KEY);
+      act(() => result.current.setRecoveryKeyInput(formatted));
+
+      await act(() => result.current.handleVerify(ev()));
+
+      expect(result.current.error).toBe("invalidRecoveryKey");
+      expect(isZeroed(captured[0])).toBe(true);
+    });
+
+    it("keeps the verified recovery key intact for the reset step", async () => {
+      const captured = captureHkdfInputs();
+
+      const { result } = await verified();
+
+      expect(result.current.step).toBe("new-passphrase");
+      expect(captured[0]).toEqual(RECOVERY_KEY);
+    });
+
+    it("wipes the recovery key when the reset committed but invalidation failed", async () => {
+      const captured = captureHkdfInputs();
+      const { result } = await verified();
+      act(() => {
+        result.current.setNewPassphrase(PASSPHRASE);
+        result.current.setConfirmPassphrase(PASSPHRASE);
+      });
+      mockFetchApi.mockResolvedValueOnce(json({ error: "SESSION_INVALIDATE_FAILED" }, 500));
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.step).toBe("reset-invalidation-failed");
+      expect(isZeroed(captured[0])).toBe(true);
+    }, 15_000);
+
+    it("wipes the verified recovery key when the flow is abandoned by unmounting", async () => {
+      const captured = captureHkdfInputs();
+      const { unmount } = await verified();
+
+      unmount();
+
+      expect(isZeroed(captured[0])).toBe(true);
+    });
+  });
 });

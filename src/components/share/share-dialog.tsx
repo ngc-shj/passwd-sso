@@ -209,14 +209,17 @@ export function ShareDialog({
   const [prevOpenState, setPrevOpenState] = useState<{ open: boolean; entryParam: string } | null>(null);
   if (prevOpenState === null || prevOpenState.open !== open || prevOpenState.entryParam !== entryParam) {
     setPrevOpenState({ open, entryParam });
+    // The parent keeps this component mounted while closed. The created URL
+    // (it carries the share key) and the access password are cleared on every
+    // transition — close included — so neither stays resident in a closed
+    // dialog nor carries over to another entry.
+    setCreatedUrl(null);
+    setCreatedAccessPassword(null);
+    setCopied(false);
+    setPasswordCopied(false);
     if (open) {
-      // The parent keeps this component mounted while closed, so everything
-      // the previous session typed or was shown once is cleared here. A
-      // policy-required password stays on (the policy effect refreshes it).
-      setCreatedUrl(null);
-      setCreatedAccessPassword(null);
-      setCopied(false);
-      setPasswordCopied(false);
+      // Everything the previous session typed is reset too. A policy-required
+      // password stays on (the policy effect refreshes it).
       setPermission(SHARE_PERMISSION.VIEW_ALL);
       setExpiresIn("1d");
       setMaxViews("");
@@ -434,8 +437,16 @@ export function ShareDialog({
     }
   };
 
+  // Closing while the POST is in flight would let its result land after the
+  // close-time clear and surface on the next open, so close is ignored until
+  // the request settles, as in create-grant-dialog.
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && creating) return;
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

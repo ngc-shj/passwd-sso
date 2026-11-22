@@ -68,8 +68,14 @@ export function ChangePassphraseDialog({
     setLoading(true);
     setError("");
     try {
-      await changePassphrase(currentPassphrase, newPassphrase);
-      toast.success(t("passphraseChanged"));
+      const effects = await changePassphrase(currentPassphrase, newPassphrase);
+      if (effects.invalidationFailed) {
+        // The change committed; only signing out other devices failed.
+        // Persistent so the user acts on it rather than dismissing it.
+        toast.warning(tApi("sessionInvalidateFailed"), { duration: Infinity });
+      } else {
+        toast.success(t("passphraseChanged"));
+      }
       handleOpenChange(false);
     } catch (err: unknown) {
       const apiErr = err as { error?: string } | undefined;

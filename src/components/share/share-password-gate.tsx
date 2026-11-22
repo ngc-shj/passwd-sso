@@ -80,6 +80,9 @@ export function SharePasswordGate({
       } catch {
         // sessionStorage unavailable (e.g. private browsing) — proceed anyway
       }
+      // The password has done its job. Should loading the content fail, this
+      // gate stays on screen, and it must not keep the password there.
+      setPassword("");
       onVerified(data.accessToken);
     } catch {
       setError(t("verifyRetryLater"));
@@ -115,7 +118,7 @@ export function SharePasswordGate({
               <Label className="text-xs">{t("accessPasswordLabel")}</Label>
               <Input
                 ref={inputRef}
-                type="text"
+                type="password"
                 value={password}
                 readOnly
                 onPaste={handlePaste}

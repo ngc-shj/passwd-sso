@@ -14,9 +14,11 @@
  * Background: docs/archive/review/close-coverage-and-clipboard-gaps-plan.md, C1.
  */
 import { execFileSync } from "node:child_process";
+import { readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ts } from "ts-morph";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 
@@ -129,4 +131,70 @@ export function checkSummary(summaryJson, members, root) {
       .map((k) => (isAbsolute(k) ? relative(root, k) : k).split("\\").join("/")),
   );
   return members.filter((m) => !measured.has(m));
+}
+
+// How a specifier names a file without its extension, in the order the bundler
+// tries them. A `.js` specifier may name its `.ts` source (ESM style).
+const RESOLVE_SUFFIXES = ["", ".ts", ".tsx", ".js", ".mjs", ".cjs", ".json", "/index.ts", "/index.tsx", "/index.js"];
+
+function isFile(abs) {
+  try {
+    return statSync(abs).isFile();
+  } catch {
+    return false;
+  }
+}
+
+function resolveImport(target, root) {
+  const candidates = RESOLVE_SUFFIXES.map((s) => target + s);
+  if (/\.[cm]?js$/.test(target)) candidates.push(target.replace(/\.[cm]?js$/, ".ts"), target.replace(/\.[cm]?js$/, ".tsx"));
+  return candidates.find((c) => isFile(join(root, c)));
+}
+
+/**
+ * Imports that leave src/ for a file the member set does not hold. The root
+ * runtime files are a closed literal list, so a new root-level helper that one
+ * of them (or a src/ file — src/instrumentation.ts already imports
+ * ../sentry.server.config) pulls in would run in production unmeasured.
+ *
+ * Every member's import specifiers come from the TypeScript scanner
+ * (`ts.preProcessFile`: static, dynamic, `require` and type imports; comments
+ * and strings are not imports). A relative or `@/` specifier whose target lies
+ * inside src/ is measured whatever it resolves to; one outside src/ must
+ * resolve to a member, and one that resolves to nothing is refused — it
+ * cannot be shown to be measured. Returns one message per offending import.
+ */
+export function checkMemberImports(members, root = REPO_ROOT) {
+  const memberSet = new Set(members);
+  const problems = [];
+  for (const member of members) {
+    let source;
+    try {
+      source = readFileSync(join(root, member), "utf8");
+    } catch (err) {
+      problems.push(`COVERAGE_IMPORT_UNREADABLE: ${member}: ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+    for (const { fileName: spec } of ts.preProcessFile(source, true, true).importedFiles) {
+      let target;
+      if (spec.startsWith("./") || spec.startsWith("../")) {
+        target = relative(root, resolve(root, dirname(member), spec));
+      } else if (spec.startsWith("@/")) {
+        target = relative(root, resolve(root, "src", spec.slice(2)));
+      } else {
+        continue;
+      }
+      target = target.split("\\").join("/");
+      if (target.startsWith("src/")) continue;
+      const resolved = resolveImport(target, root);
+      if (resolved === undefined) {
+        problems.push(`COVERAGE_IMPORT_UNRESOLVED: ${member} imports "${spec}", which resolves to no file`);
+      } else if (!memberSet.has(resolved)) {
+        problems.push(
+          `COVERAGE_IMPORT_UNMEASURED: ${member} imports "${spec}" (${resolved}), outside src/ and not a coverage member`,
+        );
+      }
+    }
+  }
+  return problems;
 }

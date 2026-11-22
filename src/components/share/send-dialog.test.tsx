@@ -565,3 +565,66 @@ describe("SendDialog file send", () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalledWith("unknownError"));
   });
 });
+
+describe("SendDialog close while a send is being created", () => {
+  const SEND_URL = `${window.location.origin}/s/late`;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  // Owns `open` the way the share-links page does, so a dismissal really closes.
+  function Host() {
+    const [open, setOpen] = React.useState(true);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>reopen</button>
+        <SendDialog open={open} onOpenChange={setOpen} />
+      </>
+    );
+  }
+
+  function pendingCreate() {
+    let resolve: (res: Response) => void = () => {};
+    vi.spyOn(globalThis, "fetch").mockReturnValue(
+      new Promise<Response>((r) => {
+        resolve = r;
+      }),
+    );
+    return (body: unknown) => resolve(okResponse(body));
+  }
+
+  it("stays open when dismissed while the request is in flight", async () => {
+    const resolveCreate = pendingCreate();
+    render(<Host />);
+    fillText();
+    fireEvent.click(screen.getByRole("button", { name: "create" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "create" })).toBeDisabled());
+
+    fireEvent.click(screen.getByRole("button", { name: "dismiss" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    resolveCreate({ url: "/s/late", accessPassword: "late-access-pw" });
+    expect(await screen.findByDisplayValue(SEND_URL)).toBeInTheDocument();
+  });
+
+  it("shows neither the URL nor the access password on reopen after the late result is dismissed", async () => {
+    const resolveCreate = pendingCreate();
+    render(<Host />);
+    fillText();
+    fireEvent.click(screen.getByRole("button", { name: "create" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "create" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "dismiss" }));
+    resolveCreate({ url: "/s/late", accessPassword: "late-access-pw" });
+    expect(await screen.findByDisplayValue("late-access-pw")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "dismiss" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "reopen" }));
+
+    expect(screen.getByPlaceholderText("sendNamePlaceholder")).toHaveValue("");
+    expect(screen.queryByDisplayValue(SEND_URL)).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("late-access-pw")).not.toBeInTheDocument();
+  });
+});

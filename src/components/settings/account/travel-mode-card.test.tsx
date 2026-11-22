@@ -142,7 +142,7 @@ describe("TravelModeCard flows", () => {
   }
 
   it("enables travel mode after confirmation and closes the confirm dialog", async () => {
-    const enable = vi.fn().mockResolvedValue(true);
+    const enable = vi.fn().mockResolvedValue({ success: true });
     mockUseTravelMode.mockReturnValue({ active: false, loading: false, enable, disable: vi.fn() });
     render(<TravelModeCard />);
 
@@ -162,17 +162,32 @@ describe("TravelModeCard flows", () => {
   }
 
   it("reports a failed enable with the translated error toast", async () => {
-    const enable = vi.fn().mockResolvedValue(false);
+    const enable = vi.fn().mockResolvedValue({ success: false, error: "INTERNAL_ERROR" });
     mockUseTravelMode.mockReturnValue({ active: false, loading: false, enable, disable: vi.fn() });
     render(<TravelModeCard />);
 
     confirmEnable();
 
     await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("enableFailed"));
+    expect(screen.queryByText("reauthSessionExpired")).not.toBeInTheDocument();
+  });
+
+  it("sends an expired session (UNAUTHORIZED) on enable to sign in again instead of a failure toast", async () => {
+    const enable = vi.fn().mockResolvedValue({ success: false, error: "UNAUTHORIZED" });
+    mockUseTravelMode.mockReturnValue({ active: false, loading: false, enable, disable: vi.fn() });
+    render(<TravelModeCard />);
+
+    confirmEnable();
+
+    expect(await screen.findByText("reauthSessionExpired")).toBeInTheDocument();
+    expect(mockToast.error).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "recentSessionAction" }));
+    await waitFor(() => expect(mockSignOut).toHaveBeenCalledTimes(1));
   });
 
   it("shows no error toast when enabling succeeds", async () => {
-    const enable = vi.fn().mockResolvedValue(true);
+    const enable = vi.fn().mockResolvedValue({ success: true });
     mockUseTravelMode.mockReturnValue({ active: false, loading: false, enable, disable: vi.fn() });
     render(<TravelModeCard />);
 

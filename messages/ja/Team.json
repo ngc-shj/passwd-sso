@@ -63,6 +63,7 @@
   "inviteFailed": "招待の送信に失敗しました",
   "invitedLinkNotCopied": "招待を送信しました。下の招待リンクをコピーしてください。",
   "inviteLinkShownOnce": "{email} への招待リンクです。再表示できないため、今コピーしてください。",
+  "inviteLinkDone": "完了",
   "alreadyMember": "このユーザーは既にメンバーです",
   "alreadyInvited": "既に招待済みです",
   "pendingInvitations": "保留中の招待",

@@ -14,5 +14,6 @@
   "success": "パスフレーズがリセットされました。リダイレクトします...",
   "invalidRecoveryKey": "無効な回復キーです。",
   "invalidChecksum": "無効な回復キーです (チェックサム不一致)。入力を確認してください。",
-  "recoveryKeyNotSet": "このアカウントには回復キーが設定されていません。"
+  "recoveryKeyNotSet": "このアカウントには回復キーが設定されていません。",
+  "continueToDashboard": "ダッシュボードへ進む"
 }

@@ -242,8 +242,11 @@ async function handlePOST(request: NextRequest) {
   // MUST remain OUTSIDE the rotation transaction because the helper opens
   // its own bypass-RLS transaction on the global prisma client and would
   // deadlock against the rotation's `pg_advisory_xact_lock` if nested.
+  // Cross-tenant: the vault key belongs to the global User, so its sessions
+  // and tokens in every tenant held the previous secretKey's trust. The
+  // current session is revoked too (#433/S-N2), unlike change-passphrase.
   const invalidationResult = await invalidateUserSessions(userId, {
-    tenantId: user.tenantId,
+    allTenants: true,
     reason: "KEY_ROTATION",
   }).catch((err) => {
     getLogger().error(

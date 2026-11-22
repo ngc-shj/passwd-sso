@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
 import {
@@ -16,13 +16,16 @@ import {
   generateAccountSalt,
   hexEncode,
 } from "@/lib/crypto/crypto-client";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_PATH } from "@/lib/constants";
 import { getStrength } from "@/components/vault/passphrase-strength";
 import { fetchApi, hardNavigate } from "@/lib/url-helpers";
 
-type Step = "input" | "new-passphrase";
+// "reset-invalidation-failed": the reset committed but the server could not
+// sign out other sessions (SESSION_INVALIDATE_FAILED); the user is told so
+// before continuing to the dashboard.
+type Step = "input" | "new-passphrase" | "reset-invalidation-failed";
 
 interface VerifiedData {
   encryptedSecretKey: string;
@@ -52,7 +55,17 @@ export function useRecoveryFlow() {
 
   // Stored after verify step
   const [verifiedData, setVerifiedData] = useState<VerifiedData | null>(null);
-  const [recoveryKeyBytes, setRecoveryKeyBytes] = useState<Uint8Array | null>(null);
+  // A ref, not state: the unmount cleanup must reach the live buffer to wipe it
+  // when the user abandons the flow between verify and reset.
+  const recoveryKeyRef = useRef<Uint8Array | null>(null);
+
+  useEffect(
+    () => () => {
+      recoveryKeyRef.current?.fill(0);
+      recoveryKeyRef.current = null;
+    },
+    [],
+  );
 
   const strength = getStrength(newPassphrase);
   const isValid =
@@ -63,9 +76,10 @@ export function useRecoveryFlow() {
     setLoading(true);
     setError("");
 
+    // Wiped on every exit except the hand-off to the reset step.
+    let key: Uint8Array | null = null;
     try {
       // 1. Parse recovery key (validates checksum)
-      let key: Uint8Array;
       try {
         key = await parseRecoveryKey(recoveryKeyInput);
       } catch (err) {
@@ -111,17 +125,21 @@ export function useRecoveryFlow() {
         accountSalt: data.accountSalt,
         keyVersion: data.keyVersion,
       });
-      setRecoveryKeyBytes(key);
+      recoveryKeyRef.current?.fill(0);
+      recoveryKeyRef.current = key;
+      key = null;
       setStep("new-passphrase");
     } catch {
       setError(tApi("unknownError"));
     } finally {
+      key?.fill(0);
       setLoading(false);
     }
   }
 
   async function handleReset(e: React.FormEvent) {
     e.preventDefault();
+    const recoveryKeyBytes = recoveryKeyRef.current;
     if (!isValid || !verifiedData || !recoveryKeyBytes) return;
 
     setLoading(true);
@@ -178,22 +196,33 @@ export function useRecoveryFlow() {
         }),
       });
 
+      // SESSION_INVALIDATE_FAILED is returned after the reset committed, so
+      // it is a success with a warning, not a retryable failure.
+      let invalidationFailed = false;
       if (!res.ok) {
         const body = await readApiErrorBody(res);
-        if (body?.error) {
-          setError(tApi(apiErrorToI18nKey(body.error)));
+        if (body?.error === API_ERROR.SESSION_INVALIDATE_FAILED) {
+          invalidationFailed = true;
         } else {
-          setError(tApi("unknownError"));
+          if (body?.error) {
+            setError(tApi(apiErrorToI18nKey(body.error)));
+          } else {
+            setError(tApi("unknownError"));
+          }
+          return;
         }
-        return;
       }
 
       recoveryKeyBytes.fill(0);
-      setRecoveryKeyBytes(null);
+      recoveryKeyRef.current = null;
+      setVerifiedData(null);
       setHasRecoveryKey(true);
 
-      // Full reload to re-initialize VaultProvider (client-side nav keeps stale state)
-      hardNavigate(`/${locale}/dashboard`);
+      if (invalidationFailed) {
+        setStep("reset-invalidation-failed");
+        return;
+      }
+      continueToDashboard();
     } catch {
       setError(tApi("unknownError"));
     } finally {
@@ -201,6 +230,11 @@ export function useRecoveryFlow() {
       secretKey?.fill(0);
       setLoading(false);
     }
+  }
+
+  function continueToDashboard() {
+    // Full reload to re-initialize VaultProvider (client-side nav keeps stale state)
+    hardNavigate(`/${locale}/dashboard`);
   }
 
   return {
@@ -217,5 +251,6 @@ export function useRecoveryFlow() {
     isValid,
     handleVerify,
     handleReset,
+    continueToDashboard,
   };
 }

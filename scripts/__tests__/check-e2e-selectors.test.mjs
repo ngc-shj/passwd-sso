@@ -109,3 +109,67 @@ describe("check-e2e-selectors — i18n value changes vs E2E regex literals", () 
     expect(r.status).toBe(0);
   });
 });
+
+function writeComponent(body) {
+  mkdirSync(join(root, "src", "components"), { recursive: true });
+  writeFileSync(join(root, "src", "components", "dialog.tsx"), body);
+}
+
+function commitComponentChange(base, head) {
+  writeComponent(base);
+  git("add", "-A");
+  git("commit", "-q", "-m", "base");
+  git("checkout", "-q", "-b", "feature");
+  writeComponent(head);
+  git("add", "-A");
+  git("commit", "-q", "-m", "change");
+}
+
+// Sections 2 and 6 decide "moved, not removed" from the added lines. A BRE
+// `^\+\+\+` header filter matches every +-line, which emptied that set and
+// flagged every re-indented or relocated selector.
+describe("check-e2e-selectors — class and id selectors that only moved", () => {
+  it("M1: a class re-indented into a new wrapper is not flagged", () => {
+    writeSpec(`page.locator(".text-destructive");\n`);
+    commitComponentChange(
+      `export const A = () => (\n  <p className="text-destructive">x</p>\n);\n`,
+      `export const A = () => (\n  <div>\n    <p className="text-destructive">x</p>\n  </div>\n);\n`,
+    );
+    const r = runGate();
+    expect(r.stdout).not.toContain("removed from source");
+    expect(r.status).toBe(0);
+  });
+
+  it("M2: a class that is really removed is flagged", () => {
+    writeSpec(`page.locator(".text-destructive");\n`);
+    commitComponentChange(
+      `export const A = () => <p className="text-destructive">x</p>;\n`,
+      `export const A = () => <p className="text-muted">x</p>;\n`,
+    );
+    const r = runGate();
+    expect(r.stdout).toContain("CSS class 'text-destructive' removed from source");
+    expect(r.status).toBe(1);
+  });
+
+  it("M3: an id re-indented into a new branch is not flagged", () => {
+    writeSpec(`page.locator("#grantee-email");\n`);
+    commitComponentChange(
+      `export const A = () => (\n  <input\n    id="grantee-email"\n  />\n);\n`,
+      `export const A = ({ done }: { done: boolean }) =>\n  done ? null : (\n    <input\n      id="grantee-email"\n    />\n  );\n`,
+    );
+    const r = runGate();
+    expect(r.stdout).not.toContain("removed from source");
+    expect(r.status).toBe(0);
+  });
+
+  it("M4: an id that is really removed is flagged", () => {
+    writeSpec(`page.locator("#grantee-email");\n`);
+    commitComponentChange(
+      `export const A = () => <input id="grantee-email" />;\n`,
+      `export const A = () => <input id="email" />;\n`,
+    );
+    const r = runGate();
+    expect(r.stdout).toContain("id='grantee-email' removed from source");
+    expect(r.status).toBe(1);
+  });
+});

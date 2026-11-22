@@ -14,5 +14,6 @@
   "success": "Passphrase reset successfully. Redirecting...",
   "invalidRecoveryKey": "Invalid Recovery Key.",
   "invalidChecksum": "Invalid Recovery Key (checksum mismatch). Please check for typos.",
-  "recoveryKeyNotSet": "No Recovery Key has been set up for this account."
+  "recoveryKeyNotSet": "No Recovery Key has been set up for this account.",
+  "continueToDashboard": "Continue to dashboard"
 }

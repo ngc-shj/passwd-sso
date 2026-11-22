@@ -101,6 +101,22 @@ describe("VaultLockScreen auto-unlock after WebAuthn sign-in", () => {
     expect(sessionStorage.getItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN)).toBeNull();
   });
 
+  it("still auto-unlocks when removing the consumed sign-in flag throws", async () => {
+    const removeItem = vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw new DOMException("The operation is insecure.", "SecurityError");
+    });
+    try {
+      const settle = pendingCredentialsCheck();
+      render(<VaultLockScreen />);
+
+      settle();
+
+      await waitFor(() => expect(mockUnlockWithStoredPrf).toHaveBeenCalledTimes(1));
+    } finally {
+      removeItem.mockRestore();
+    }
+  });
+
   it("leaves the one-shot sign-in flag for the next mount when unmounted before the check settles", async () => {
     const settle = pendingCredentialsCheck();
     const { unmount } = render(<VaultLockScreen />);

@@ -124,6 +124,14 @@ export interface RotationEffects {
   invalidationFailed: boolean;
 }
 
+/**
+ * `invalidationFailed`: the server committed the new wrap but could not sign
+ * out the account's other sessions (SESSION_INVALIDATE_FAILED).
+ */
+export interface PassphraseChangeEffects {
+  invalidationFailed: boolean;
+}
+
 export interface TenantPasswordPolicy {
   minPasswordLength: number;
   requireUppercase: boolean;
@@ -144,7 +152,7 @@ interface VaultContextValue {
   unlockWithStoredPrf: () => Promise<boolean>;
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
-  changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<void>;
+  changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<PassphraseChangeEffects>;
   rotateKey: (
     passphrase: string,
     onProgress?: (progress: { phase: "migrating" | "rewrapping" | "committing" | "entries" | "history", current: number, total: number }) => void,
@@ -885,9 +893,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         }),
       });
 
+      // SESSION_INVALIDATE_FAILED is returned after the new wrap committed,
+      // so it must still update the local refs below or they go stale.
+      let invalidationFailed = false;
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw err;
+        if (err?.error !== API_ERROR.SESSION_INVALIDATE_FAILED) {
+          throw err;
+        }
+        invalidationFailed = true;
       }
 
       // 6. Update local accountSalt and wrappedKey (secretKey unchanged)
@@ -897,6 +911,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         iv: rewrapped.iv,
         authTag: rewrapped.authTag,
       };
+      return { invalidationFailed };
     },
     []
   );

@@ -296,7 +296,7 @@ describe("POST /api/vault/rotate-key", () => {
     );
     // Verify ALL user-bound auth artifacts are revoked after key rotation
     expect(mockInvalidateUserSessions).toHaveBeenCalledWith("user-1", {
-      tenantId: "tenant-1",
+      allTenants: true,
       reason: "KEY_ROTATION",
     });
   });

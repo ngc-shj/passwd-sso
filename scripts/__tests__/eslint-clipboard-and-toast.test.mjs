@@ -41,6 +41,8 @@ const fetchHits = (code, filePath) =>
   hits(code, filePath, "no-restricted-syntax", "fetchApi()");
 const withoutClearHits = (code, filePath) =>
   hits(code, filePath, "no-restricted-imports", "copySecretWithoutClear");
+const dynamicCopySecretHits = (code, filePath) =>
+  hits(code, filePath, "no-restricted-syntax", "Import @/lib/clipboard/copy-secret statically");
 
 const FIXTURES = [
   "src/lib/x.ts",
@@ -88,8 +90,19 @@ describe("clipboard writes are restricted to src/lib/clipboard", () => {
     expect(counts).toEqual([1, 1, 1, 1, 1, 1]);
   });
 
-  it("does not report inside src/lib/clipboard", async () => {
-    expect(await clipboardHits(CLIPBOARD_WRITES[0][1], "src/lib/clipboard/x.ts")).toBe(0);
+  it("does not report in copy-secret.ts, the one sanctioned writer", async () => {
+    expect(await clipboardHits(CLIPBOARD_WRITES[0][1], "src/lib/clipboard/copy-secret.ts")).toBe(0);
+  });
+
+  it.each(["src/lib/clipboard/x.ts", "src/lib/clipboard/report-copy-outcome.ts"])(
+    "reports in %s, which shares the directory but not the exemption",
+    async (filePath) => {
+      expect(await clipboardHits(CLIPBOARD_WRITES[0][1], filePath)).toBe(1);
+    },
+  );
+
+  it("reports an untranslated toast in src/lib/clipboard outside copy-secret.ts", async () => {
+    expect(await toastHits(TOAST_LITERALS[0][1], "src/lib/clipboard/report-copy-outcome.ts")).toBe(1);
   });
 
   it("does not report in a test file", async () => {
@@ -134,6 +147,38 @@ describe("copySecretWithoutClear is restricted by import", () => {
   it("does not report importing copySecretToClipboard from the same module", async () => {
     const code = 'import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";\nexport const f = copySecretToClipboard;';
     expect(await withoutClearHits(code, COMPONENT)).toBe(0);
+  });
+
+  describe("a dynamic import() or require() of the module", () => {
+    const DYNAMIC_FORMS = [
+      ["an @/-aliased dynamic import()", 'export const m = import("@/lib/clipboard/copy-secret");'],
+      ["a relative dynamic import()", 'export const m = import("../../lib/clipboard/copy-secret");'],
+      ["a static template-literal import()", "export const m = import(`@/lib/clipboard/copy-secret`);"],
+      ["a require()", 'export const m = require("@/lib/clipboard/copy-secret");'],
+    ];
+
+    for (const filePath of FIXTURES) {
+      it.each(DYNAMIC_FORMS)(`reports %s in ${filePath}`, async (_label, code) => {
+        expect(await dynamicCopySecretHits(code, filePath)).toBe(1);
+      });
+    }
+
+    it("reports it in the sanctioned non-clearing caller too", async () => {
+      const code = DYNAMIC_FORMS[0][1];
+      expect(await dynamicCopySecretHits(code, "src/components/vault/recovery-key-dialog.tsx")).toBe(1);
+    });
+
+    it.each([
+      ["a dynamic import() of another clipboard module", 'export const m = import("@/lib/clipboard/report-copy-outcome");'],
+      ["a dynamic import() of an unrelated module", 'export const m = import("@/lib/url-helpers");'],
+      ["a static import of the module", 'import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";\nexport const f = copySecretToClipboard;'],
+    ])("does not report %s", async (_label, code) => {
+      expect(await dynamicCopySecretHits(code, COMPONENT)).toBe(0);
+    });
+
+    it("does not report in a test file", async () => {
+      expect(await dynamicCopySecretHits(DYNAMIC_FORMS[0][1], "src/components/x.test.tsx")).toBe(0);
+    });
   });
 
   describe("the sanctioned caller, recovery-key-dialog.tsx", () => {

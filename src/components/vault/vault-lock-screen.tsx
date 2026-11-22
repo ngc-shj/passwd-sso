@@ -82,6 +82,14 @@ function readWebAuthnSignInFlag(): boolean {
   }
 }
 
+function consumeWebAuthnSignInFlag(): void {
+  try {
+    sessionStorage.removeItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN);
+  } catch {
+    // Same blocked-storage case: the auto-unlock below must still run.
+  }
+}
+
 export function VaultLockScreen() {
   const t = useTranslations("Vault");
   const tw = useTranslations("WebAuthn");
@@ -172,7 +180,7 @@ export function VaultLockScreen() {
       if (!webauthnSignInRef.current) return;
       // Consume flag (one-shot)
       webauthnSignInRef.current = false;
-      sessionStorage.removeItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN);
+      consumeWebAuthnSignInFlag();
 
       // PRF material is handed off in-memory (not sessionStorage) and consumed by
       // unlockWithStoredPrf; peek without consuming to decide whether to attempt.

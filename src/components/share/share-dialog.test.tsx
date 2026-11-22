@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
@@ -28,8 +29,21 @@ vi.mock("@/lib/http/toast-api-error", () => ({
 
 // Stub heavy UI primitives so child rendering is deterministic in jsdom.
 vi.mock("@/components/ui/dialog", () => ({
-  Dialog: ({ children, open }: { children: React.ReactNode; open: boolean }) =>
-    open ? <div role="dialog">{children}</div> : null,
+  Dialog: ({
+    children,
+    open,
+    onOpenChange,
+  }: {
+    children: React.ReactNode;
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  }) =>
+    open ? (
+      <div role="dialog">
+        <button type="button" onClick={() => onOpenChange(false)}>dismiss</button>
+        {children}
+      </div>
+    ) : null,
   DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
@@ -453,5 +467,75 @@ describe("ShareDialog — reopening after a session", () => {
 
     expect(screen.getByRole("switch")).not.toBeChecked();
     expect(screen.getByPlaceholderText("maxViewsPlaceholder")).toHaveValue(null);
+  });
+});
+
+describe("ShareDialog — closing with a created link", () => {
+  const SHARE_URL = "https://app.example.com/s/late";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Owns `open` the way password-card does, so a dismissal really closes.
+  function Host() {
+    const [open, setOpen] = useState(true);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>reopen</button>
+        <ShareDialog
+          open={open}
+          onOpenChange={setOpen}
+          passwordEntryId="p1"
+          decryptedData={{ title: "x", username: "u", password: "pw" }}
+        />
+      </>
+    );
+  }
+
+  /** Lists resolve at once; the create POST waits for the returned resolver. */
+  function pendingCreate() {
+    let resolve: (res: Response) => void = () => {};
+    mockFetch.mockImplementation((_path: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? new Promise<Response>((r) => {
+            resolve = r;
+          })
+        : Promise.resolve(okJson({ items: [] })),
+    );
+    return (body: unknown) => resolve(okJson(body));
+  }
+
+  async function startCreate() {
+    render(<Host />);
+    fireEvent.click(screen.getByRole("button", { name: /create/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /create/ })).toBeDisabled());
+  }
+
+  it("stays open when dismissed while the link is being created", async () => {
+    const resolveCreate = pendingCreate();
+    await startCreate();
+
+    fireEvent.click(screen.getByRole("button", { name: "dismiss" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    resolveCreate({ url: "/s/late", accessPassword: "late-access-pw" });
+    expect(await screen.findByDisplayValue(SHARE_URL)).toBeInTheDocument();
+  });
+
+  it("shows neither the URL nor the access password on reopen after the late result is dismissed", async () => {
+    const resolveCreate = pendingCreate();
+    await startCreate();
+    fireEvent.click(screen.getByRole("button", { name: "dismiss" }));
+    resolveCreate({ url: "/s/late", accessPassword: "late-access-pw" });
+    expect(await screen.findByDisplayValue("late-access-pw")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "dismiss" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "reopen" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(SHARE_URL)).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("late-access-pw")).not.toBeInTheDocument();
   });
 });

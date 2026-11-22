@@ -113,7 +113,11 @@ export function useEmergencyVault(grantId: string) {
           },
           encryptionKey
         );
-        const granteePrivKey = await importPrivateKey(granteePrivKeyBytes);
+        // importKey copies the bytes, so the plaintext PKCS#8 is wiped on
+        // either outcome.
+        const granteePrivKey = await importPrivateKey(granteePrivKeyBytes).finally(() =>
+          granteePrivKeyBytes.fill(0),
+        );
 
         // 3. Unwrap owner's secretKey
         const hkdfSalt = hexDecode(vaultData.hkdfSalt);
@@ -137,8 +141,9 @@ export function useEmergencyVault(grantId: string) {
         );
 
         // 4. Derive owner's encryption key
-        const ownerEncKey = await deriveEncryptionKey(ownerSecretKey);
-        ownerSecretKey.fill(0);
+        const ownerEncKey = await deriveEncryptionKey(ownerSecretKey).finally(() =>
+          ownerSecretKey.fill(0),
+        );
         ownerEncKeyRef.current = ownerEncKey;
 
         // 5. Fetch encrypted entries
