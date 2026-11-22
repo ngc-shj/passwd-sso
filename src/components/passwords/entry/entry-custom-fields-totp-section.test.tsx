@@ -260,6 +260,20 @@ describe("EntryCustomFieldsTotpSection", () => {
     expect(fieldsState()).toEqual([{ label: "a", value: "", type }]);
   });
 
+  it.each([
+    ["fieldText", "text"],
+    ["fieldHidden", "hidden"],
+    ["fieldUrl", "url"],
+  ])("clears a boolean field's value when the type changes via %s", async (itemLabel, type) => {
+    const user = userEvent.setup();
+    render(<Harness initial={[{ label: "a", value: "true", type: "boolean" }]} />);
+
+    await user.click(screen.getByRole("button", { name: itemLabel }));
+
+    expect(fieldsState()).toEqual([{ label: "a", value: "", type }]);
+    expect(screen.getByPlaceholderText("fieldValue")).toHaveValue("");
+  });
+
   it("keeps the value when the type changes to hidden", async () => {
     const user = userEvent.setup();
     render(<Harness initial={[{ label: "a", value: "keep", type: "text" }]} />);

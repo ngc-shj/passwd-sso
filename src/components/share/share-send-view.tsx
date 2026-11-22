@@ -8,7 +8,7 @@ import { CopyButton } from "@/components/passwords/shared/copy-button";
 import { Clock, Eye, MessageSquare, Paperclip, Download, AlertTriangle } from "lucide-react";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { formatFileSize } from "@/lib/format/format-file-size";
-import { fetchApi, hardNavigate, withBasePath } from "@/lib/url-helpers";
+import { fetchApi, withBasePath } from "@/lib/url-helpers";
 
 interface ShareSendViewProps {
   sendType: "TEXT" | "FILE";
@@ -23,30 +23,22 @@ interface ShareSendViewProps {
   accessToken?: string;
 }
 
-export function ShareSendView({
-  sendType,
-  name,
-  text,
-  filename,
-  sizeBytes,
-  token,
-  expiresAt,
-  viewCount,
-  maxViews,
-  accessToken,
-}: ShareSendViewProps) {
+interface ProtectedDownloadButtonProps {
+  token: string;
+  accessToken: string;
+  filename?: string | null;
+}
+
+/**
+ * The download for a password-protected Send: the file route needs the access
+ * token as a Bearer header, which a plain link cannot carry, so the file is
+ * fetched and handed to the browser as a blob.
+ */
+function ProtectedDownloadButton({ token, accessToken, filename }: ProtectedDownloadButtonProps) {
   const t = useTranslations("Share");
-  const locale = useLocale();
   const [downloadError, setDownloadError] = useState(false);
 
   const handleDownload = useCallback(async () => {
-    if (!accessToken) {
-      // Non-protected share: direct download
-      hardNavigate(`/s/${token}/download`);
-      return;
-    }
-
-    // Protected share: fetch with Authorization header
     setDownloadError(false);
     try {
       const res = await fetchApi(`/s/${token}/download`, {
@@ -71,6 +63,36 @@ export function ShareSendView({
     }
   }, [accessToken, token, filename]);
 
+  return (
+    <>
+      {downloadError && (
+        <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-2.5 text-xs text-destructive">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span>{t("contentLoadError")}</span>
+        </div>
+      )}
+      <Button className="w-full" onClick={handleDownload}>
+        <Download className="mr-2 h-4 w-4" />
+        {t("sendDownload")}
+      </Button>
+    </>
+  );
+}
+
+export function ShareSendView({
+  sendType,
+  name,
+  text,
+  filename,
+  sizeBytes,
+  token,
+  expiresAt,
+  viewCount,
+  maxViews,
+  accessToken,
+}: ShareSendViewProps) {
+  const t = useTranslations("Share");
+  const locale = useLocale();
   return (
     <div className="min-h-screen bg-gradient-to-b from-muted/30 to-background p-4">
       <div className="mx-auto max-w-4xl py-6">
@@ -126,17 +148,12 @@ export function ShareSendView({
                     </p>
                   )}
                 </div>
-                {downloadError && (
-                  <div className="flex items-center gap-2 rounded-lg border border-destructive/50 bg-destructive/10 p-2.5 text-xs text-destructive">
-                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                    <span>{t("contentLoadError")}</span>
-                  </div>
-                )}
                 {accessToken ? (
-                  <Button className="w-full" onClick={handleDownload}>
-                    <Download className="mr-2 h-4 w-4" />
-                    {t("sendDownload")}
-                  </Button>
+                  <ProtectedDownloadButton
+                    token={token}
+                    accessToken={accessToken}
+                    filename={filename}
+                  />
                 ) : (
                   <Button asChild className="w-full">
                     <a href={withBasePath(`/s/${token}/download`)}>

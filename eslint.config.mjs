@@ -22,6 +22,55 @@ const INSENSITIVE_EQUALS_RESTRICTION = {
     "for an exact case-insensitive match (see src/lib/prisma/prisma-filters.ts).",
 };
 
+// Every programmatic clipboard write of a secret — including secret-bearing
+// URLs (share links with `#key=`, Send links, invite links) — goes through
+// copySecretToClipboard (src/lib/clipboard/copy-secret.ts), which bounds how
+// long the value stays there. A best-effort tripwire: a computed or template
+// property name, Reflect.get, an alias (`const cd = e.clipboardData`) or an
+// untyped navigator alias is not visible to a syntax selector; review covers
+// that residue. Reading pasted text (`clipboardData.getData`) is not a write and
+// is not matched.
+const CLIPBOARD_MESSAGE =
+  "Write to the clipboard only through copySecretToClipboard (src/lib/clipboard/copy-secret.ts), " +
+  "which clears the value after a timeout.";
+const CLIPBOARD_RESTRICTIONS = [
+  "MemberExpression[property.name='clipboard']",
+  "MemberExpression[property.value='clipboard']",
+  "ObjectPattern > Property[key.name='clipboard']",
+  "ObjectPattern > Property[key.value='clipboard']",
+  "MemberExpression[property.name='execCommand']",
+  "CallExpression[callee.object.property.name='clipboardData'][callee.property.name='setData']",
+].map((selector) => ({ selector, message: CLIPBOARD_MESSAGE }));
+
+// A toast is user-facing text, so its first argument must come from a
+// translator: a string or template literal there — directly, or as an arm of a
+// `?:`, `??` or `||` — ships untranslated.
+const LITERAL_TYPE = "/^(Literal|TemplateLiteral)$/";
+const TOAST_LITERAL_RESTRICTION = {
+  selector:
+    "CallExpression:matches([callee.name='toast'], [callee.object.name='toast'])" +
+    ":matches(" +
+    [
+      `[arguments.0.type=${LITERAL_TYPE}]`,
+      `[arguments.0.type='ConditionalExpression'][arguments.0.consequent.type=${LITERAL_TYPE}]`,
+      `[arguments.0.type='ConditionalExpression'][arguments.0.alternate.type=${LITERAL_TYPE}]`,
+      `[arguments.0.type='LogicalExpression'][arguments.0.left.type=${LITERAL_TYPE}]`,
+      `[arguments.0.type='LogicalExpression'][arguments.0.right.type=${LITERAL_TYPE}]`,
+    ].join(", ") +
+    ")",
+  message: "Toast text must be translated: pass t(\"key\"), not a string or template literal.",
+};
+
+const NON_TEST_IGNORES = ["**/*.test.*", "**/*.spec.*", "**/__tests__/**"];
+
+// The root runtime files ship in the same bundles as src/ and get the same rules.
+const ROOT_RUNTIME_FILES = [
+  "proxy.ts",
+  "instrumentation-client.ts",
+  "sentry.client.config.ts",
+  "sentry.server.config.ts",
+];
+
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
@@ -49,10 +98,35 @@ const eslintConfig = defineConfig([
     // (fresh checkout, no .claude) never sees.
     ".claude/**",
   ]),
+  // no-restricted-syntax layout. A later block's options REPLACE an earlier
+  // one's for every file both match, so each block below restates every set
+  // that must still apply to its files:
+  //   1. src/** and scripts/**, tests included: INSENSITIVE_EQUALS.
+  //   2. Non-test src/** outside src/lib/clipboard/**, plus the root runtime
+  //      files: INSENSITIVE_EQUALS + clipboard + toast.
+  //   3. Non-test components/hooks: fetch + INSENSITIVE_EQUALS + clipboard +
+  //      toast.
+  // src/lib/clipboard/** is the one sanctioned writer, so it keeps block 1 only.
+  // copySecretWithoutClear is restricted under no-restricted-imports — a
+  // different rule key, so it does not take part in this replacement.
+  // scripts/__tests__/eslint-clipboard-and-toast.test.mjs pins every set on
+  // every block.
   {
     files: ["src/**/*.{ts,tsx}", "scripts/**/*.{ts,mts}"],
     rules: {
       "no-restricted-syntax": ["error", INSENSITIVE_EQUALS_RESTRICTION],
+    },
+  },
+  {
+    files: ["src/**/*.{ts,tsx}", ...ROOT_RUNTIME_FILES],
+    ignores: [...NON_TEST_IGNORES, "src/lib/clipboard/**"],
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        INSENSITIVE_EQUALS_RESTRICTION,
+        ...CLIPBOARD_RESTRICTIONS,
+        TOAST_LITERAL_RESTRICTION,
+      ],
     },
   },
   {
@@ -82,7 +156,43 @@ const eslintConfig = defineConfig([
             "Use fetchApi from @/lib/url-helpers instead.",
         },
         INSENSITIVE_EQUALS_RESTRICTION,
+        ...CLIPBOARD_RESTRICTIONS,
+        TOAST_LITERAL_RESTRICTION,
       ],
+    },
+  },
+  {
+    // The non-clearing copy is for a value the user is told to keep. Restricted
+    // by import name, so an alias (`as c`) and a namespace import are caught
+    // too; the `**/` group catches relative specifiers. A dynamic import() is
+    // not visible to this rule.
+    files: ["src/**/*.{ts,tsx}", ...ROOT_RUNTIME_FILES],
+    ignores: NON_TEST_IGNORES,
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["@/lib/clipboard/copy-secret", "**/lib/clipboard/copy-secret"],
+              importNames: ["copySecretWithoutClear"],
+              message:
+                "copySecretWithoutClear leaves the secret on the clipboard indefinitely. " +
+                "Use copySecretToClipboard.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    // The one sanctioned non-clearing caller: the recovery key, which the user
+    // is instructed to store permanently. Like the no-console sinks below, this
+    // list IS the audit surface. It re-declares no no-restricted-syntax set, so
+    // the clipboard and toast rules still apply to this file.
+    files: ["src/components/vault/recovery-key-dialog.tsx"],
+    rules: {
+      "no-restricted-imports": "off",
     },
   },
   {

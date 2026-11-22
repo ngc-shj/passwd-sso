@@ -178,9 +178,16 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
 
   const handleCopyUrl = async () => {
     if (!createdUrl) return;
-    await navigator.clipboard.writeText(createdUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2 * MS_PER_SECOND);
+    // Possession of the Send URL is access to its content, so it gets the same
+    // bounded residency as any other secret.
+    const outcome = await copySecretToClipboard(() => createdUrl);
+    reportCopyOutcome(outcome, {
+      tCopy,
+      onOk: () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2 * MS_PER_SECOND);
+      },
+    });
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {

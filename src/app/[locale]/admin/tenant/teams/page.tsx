@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Link } from "@/i18n/navigation";
 import { Button } from "@/components/ui/button";
@@ -10,57 +9,17 @@ import { TeamCreateDialog } from "@/components/team/management/team-create-dialo
 import { TeamRoleBadge } from "@/components/team/management/team-role-badge";
 import { OwnerlessTeamsCard } from "@/components/team/management/ownerless-teams-card";
 import { Plus, UsersRound, CalendarClock, Globe } from "lucide-react";
-import { API_PATH } from "@/lib/constants";
 import { formatDate } from "@/lib/format/format-datetime";
-import { fetchApi } from "@/lib/url-helpers";
-import { notifyTeamDataChanged } from "@/lib/events";
 import { useTenantRole } from "@/hooks/use-tenant-role";
+import { useTenantTeamList } from "@/hooks/team/use-tenant-team-list";
 import { SectionLayout } from "@/components/settings/account/section-layout";
-
-interface TeamListItem {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  role: string;
-  createdAt: string;
-  memberCount: number;
-  tenantName?: string;
-  isCrossTenant?: boolean;
-}
 
 export default function AdminTenantTeamsPage() {
   const t = useTranslations("Team");
   const tAdmin = useTranslations("AdminConsole");
   const locale = useLocale();
   const { isAdmin } = useTenantRole();
-  const [teams, setTeams] = useState<TeamListItem[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const fetchTeams = () => {
-    void (async () => {
-      try {
-        const res = await fetchApi(API_PATH.TEAMS);
-        if (!res.ok) return;
-        const data = await res.json();
-        if (Array.isArray(data)) setTeams(data);
-      } catch {
-        // best-effort — leave teams empty
-      } finally {
-        setLoading(false);
-      }
-    })();
-  };
-
-  const handleCreated = () => {
-    setLoading(true);
-    fetchTeams();
-    notifyTeamDataChanged();
-  };
-
-  useEffect(() => {
-    fetchTeams();
-  }, []);
+  const { teams, loading, handleCreated } = useTenantTeamList();
 
   return (
     <SectionLayout

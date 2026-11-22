@@ -84,6 +84,9 @@ vi.mock("@/components/ui/switch", () => ({
   ),
 }));
 
+import { toast } from "sonner";
+import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
+import { installClipboard, uninstallClipboard } from "@/__tests__/helpers/mock-clipboard";
 import { ShareDialog } from "./share-dialog";
 
 function okJson(body: unknown): Response {
@@ -325,5 +328,77 @@ describe("ShareDialog — §Sec-1 share-flow crypto invariants", () => {
     await waitFor(() => {
       expect(screen.getByText("sharingDisabledByPolicy")).toBeInTheDocument();
     });
+  });
+});
+
+describe("ShareDialog — copying the created share URL", () => {
+  const SHARE_URL = "https://app.example.com/s/abc123";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    uninstallClipboard();
+  });
+
+  async function createLinkAndFindCopyButton(): Promise<HTMLElement> {
+    mockFetch
+      .mockResolvedValueOnce(okJson({ items: [] }))
+      .mockResolvedValueOnce(okJson({ url: "/s/abc123" }))
+      .mockResolvedValueOnce(okJson({ items: [] }));
+    render(
+      <ShareDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        passwordEntryId="p1"
+        decryptedData={{ title: "x", username: "u", password: "pw" }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /create/ }));
+    const field = await screen.findByDisplayValue(SHARE_URL);
+    return within(field.parentElement as HTMLElement).getByRole("button");
+  }
+
+  it("writes the share URL to the clipboard and blanks it after the clear timeout", async () => {
+    const clip = installClipboard({ readText: vi.fn().mockResolvedValue(SHARE_URL) });
+    const copyButton = await createLinkAndFindCopyButton();
+    vi.useFakeTimers();
+
+    fireEvent.click(copyButton);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(clip.writeText).toHaveBeenCalledWith(SHARE_URL);
+
+    await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_TIMEOUT_MS);
+    expect(clip.writeText).toHaveBeenLastCalledWith("");
+  });
+
+  it("shows the copied tick instead of a toast when the write succeeds", async () => {
+    installClipboard();
+    const copyButton = await createLinkAndFindCopyButton();
+
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(copyButton.querySelector(".lucide-check")).not.toBeNull();
+    });
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("reports a rejected write with the write-failed toast and keeps the copy icon", async () => {
+    installClipboard({
+      writeText: vi.fn().mockRejectedValue(new DOMException("denied", "NotAllowedError")),
+    });
+    const copyButton = await createLinkAndFindCopyButton();
+
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("copyWriteFailed");
+    });
+    expect(toast.error).not.toHaveBeenCalledWith("createError");
+    expect(copyButton.querySelector(".lucide-check")).toBeNull();
+    expect(copyButton.querySelector(".lucide-copy")).not.toBeNull();
   });
 });

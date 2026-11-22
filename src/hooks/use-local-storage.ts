@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 
 /**
  * SSR-safe localStorage hook with shallow merge for object values.
@@ -43,20 +43,31 @@ export function useLocalStorage<T>(
     }
   }, [key, defaultValue]);
 
-  const setValue = useCallback(
-    (value: T | ((prev: T) => T)) => {
-      setStoredValue((prev) => {
-        const nextValue = value instanceof Function ? value(prev) : value;
-        try {
-          localStorage.setItem(key, JSON.stringify(nextValue));
-        } catch {
-          // Quota exceeded or private browsing — silently degrade
-        }
-        return nextValue;
-      });
-    },
-    [key]
-  );
+  // Set by setValue, consumed by the write effect: the updater stays pure (React
+  // may run it twice), and a value that only came from hydration is never
+  // written back.
+  const pendingWriteRef = useRef(false);
+  // The value the write effect last saw. StrictMode re-runs mount effects with
+  // the value unchanged; without this the re-run would persist the default
+  // while a setValue from that same commit is still queued.
+  const seenValueRef = useRef(storedValue);
+
+  useEffect(() => {
+    if (seenValueRef.current === storedValue) return;
+    seenValueRef.current = storedValue;
+    if (!pendingWriteRef.current) return;
+    pendingWriteRef.current = false;
+    try {
+      localStorage.setItem(key, JSON.stringify(storedValue));
+    } catch {
+      // Quota exceeded or private browsing — silently degrade
+    }
+  }, [key, storedValue]);
+
+  const setValue = useCallback((value: T | ((prev: T) => T)) => {
+    pendingWriteRef.current = true;
+    setStoredValue((prev) => (value instanceof Function ? value(prev) : value));
+  }, []);
 
   return [storedValue, setValue];
 }

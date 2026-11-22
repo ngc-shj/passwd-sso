@@ -360,9 +360,16 @@ export function ShareDialog({
 
   const handleCopyUrl = async () => {
     if (!createdUrl) return;
-    await navigator.clipboard.writeText(createdUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2 * MS_PER_SECOND);
+    // The URL carries the share key in its `#key=` fragment, so it gets the same
+    // bounded residency as any other secret.
+    const outcome = await copySecretToClipboard(() => createdUrl);
+    reportCopyOutcome(outcome, {
+      tCopy,
+      onOk: () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2 * MS_PER_SECOND);
+      },
+    });
   };
 
   const fetchAccessLogs = useCallback(

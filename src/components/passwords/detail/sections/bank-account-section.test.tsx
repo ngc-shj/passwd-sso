@@ -1,18 +1,32 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
+const { copied } = vi.hoisted(() => ({ copied: [] as unknown[] }));
+
 vi.mock("../../shared/copy-button", () => ({
-  CopyButton: () => <button type="button" data-testid="copy">copy</button>,
+  CopyButton: ({ getValue, fieldLabel }: { getValue: () => unknown; fieldLabel: string }) => (
+    <button
+      type="button"
+      data-testid="copy"
+      aria-label={`copy ${fieldLabel}`}
+      onClick={async () => {
+        copied.push(await getValue());
+      }}
+    >
+      copy
+    </button>
+  ),
 }));
 
 import { BankAccountSection } from "./bank-account-section";
 import type { InlineDetailData } from "@/types/entry";
+import type { CreateGuardedGetterFn } from "./types";
 
 const baseData: InlineDetailData = {
   id: "e1",
@@ -73,5 +87,106 @@ describe("BankAccountSection", () => {
     expect(screen.queryByText("GB00ACME01234567890")).not.toBeInTheDocument();
     // dot mask renders multiple times
     expect(screen.getAllByText("••••••••").length).toBeGreaterThan(0);
+  });
+});
+
+// Marks values that went through the reprompt guard so a test can tell a
+// guarded copy from a plain one.
+const guardedGetter: CreateGuardedGetterFn = (id, reprompt, getter) => () =>
+  Promise.resolve(`guarded(${id},${String(reprompt)}):${getter()}`);
+const passVerification = (_id: string, _r: boolean, cb: () => void) => cb();
+const denyVerification = () => {};
+
+const fullData: InlineDetailData = {
+  ...baseData,
+  swiftBic: "ACMEGB2L",
+  branchName: "Central",
+  notes: "bank memo",
+};
+
+function renderFull(
+  data: InlineDetailData = fullData,
+  requireVerification: (id: string, r: boolean, cb: () => void) => void = passVerification,
+) {
+  return render(
+    <BankAccountSection
+      data={data}
+      requireVerification={requireVerification}
+      createGuardedGetter={guardedGetter}
+    />,
+  );
+}
+
+// The reveal toggle is the icon button in the same field as the label.
+function revealToggle(label: string): HTMLElement {
+  const field = screen.getByText(label).closest("div");
+  if (!field) throw new Error(`no field for ${label}`);
+  const toggle = within(field)
+    .getAllByRole("button")
+    .find((b) => b.dataset.testid !== "copy");
+  if (!toggle) throw new Error(`no reveal toggle for ${label}`);
+  return toggle;
+}
+
+describe("BankAccountSection copy and reveal", () => {
+  beforeEach(() => {
+    copied.length = 0;
+  });
+
+  it.each([
+    ["bankName", "Acme Bank"],
+    ["accountHolderName", "Alice"],
+    ["swiftBic", "ACMEGB2L"],
+  ])("copies %s as plain text without the reprompt guard", async (label, value) => {
+    renderFull({ ...fullData, requireReprompt: true });
+    fireEvent.click(screen.getByRole("button", { name: `copy ${label}` }));
+    await waitFor(() => expect(copied).toEqual([value]));
+  });
+
+  it.each([
+    ["accountNumber", "0123456789"],
+    ["routingNumber", "012345678"],
+    ["iban", "GB00ACME01234567890"],
+  ])("copies %s through the reprompt guard", async (label, value) => {
+    renderFull({ ...fullData, requireReprompt: true });
+    fireEvent.click(screen.getByRole("button", { name: `copy ${label}` }));
+    await waitFor(() => expect(copied).toEqual([`guarded(e1,true):${value}`]));
+  });
+
+  it.each([
+    ["accountNumber", "0123456789"],
+    ["routingNumber", "012345678"],
+    ["iban", "GB00ACME01234567890"],
+  ])("reveals %s with an auto-hide notice and masks it again on the second click", (label, shown) => {
+    renderFull();
+    fireEvent.click(revealToggle(label));
+    expect(screen.getByText(shown)).toBeInTheDocument();
+    expect(screen.getByText("autoHide")).toBeInTheDocument();
+
+    fireEvent.click(revealToggle(label));
+    expect(screen.queryByText(shown)).not.toBeInTheDocument();
+    expect(screen.queryByText("autoHide")).not.toBeInTheDocument();
+  });
+
+  it("keeps iban masked when verification is not granted", () => {
+    renderFull(fullData, denyVerification);
+    fireEvent.click(revealToggle("iban"));
+    expect(screen.queryByText("GB00ACME01234567890")).not.toBeInTheDocument();
+    expect(screen.queryByText("autoHide")).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ["savings", "accountTypeSavings"],
+    ["other", "accountTypeOther"],
+    ["brokerage", "brokerage"],
+  ])("renders account type %s as %s", (accountType, shown) => {
+    renderFull({ ...fullData, accountType });
+    expect(screen.getByText(shown)).toBeInTheDocument();
+  });
+
+  it("renders the branch name and notes", () => {
+    renderFull();
+    expect(screen.getByText("Central")).toBeInTheDocument();
+    expect(screen.getByText("bank memo")).toBeInTheDocument();
   });
 });

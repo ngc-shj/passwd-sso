@@ -19,6 +19,7 @@ import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { COPY_OUTCOME, copySecretToClipboard } from "@/lib/clipboard/copy-secret";
 
 interface Props {
   teamId: string;
@@ -67,11 +68,12 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
       onSuccess();
       // The invitation exists from here on: a clipboard refusal, or no
       // clipboard at all (a non-secure origin), must not be reported as a
-      // failed invitation.
-      const copied = await Promise.resolve()
-        .then(() => navigator.clipboard.writeText(inviteUrl))
-        .then(() => true, () => false);
-      toast.success(t(copied ? "invitedWithLink" : "invitedLinkNotCopied"));
+      // failed invitation. The URL redeems the invitation, so it is copied with
+      // the same bounded residency as any other secret.
+      const outcome = await copySecretToClipboard(() => inviteUrl);
+      toast.success(
+        t(outcome === COPY_OUTCOME.OK ? "invitedWithLink" : "invitedLinkNotCopied"),
+      );
     } catch {
       toast.error(t("inviteFailed"));
     } finally {

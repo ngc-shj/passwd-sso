@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 if (typeof globalThis.ResizeObserver === "undefined") {
@@ -313,3 +313,239 @@ describe("AuditDeliveryTargetCard", () => {
     });
   });
 });
+
+describe("AuditDeliveryTargetCard create validation and payloads", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+  });
+
+  function postBodies() {
+    return mockFetch.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === "POST")
+      .map(([, init]) => JSON.parse(String((init as RequestInit).body)) as unknown);
+  }
+
+  async function openCreate(kindLabel: string) {
+    render(<AuditDeliveryTargetCard />);
+    await waitFor(() => expect(screen.getByText("noTargets")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /addTarget/ }));
+    fireEvent.click(screen.getByText(kindLabel));
+  }
+
+  function submit() {
+    const addButtons = screen.getAllByRole("button", { name: /addTarget/ });
+    fireEvent.click(addButtons[addButtons.length - 1]);
+  }
+
+  function lastAddButton() {
+    const addButtons = screen.getAllByRole("button", { name: /addTarget/ });
+    return addButtons[addButtons.length - 1];
+  }
+
+  it("rejects a non-https webhook URL without posting", async () => {
+    setupTargets([]);
+    await openCreate("kindWebhook");
+    fireEvent.change(screen.getByLabelText("url"), { target: { value: "http://hooks.example.com" } });
+    fireEvent.change(screen.getByLabelText("secret"), { target: { value: "s" } });
+
+    submit();
+
+    expect(await screen.findByText("urlHttpsRequired")).toBeInTheDocument();
+    expect(postBodies()).toHaveLength(0);
+  });
+
+  it("rejects an unparseable URL and clears the error once the URL is edited", async () => {
+    setupTargets([]);
+    await openCreate("kindSiemHec");
+    fireEvent.change(screen.getByLabelText("url"), { target: { value: "not a url" } });
+    fireEvent.change(screen.getByLabelText("hecToken"), { target: { value: "tok" } });
+
+    submit();
+    expect(await screen.findByText("urlInvalid")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("url"), { target: { value: "https://splunk.example.com" } });
+    expect(screen.queryByText("urlInvalid")).not.toBeInTheDocument();
+  });
+
+  it("keeps create disabled until the webhook secret is filled", async () => {
+    setupTargets([]);
+    await openCreate("kindWebhook");
+    fireEvent.change(screen.getByLabelText("url"), { target: { value: "https://hooks.example.com" } });
+    expect(lastAddButton()).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("secret"), { target: { value: "   " } });
+    expect(lastAddButton()).toBeDisabled();
+
+    fireEvent.change(screen.getByLabelText("secret"), { target: { value: "s3cret" } });
+    expect(lastAddButton()).toBeEnabled();
+  });
+
+  it("posts a trimmed SIEM HEC payload", async () => {
+    setupTargets([]);
+    await openCreate("kindSiemHec");
+    fireEvent.change(screen.getByLabelText("url"), { target: { value: " https://splunk.example.com/hec " } });
+    fireEvent.change(screen.getByLabelText("hecToken"), { target: { value: " tok " } });
+
+    submit();
+
+    await waitFor(() => expect(postBodies()).toHaveLength(1));
+    expect(postBodies()[0]).toEqual({
+      kind: "SIEM_HEC",
+      url: "https://splunk.example.com/hec",
+      token: "tok",
+    });
+  });
+
+  it("posts a trimmed S3 payload after validating the endpoint", async () => {
+    setupTargets([]);
+    await openCreate("kindS3Object");
+    fireEvent.change(screen.getByLabelText("endpoint"), { target: { value: "https://s3.example.com " } });
+    fireEvent.change(screen.getByLabelText("region"), { target: { value: " ap-northeast-1" } });
+    fireEvent.change(screen.getByLabelText("accessKeyId"), { target: { value: "AKIA " } });
+    fireEvent.change(screen.getByLabelText("secretAccessKey"), { target: { value: " sk" } });
+
+    submit();
+
+    await waitFor(() => expect(postBodies()).toHaveLength(1));
+    expect(postBodies()[0]).toEqual({
+      kind: "S3_OBJECT",
+      endpoint: "https://s3.example.com",
+      region: "ap-northeast-1",
+      accessKeyId: "AKIA",
+      secretAccessKey: "sk",
+    });
+  });
+
+  it("rejects a non-https S3 endpoint", async () => {
+    setupTargets([]);
+    await openCreate("kindS3Object");
+    fireEvent.change(screen.getByLabelText("endpoint"), { target: { value: "http://s3.example.com" } });
+    fireEvent.change(screen.getByLabelText("region"), { target: { value: "r" } });
+    fireEvent.change(screen.getByLabelText("accessKeyId"), { target: { value: "a" } });
+    fireEvent.change(screen.getByLabelText("secretAccessKey"), { target: { value: "s" } });
+
+    submit();
+
+    expect(await screen.findByText("urlHttpsRequired")).toBeInTheDocument();
+    expect(postBodies()).toHaveLength(0);
+  });
+
+  it("toasts createFailed and keeps the dialog open on a failed create", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        init?.method === "POST"
+          ? { ok: false, status: 500, json: () => Promise.resolve({ error: "INTERNAL_ERROR" }) }
+          : { ok: true, status: 200, json: () => Promise.resolve({ targets: [] }) },
+      ),
+    );
+    await openCreate("kindWebhook");
+    fireEvent.change(screen.getByLabelText("url"), { target: { value: "https://hooks.example.com" } });
+    fireEvent.change(screen.getByLabelText("secret"), { target: { value: "s" } });
+
+    submit();
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("createFailed"));
+    expect(screen.getByLabelText("url")).toHaveValue("https://hooks.example.com");
+  });
+
+  it("resets the form when the dialog is cancelled", async () => {
+    setupTargets([]);
+    await openCreate("kindWebhook");
+    fireEvent.change(screen.getByLabelText("url"), { target: { value: "https://hooks.example.com" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    fireEvent.click(screen.getByRole("button", { name: /addTarget/ }));
+
+    expect(screen.queryByLabelText("url")).not.toBeInTheDocument();
+  });
+});
+
+describe("AuditDeliveryTargetCard target list", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+  });
+
+  const activeTarget = {
+    id: "t1",
+    kind: "SIEM_HEC",
+    isActive: true,
+    failCount: 0,
+    lastError: "timeout",
+    lastDeliveredAt: "2026-02-03T04:05:06Z",
+    createdAt: "2026-01-01T00:00:00Z",
+  };
+
+  function patchBodies() {
+    return mockFetch.mock.calls
+      .filter(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")
+      .map(([url, init]) => [url, JSON.parse(String((init as RequestInit).body))] as const);
+  }
+
+  async function confirmToggle(kindLabel: string, confirmLabel: string) {
+    const badge = await screen.findByText(kindLabel);
+    const item = badge.closest("div.p-3") as HTMLElement;
+    fireEvent.click(within(item).getByRole("button"));
+    fireEvent.click(await screen.findByRole("button", { name: confirmLabel }));
+  }
+
+  it("shows the last delivery time and last error of a target", async () => {
+    setupTargets([activeTarget]);
+    render(<AuditDeliveryTargetCard />);
+    expect(await screen.findByText("lastDelivered: 2026-02-03T04:05:06Z")).toBeInTheDocument();
+    expect(screen.getByText("lastError: timeout")).toBeInTheDocument();
+  });
+
+  it("deactivates an active target after confirmation", async () => {
+    setupTargets([activeTarget]);
+    render(<AuditDeliveryTargetCard />);
+
+    await confirmToggle("kindSiemHec", "deactivate");
+
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("deactivated"));
+    expect(patchBodies()).toEqual([[expect.stringContaining("t1"), { isActive: false }]]);
+  });
+
+  it("lists inactive targets separately and reactivates one after confirmation", async () => {
+    setupTargets([{ ...activeTarget, id: "t9", kind: "S3_OBJECT", isActive: false }]);
+    render(<AuditDeliveryTargetCard />);
+
+    expect(await screen.findByText("noActiveTargets")).toBeInTheDocument();
+    fireEvent.click(screen.getByText(/^inactiveTargets/));
+    await confirmToggle("kindS3Object", "activate");
+
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("reactivated"));
+    expect(patchBodies()).toEqual([[expect.stringContaining("t9"), { isActive: true }]]);
+  });
+
+  it("toasts updateFailed when the toggle is rejected", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) =>
+      Promise.resolve(
+        init?.method === "PATCH"
+          ? { ok: false, status: 500, json: () => Promise.resolve({ error: "INTERNAL_ERROR" }) }
+          : { ok: true, status: 200, json: () => Promise.resolve({ targets: [activeTarget] }) },
+      ),
+    );
+    render(<AuditDeliveryTargetCard />);
+
+    await confirmToggle("kindSiemHec", "deactivate");
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("updateFailed"));
+    expect(mockToast.success).not.toHaveBeenCalled();
+  });
+
+  it("toasts updateFailed when the toggle request throws", async () => {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) =>
+      init?.method === "PATCH"
+        ? Promise.reject(new Error("offline"))
+        : Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ targets: [activeTarget] }) }),
+    );
+    render(<AuditDeliveryTargetCard />);
+
+    await confirmToggle("kindSiemHec", "deactivate");
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("updateFailed"));
+  });
+});
+

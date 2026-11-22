@@ -146,6 +146,7 @@ import { buildPersonalEntryAAD, buildTeamEntryAAD } from "@/lib/crypto/crypto-aa
 import { aadGatedDecrypt } from "@/__tests__/helpers/aad-model-decrypt";
 import { toast } from "sonner";
 import { TeamKeyVersionUnavailableError } from "@/lib/team/team-vault-core";
+import { REVEAL_TIMEOUT_MS } from "@/lib/constants";
 
 const HISTORY_ITEMS = [
   {
@@ -919,5 +920,80 @@ describe("ViewContent — sensitive field masking", () => {
     expect(screen.queryByText("123")).not.toBeInTheDocument();
     expect(screen.queryByText("4111111111111111")).not.toBeInTheDocument();
     expect(screen.queryByText("A12345678")).not.toBeInTheDocument();
+  });
+});
+
+describe("ViewContent — reveal timeout", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockRequireVerification.mockImplementation(
+      (_entryId: string, _reqReprompt: boolean, cb: () => void) => cb(),
+    );
+    mockDecryptData.mockResolvedValue(JSON.stringify({ title: "Test Entry", password: "s3cret!" }));
+    globalThis.fetch = mockFetchHistoryList();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  // Opens the view dialog on real timers, then hands the clock to the test.
+  async function openViewWithFakeClock(): Promise<HTMLButtonElement> {
+    await act(async () => {
+      render(<EntryHistorySection entryId="entry-1" />);
+    });
+    await waitFor(() => {
+      expect(screen.getByText(/entryHistory/)).toHaveTextContent("(1)");
+    });
+    fireEvent.click(screen.getByText(/entryHistory/));
+    await act(async () => {
+      fireEvent.click(screen.getAllByText(/viewVersion/)[0]);
+    });
+    const dialog = await screen.findByTestId("view-dialog");
+    vi.useFakeTimers();
+    const toggle = dialog.querySelector<HTMLButtonElement>('button[type="button"]');
+    if (!toggle) throw new Error("reveal toggle not rendered");
+    return toggle;
+  }
+
+  function advance(ms: number) {
+    act(() => {
+      vi.advanceTimersByTime(ms);
+    });
+  }
+
+  it("masks a revealed field again after the reveal timeout", async () => {
+    const toggle = await openViewWithFakeClock();
+
+    fireEvent.click(toggle);
+    expect(screen.getByText("s3cret!")).toBeInTheDocument();
+
+    advance(REVEAL_TIMEOUT_MS);
+    expect(screen.queryByText("s3cret!")).not.toBeInTheDocument();
+  });
+
+  it("hides a revealed field when its toggle is clicked again", async () => {
+    const toggle = await openViewWithFakeClock();
+    fireEvent.click(toggle);
+    expect(screen.getByText("s3cret!")).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+
+    expect(screen.queryByText("s3cret!")).not.toBeInTheDocument();
+  });
+
+  it("gives a re-reveal after a manual hide its own full timeout", async () => {
+    const toggle = await openViewWithFakeClock();
+    const half = REVEAL_TIMEOUT_MS / 2;
+
+    fireEvent.click(toggle);
+    advance(half);
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    advance(half + 1);
+    expect(screen.getByText("s3cret!")).toBeInTheDocument();
+
+    advance(half - 1);
+    expect(screen.queryByText("s3cret!")).not.toBeInTheDocument();
   });
 });

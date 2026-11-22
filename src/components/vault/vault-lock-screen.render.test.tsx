@@ -233,6 +233,17 @@ describe("VaultLockScreen passphrase unlock", () => {
     expect(await screen.findByText("unlockError")).toBeInTheDocument();
   });
 
+  it("replaces the passphrase form with the session-expired card on UNAUTHORIZED", async () => {
+    mockUnlock.mockRejectedValue(new MockVaultUnlockError(API_ERROR.UNAUTHORIZED));
+    render(<VaultLockScreen />);
+    expect(passphraseInput()).toBeInTheDocument();
+
+    submitPassphrase("my passphrase");
+
+    expect(await screen.findByText("sessionExpired")).toBeInTheDocument();
+    expect(screen.queryByLabelText("passphrase")).toBeNull();
+  });
+
   it("switches to the session-expired screen on UNAUTHORIZED and links to sign-in", async () => {
     mockUnlock.mockRejectedValue(new MockVaultUnlockError(API_ERROR.UNAUTHORIZED));
     render(<VaultLockScreen />);
@@ -343,6 +354,18 @@ describe("VaultLockScreen auto-unlock outcomes", () => {
     render(<VaultLockScreen />);
 
     expect(await screen.findByText("accountLocked")).toBeInTheDocument();
+  });
+
+  it.each([
+    [API_ERROR.RATE_LIMIT_EXCEEDED, "rateLimited"],
+    [API_ERROR.SERVICE_UNAVAILABLE, "serviceUnavailable"],
+    ["SOMETHING_ELSE", "unlockError"],
+  ])("maps a %s stored-PRF unlock error to the %s message, not the lockout", async (code, message) => {
+    mockUnlockWithStoredPrf.mockRejectedValue(new MockVaultUnlockError(code, null));
+    render(<VaultLockScreen />);
+
+    expect(await screen.findByText(message)).toBeInTheDocument();
+    expect(screen.queryByText("accountLocked")).toBeNull();
   });
 
   it("switches to the session-expired screen when the stored-PRF unlock is UNAUTHORIZED", async () => {

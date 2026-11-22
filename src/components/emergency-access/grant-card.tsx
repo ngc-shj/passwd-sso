@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { Copy, ShieldOff, ShieldAlert, ShieldCheck, ShieldX, KeyRound, Lock, Loader2, Info } from "lucide-react";
+import { ShieldOff, ShieldAlert, ShieldCheck, ShieldX, KeyRound, Lock, Loader2, Info } from "lucide-react";
 import { MS_PER_DAY, MS_PER_HOUR } from "@/lib/constants/time";
 import { useRouter } from "@/i18n/navigation";
 import { useVault } from "@/lib/vault/vault-context";
@@ -31,7 +31,7 @@ import {
   encryptPrivateKey,
 } from "@/lib/crypto/crypto-emergency";
 import { eaErrorToI18nKey } from "@/lib/http/api-error-codes";
-import { fetchApi, appUrl } from "@/lib/url-helpers";
+import { fetchApi } from "@/lib/url-helpers";
 
 interface Grant {
   id: string;
@@ -40,7 +40,6 @@ interface Grant {
   granteeEmail: string;
   status: EaStatusValue;
   waitDays: number;
-  token?: string;
   requestedAt: string | null;
   waitExpiresAt: string | null;
   createdAt: string;
@@ -187,13 +186,6 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
     ? grant.grantee?.name || grant.granteeEmail
     : grant.owner.name || grant.owner.email || "";
 
-  const handleCopyLink = async () => {
-    if (!grant.token) return;
-    const url = appUrl(`/dashboard/emergency-access/invite/${grant.token}`);
-    await navigator.clipboard.writeText(url);
-    toast.success(t("copyLink"));
-  };
-
   const handleRevoke = async (permanent: boolean) => {
     try {
       const res = await fetchApi(apiPath.emergencyGrantAction(grant.id, "revoke"), {
@@ -334,12 +326,6 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
 
           <div className="flex items-center gap-1">
             {/* Owner actions */}
-            {isOwner && grant.status === EA_STATUS.PENDING && grant.token && (
-              <Button variant="ghost" size="icon" onClick={handleCopyLink} title={t("copyLink")}>
-                <Copy className="h-4 w-4" />
-              </Button>
-            )}
-
             {isOwner && grant.status === EA_STATUS.REQUESTED && (
               <>
                 <AlertDialog>

@@ -5,7 +5,8 @@ import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
 import { API_PATH } from "@/lib/constants/auth/api-path";
 import { fetchApi } from "@/lib/url-helpers";
-import { readApiErrorBody, getApiErrorMessage } from "@/lib/http/read-api-error-body";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import {
@@ -73,6 +74,7 @@ export function CreateDelegationDialog({
   onCreated,
 }: Props) {
   const t = useTranslations("MachineIdentity.delegation");
+  const tApi = useTranslations("ApiErrors");
   const { encryptionKey, userId } = useVault();
   const [search, setSearch] = useState("");
   const [selectedTokenId, setSelectedTokenId] = useState<string>("");
@@ -210,7 +212,7 @@ export function CreateDelegationDialog({
       }
 
       if (failedIds.length > 0 && delegationEntries.length === 0) {
-        toast.error("Failed to build delegation entries");
+        toast.error(t("buildEntriesFailed"));
         return;
       }
 
@@ -229,11 +231,13 @@ export function CreateDelegationDialog({
         onOpenChange(false);
         onCreated();
       } else {
-        const message = getApiErrorMessage(await readApiErrorBody(res));
-        toast.error(message ?? "Failed to create delegation");
+        // details.message is an untranslated server string; only the code is
+        // shown, through the ApiErrors catalogue.
+        const body = await readApiErrorBody(res);
+        toast.error(tApi(apiErrorToI18nKey(body?.error)));
       }
     } catch {
-      toast.error("Failed to create delegation");
+      toast.error(t("createFailed"));
     } finally {
       setSubmitting(false);
     }

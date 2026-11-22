@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -52,6 +52,11 @@ export function NotificationBell() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  const notificationsRef = useRef<NotificationItem[]>([]);
+
+  useEffect(() => {
+    notificationsRef.current = notifications;
+  }, [notifications]);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -147,13 +152,13 @@ export function NotificationBell() {
         method: "DELETE",
       });
       if (res.ok) {
-        setNotifications((prev) => {
-          const removed = prev.find((n) => n.id === id);
-          if (removed && !removed.isRead) {
-            setUnreadCount((c) => Math.max(0, c - 1));
-          }
-          return prev.filter((n) => n.id !== id);
-        });
+        // Read the removed item from the last committed list: a setter called
+        // inside the list updater would run twice under StrictMode.
+        const removed = notificationsRef.current.find((n) => n.id === id);
+        setNotifications((prev) => prev.filter((n) => n.id !== id));
+        if (removed && !removed.isRead) {
+          setUnreadCount((c) => Math.max(0, c - 1));
+        }
       }
     } catch {
       // Silently ignore

@@ -2,7 +2,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
 import { render, screen, fireEvent, waitFor, within, act } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { StrictMode, type ReactNode } from "react";
 
 const { mockFetch } = vi.hoisted(() => ({ mockFetch: vi.fn() }));
 
@@ -124,12 +124,12 @@ function callsWith(url: string, method: string) {
   );
 }
 
-async function openWith(items: Item[], unreadCount: number) {
+async function openWith(items: Item[], unreadCount: number, { strict = false } = {}) {
   route({
     count: () => Promise.resolve(json({ unreadCount })),
     list: () => Promise.resolve(json({ items })),
   });
-  render(<NotificationBell />);
+  render(strict ? <StrictMode><NotificationBell /></StrictMode> : <NotificationBell />);
   if (unreadCount > 0) await within(bell()).findByText(String(unreadCount));
   fireEvent.click(screen.getByTestId("toggle-menu"));
 }
@@ -349,6 +349,30 @@ describe("NotificationBell", () => {
     fireEvent.click(screen.getByText("delete"));
     await waitFor(() => expect(screen.queryByText("First")).not.toBeInTheDocument());
     expect(within(bell()).getByText("2")).toBeInTheDocument();
+  });
+
+  it("decrements the badge by exactly one when an unread notification is deleted under StrictMode", async () => {
+    await openWith(
+      [item({ id: "n-1", title: "First" }), item({ id: "n-2", title: "Second" }), item({ id: "n-3", title: "Third" })],
+      3,
+      { strict: true },
+    );
+    await screen.findByText("First");
+    fireEvent.click(screen.getAllByText("delete")[0]);
+    await waitFor(() => expect(screen.queryByText("First")).not.toBeInTheDocument());
+    expect(within(bell()).getByText("2")).toBeInTheDocument();
+  });
+
+  it("leaves the badge unchanged when a read notification is deleted under StrictMode", async () => {
+    await openWith(
+      [item({ id: "n-1", title: "First", isRead: true }), item({ id: "n-2", title: "Second" })],
+      3,
+      { strict: true },
+    );
+    await screen.findByText("First");
+    fireEvent.click(screen.getAllByText("delete")[0]);
+    await waitFor(() => expect(screen.queryByText("First")).not.toBeInTheDocument());
+    expect(within(bell()).getByText("3")).toBeInTheDocument();
   });
 
   it("keeps the notification when the delete request fails", async () => {

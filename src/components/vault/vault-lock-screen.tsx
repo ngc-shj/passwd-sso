@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
@@ -38,6 +38,39 @@ export function formatLockedUntil(lockedUntil: string | null | undefined, t: (ke
   return t("accountLockedWithTime", { time: t("minutes", { count: String(minutes) }) });
 }
 
+export type UnlockErrorResolution =
+  | { kind: "sessionExpired" }
+  | { kind: "message"; message: string };
+
+/**
+ * The one mapping from an unlock failure to what the user sees. Each caller
+ * supplies its own strings; an unknown code or a non-VaultUnlockError gets
+ * `fallback`, never text taken from the error itself.
+ */
+export function resolveUnlockError(
+  err: unknown,
+  msgs: {
+    lockedUntil: (lockedUntil: string | null | undefined) => string;
+    rateLimited: string;
+    unavailable: string;
+    fallback: string;
+  },
+): UnlockErrorResolution {
+  if (!(err instanceof VaultUnlockError)) return { kind: "message", message: msgs.fallback };
+  switch (err.code) {
+    case API_ERROR.UNAUTHORIZED:
+      return { kind: "sessionExpired" };
+    case API_ERROR.ACCOUNT_LOCKED:
+      return { kind: "message", message: msgs.lockedUntil(err.lockedUntil) };
+    case API_ERROR.RATE_LIMIT_EXCEEDED:
+      return { kind: "message", message: msgs.rateLimited };
+    case API_ERROR.SERVICE_UNAVAILABLE:
+      return { kind: "message", message: msgs.unavailable };
+    default:
+      return { kind: "message", message: msgs.fallback };
+  }
+}
+
 export function VaultLockScreen() {
   const t = useTranslations("Vault");
   const tw = useTranslations("WebAuthn");
@@ -65,31 +98,32 @@ export function VaultLockScreen() {
         setPassphrase("");
       }
     } catch (err) {
-      if (err instanceof VaultUnlockError) {
-        switch (err.code) {
-          case API_ERROR.UNAUTHORIZED:
-            setSessionExpired(true);
-            return;
-          case API_ERROR.ACCOUNT_LOCKED:
-            setError(formatLockedUntil(err.lockedUntil, t));
-            break;
-          case API_ERROR.RATE_LIMIT_EXCEEDED:
-            setError(t("rateLimited"));
-            break;
-          case API_ERROR.SERVICE_UNAVAILABLE:
-            setError(t("retryLater"));
-            break;
-          default:
-            setError(t("unlockError"));
-        }
+      const resolved = resolveUnlockError(err, {
+        lockedUntil: (lockedUntil) => formatLockedUntil(lockedUntil, t),
+        rateLimited: t("rateLimited"),
+        unavailable: t("retryLater"),
+        fallback: t("unlockError"),
+      });
+      if (resolved.kind === "sessionExpired") {
+        setSessionExpired(true);
       } else {
-        setError(t("unlockError"));
+        setError(resolved.message);
       }
       setPassphrase("");
     } finally {
       setLoading(false);
     }
   };
+
+  const passkeyUnlockMessages = useMemo(
+    () => ({
+      lockedUntil: (lockedUntil: string | null | undefined) => formatLockedUntil(lockedUntil, t),
+      rateLimited: t("rateLimited"),
+      unavailable: tw("serviceUnavailable"),
+      fallback: tw("unlockError"),
+    }),
+    [t, tw],
+  );
 
   const handlePasskeyUnlock = useCallback(async () => {
     setPasskeyLoading(true);
@@ -100,30 +134,16 @@ export function VaultLockScreen() {
         setError(tw("unlockError"));
       }
     } catch (err) {
-      if (err instanceof VaultUnlockError) {
-        switch (err.code) {
-          case API_ERROR.UNAUTHORIZED:
-            setSessionExpired(true);
-            return;
-          case API_ERROR.ACCOUNT_LOCKED:
-            setError(formatLockedUntil(err.lockedUntil, t));
-            break;
-          case API_ERROR.RATE_LIMIT_EXCEEDED:
-            setError(t("rateLimited"));
-            break;
-          case API_ERROR.SERVICE_UNAVAILABLE:
-            setError(tw("serviceUnavailable"));
-            break;
-          default:
-            setError(tw("unlockError"));
-        }
+      const resolved = resolveUnlockError(err, passkeyUnlockMessages);
+      if (resolved.kind === "sessionExpired") {
+        setSessionExpired(true);
       } else {
-        setError(tw("unlockError"));
+        setError(resolved.message);
       }
     } finally {
       setPasskeyLoading(false);
     }
-  }, [unlockWithPasskey, t, tw]);
+  }, [unlockWithPasskey, tw, passkeyUnlockMessages]);
 
   // Track whether we arrived via WebAuthn sign-in.
   // The ref persists across renders so we don't lose the flag while
@@ -154,14 +174,11 @@ export function VaultLockScreen() {
             if (!ok) setError(tw("unlockError"));
           })
           .catch((err) => {
-            if (err instanceof VaultUnlockError) {
-              if (err.code === API_ERROR.UNAUTHORIZED) {
-                setSessionExpired(true);
-                return;
-              }
-              setError(formatLockedUntil(err.lockedUntil, t));
+            const resolved = resolveUnlockError(err, passkeyUnlockMessages);
+            if (resolved.kind === "sessionExpired") {
+              setSessionExpired(true);
             } else {
-              setError(tw("unlockError"));
+              setError(resolved.message);
             }
           })
           .finally(() => setPasskeyLoading(false));
@@ -170,7 +187,7 @@ export function VaultLockScreen() {
       // do NOT auto-trigger a separate ceremony — the user can manually unlock
       // with passphrase or click the passkey unlock button.
     };
-  }, [unlockWithStoredPrf, t, tw]);
+  }, [unlockWithStoredPrf, tw, passkeyUnlockMessages]);
 
   // Check if user has a passkey that can unlock now: PRF-capable AND holding
   // the server-side wrapping. A passkey registered while the vault was locked,

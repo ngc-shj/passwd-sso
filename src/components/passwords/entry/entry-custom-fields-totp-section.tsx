@@ -96,7 +96,9 @@ export function EntryCustomFieldsTotpSection({
                               value:
                                 v === CUSTOM_FIELD_TYPE.BOOLEAN
                                   ? "false"
-                                  : v === CUSTOM_FIELD_TYPE.DATE || v === CUSTOM_FIELD_TYPE.MONTH_YEAR
+                                  : v === CUSTOM_FIELD_TYPE.DATE ||
+                                      v === CUSTOM_FIELD_TYPE.MONTH_YEAR ||
+                                      f.type === CUSTOM_FIELD_TYPE.BOOLEAN
                                     ? ""
                                     : f.value,
                             }

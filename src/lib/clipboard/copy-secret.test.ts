@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 
 import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
 import { CopyCancelledError } from "./copy-cancelled-error";
@@ -11,14 +11,22 @@ import {
 } from "./copy-secret";
 
 describe("copySecretToClipboard", () => {
+  let addSpy: MockInstance<Window["addEventListener"]>;
+
   beforeEach(() => {
     vi.useFakeTimers();
     installClipboard();
+    addSpy = vi.spyOn(window, "addEventListener");
   });
 
   // Registered at acquisition, not after the assertions: a failing test must not
-  // leave fake timers or the clipboard descriptor installed for the rest of the file.
+  // leave fake timers, the clipboard descriptor or a refocus listener installed
+  // for the rest of the file.
   afterEach(() => {
+    for (const [type, listener] of addSpy.mock.calls) {
+      if (type === "focus") window.removeEventListener("focus", listener);
+    }
+    addSpy.mockRestore();
     vi.useRealTimers();
     uninstallClipboard();
   });
@@ -144,8 +152,8 @@ describe("copySecretToClipboard", () => {
     });
 
     it("blanks unconditionally when read-back is unavailable", async () => {
-      // The dominant path on Firefox (no page-script readText) and WebKit
-      // (permission-gated), not an edge case.
+      // Chromium without the clipboard-read permission. On Firefox and WebKit
+      // the blanking write is refused as well (no transient activation).
       const clip = installClipboard({
         readText: vi.fn().mockRejectedValue(new DOMException("denied", "NotAllowedError")),
       });
@@ -166,6 +174,11 @@ describe("copySecretToClipboard", () => {
 
       await expect(copyThenAdvance(clip)).resolves.toBeUndefined();
       expect(clip.writeText).toHaveBeenCalledTimes(1);
+      // The failure is handed to the refocus retry rather than dropped. Awaited
+      // here so the listener is registered before afterEach removes it.
+      await vi.waitFor(() =>
+        expect(addSpy).toHaveBeenCalledWith("focus", expect.any(Function)),
+      );
     });
   });
 
@@ -184,5 +197,152 @@ describe("copySecretToClipboard", () => {
       installClipboard();
       expect(await copySecretWithoutClear(() => "")).toBe(COPY_OUTCOME.EMPTY);
     });
+  });
+});
+
+describe("copySecretToClipboard — the refocus retry after a failed clear", () => {
+  const SECRET = "https://app.example.com/s/tok#key=abc";
+  const denied = () => new DOMException("denied", "NotAllowedError");
+
+  let addSpy: MockInstance<Window["addEventListener"]>;
+  let hasFocusSpy: MockInstance<Document["hasFocus"]>;
+
+  /** A clipboard that holds its content, and can be made to refuse like a backgrounded tab. */
+  function statefulClipboard() {
+    const state = { content: "", readable: true, writable: true };
+    const clip = installClipboard({
+      writeText: vi.fn(async (value: string) => {
+        if (!state.writable) throw denied();
+        state.content = value;
+      }),
+      readText: vi.fn(async () => {
+        if (!state.readable) throw denied();
+        return state.content;
+      }),
+    });
+    return { state, clip };
+  }
+
+  function focusListenerCount(): number {
+    return addSpy.mock.calls.filter(([type]) => type === "focus").length;
+  }
+
+  /** Copy, then let the timed clear fail because the tab is refused everything. */
+  async function copyAndFailTheTimedClear() {
+    const stateful = statefulClipboard();
+    await copySecretToClipboard(() => SECRET);
+    stateful.state.readable = false;
+    stateful.state.writable = false;
+    await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_TIMEOUT_MS);
+    await vi.waitFor(() => expect(focusListenerCount()).toBe(1));
+    // The user is back: the clipboard answers again.
+    stateful.state.readable = true;
+    stateful.state.writable = true;
+    stateful.clip.readText.mockClear();
+    stateful.clip.writeText.mockClear();
+    return stateful;
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    addSpy = vi.spyOn(window, "addEventListener");
+    // jsdom reports no focus by default.
+    hasFocusSpy = vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  });
+
+  afterEach(() => {
+    for (const [type, listener] of addSpy.mock.calls) {
+      if (type === "focus") window.removeEventListener("focus", listener);
+    }
+    vi.runOnlyPendingTimers();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    uninstallClipboard();
+  });
+
+  it("blanks the clipboard on the next focused return", async () => {
+    const { state, clip } = await copyAndFailTheTimedClear();
+
+    window.dispatchEvent(new Event("focus"));
+
+    await vi.waitFor(() => expect(state.content).toBe(""));
+    expect(clip.readText).toHaveBeenCalledTimes(1);
+  });
+
+  it("waits for a focus the document reports before attempting", async () => {
+    const { state, clip } = await copyAndFailTheTimedClear();
+
+    hasFocusSpy.mockReturnValue(false);
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(clip.readText).not.toHaveBeenCalled();
+    expect(state.content).toBe(SECRET);
+
+    hasFocusSpy.mockReturnValue(true);
+    window.dispatchEvent(new Event("focus"));
+    await vi.waitFor(() => expect(state.content).toBe(""));
+  });
+
+  it("leaves a clipboard that now holds something else alone", async () => {
+    const { state, clip } = await copyAndFailTheTimedClear();
+    state.content = "copied later by the user";
+
+    window.dispatchEvent(new Event("focus"));
+
+    await vi.waitFor(() => expect(clip.readText).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(clip.writeText).not.toHaveBeenCalled();
+    expect(state.content).toBe("copied later by the user");
+  });
+
+  it("blanks without comparing when the read-back is refused on retry", async () => {
+    const { state, clip } = await copyAndFailTheTimedClear();
+    state.readable = false;
+
+    window.dispatchEvent(new Event("focus"));
+
+    await vi.waitFor(() => expect(clip.writeText).toHaveBeenCalledWith(""));
+    expect(state.content).toBe("");
+  });
+
+  it("makes exactly one attempt across later focus events", async () => {
+    const { clip } = await copyAndFailTheTimedClear();
+    window.dispatchEvent(new Event("focus"));
+    await vi.waitFor(() => expect(clip.writeText).toHaveBeenCalledTimes(1));
+
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(clip.readText).toHaveBeenCalledTimes(1);
+    expect(clip.writeText).toHaveBeenCalledTimes(1);
+  });
+
+  it("registers nothing and digests nothing when the timed clear succeeds", async () => {
+    const digestSpy = vi.spyOn(crypto.subtle, "digest");
+    const { state } = statefulClipboard();
+    await copySecretToClipboard(() => SECRET);
+
+    await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_TIMEOUT_MS);
+
+    // Positive control: the timed clear really ran and blanked the clipboard.
+    expect(state.content).toBe("");
+    expect(digestSpy).not.toHaveBeenCalled();
+    expect(focusListenerCount()).toBe(0);
+  });
+
+  it("does not re-register when the retry itself fails", async () => {
+    const { state, clip } = await copyAndFailTheTimedClear();
+    state.readable = false;
+    state.writable = false;
+
+    window.dispatchEvent(new Event("focus"));
+    await vi.waitFor(() => expect(clip.writeText).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(focusListenerCount()).toBe(1);
+
+    window.dispatchEvent(new Event("focus"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(clip.writeText).toHaveBeenCalledTimes(1);
+    expect(clip.readText).toHaveBeenCalledTimes(1);
   });
 });

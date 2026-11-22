@@ -14,8 +14,18 @@ vi.mock("next/navigation", () => ({
 }));
 
 vi.mock("@/i18n/navigation", () => ({
-  Link: ({ children, href, className }: { children: React.ReactNode; href: string; className?: string }) => (
-    <a href={href} className={className}>{children}</a>
+  Link: ({
+    children,
+    href,
+    className,
+    "aria-current": ariaCurrent,
+  }: {
+    children: React.ReactNode;
+    href: string;
+    className?: string;
+    "aria-current"?: "page";
+  }) => (
+    <a href={href} className={className} aria-current={ariaCurrent}>{children}</a>
   ),
 }));
 
@@ -127,4 +137,99 @@ describe("SectionNav", () => {
     )?.parentElement;
     expect(ssoWrapper).toHaveAttribute("data-variant", "ghost");
   });
+
+  it("marks only the active leaf link with aria-current=page", () => {
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/devices");
+    const { container } = render(<SectionNav items={navItems} />);
+
+    const [desktopNav] = container.querySelectorAll("nav");
+    expect(desktopNav.querySelector('a[href="/dashboard/settings/devices"]')).toHaveAttribute(
+      "aria-current",
+      "page",
+    );
+    expect(
+      desktopNav.querySelector('a[href="/dashboard/settings/auth/passkey"]'),
+    ).not.toHaveAttribute("aria-current");
+  });
+
+  it("uses the outline variant for inactive leaf pills on mobile", () => {
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/auth/passkey");
+    const { container } = render(<SectionNav items={navItems} />);
+
+    const mobileNav = container.querySelectorAll("nav")[1];
+    expect(
+      mobileNav.querySelector('a[href="/dashboard/settings/devices"]')?.parentElement,
+    ).toHaveAttribute("data-variant", "outline");
+    expect(
+      mobileNav.querySelector('a[href="/dashboard/settings/auth/passkey"]')?.parentElement,
+    ).toHaveAttribute("data-variant", "secondary");
+  });
 });
+
+describe("SectionNav with grouped items", () => {
+  const groupedItems = [
+    {
+      href: "/dashboard/settings/auth",
+      label: "Authentication",
+      icon: Shield,
+      children: [
+        { href: "/dashboard/settings/auth/passkey", label: "Passkeys", icon: Shield },
+        { href: "/dashboard/settings/auth/recovery-key", label: "Recovery key", icon: Globe },
+      ],
+    },
+    { href: "/dashboard/settings/devices", label: "Devices", icon: Webhook },
+  ];
+
+  it("renders the group header as text, not a link", () => {
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/devices");
+    render(<SectionNav items={groupedItems} />);
+
+    expect(screen.getByText("Authentication")).toBeInTheDocument();
+    const hrefs = screen.getAllByRole("link").map((l) => l.getAttribute("href"));
+    expect(hrefs).not.toContain("/dashboard/settings/auth");
+    expect(hrefs).toContain("/dashboard/settings/auth/passkey");
+  });
+
+  it("highlights the group header when one of its children is active", () => {
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/auth/recovery-key");
+    const { rerender } = render(<SectionNav items={groupedItems} />);
+    expect(screen.getByText("Authentication").parentElement).toHaveClass("text-foreground");
+
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/devices");
+    rerender(<SectionNav items={groupedItems} />);
+    expect(screen.getByText("Authentication").parentElement).toHaveClass("text-muted-foreground");
+  });
+
+  it("marks the active child in the desktop nav", () => {
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/auth/recovery-key");
+    const { container } = render(<SectionNav items={groupedItems} />);
+
+    const [desktopNav] = container.querySelectorAll("nav");
+    const active = desktopNav.querySelector('a[href="/dashboard/settings/auth/recovery-key"]');
+    const inactive = desktopNav.querySelector('a[href="/dashboard/settings/auth/passkey"]');
+    expect(active?.parentElement).toHaveAttribute("data-variant", "secondary");
+    expect(active).toHaveAttribute("aria-current", "page");
+    expect(inactive?.parentElement).toHaveAttribute("data-variant", "ghost");
+    expect(inactive).not.toHaveAttribute("aria-current");
+  });
+
+  it("flattens children into mobile pills and marks the active one", () => {
+    mockUsePathname.mockReturnValue("/ja/dashboard/settings/auth/recovery-key");
+    const { container } = render(<SectionNav items={groupedItems} />);
+
+    const mobileNav = container.querySelectorAll("nav")[1];
+    const hrefs = Array.from(mobileNav.querySelectorAll("a")).map((a) => a.getAttribute("href"));
+    expect(hrefs).toEqual([
+      "/dashboard/settings/auth/passkey",
+      "/dashboard/settings/auth/recovery-key",
+      "/dashboard/settings/devices",
+    ]);
+    const active = mobileNav.querySelector('a[href="/dashboard/settings/auth/recovery-key"]');
+    expect(active?.parentElement).toHaveAttribute("data-variant", "secondary");
+    expect(active).toHaveAttribute("aria-current", "page");
+    expect(
+      mobileNav.querySelector('a[href="/dashboard/settings/auth/passkey"]')?.parentElement,
+    ).toHaveAttribute("data-variant", "outline");
+  });
+});
+

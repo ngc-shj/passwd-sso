@@ -374,7 +374,7 @@ describe("CreateDelegationDialog entry loading and submit", () => {
     });
   });
 
-  it("toasts the server's error message when the delegation is refused", async () => {
+  it("toasts the translated error code, never the server's message, when the delegation is refused", async () => {
     decryptFrom(ENTRIES);
     mockFetch
       .mockResolvedValueOnce(listResponse(ENTRIES))
@@ -390,12 +390,14 @@ describe("CreateDelegationDialog entry loading and submit", () => {
     fireEvent.click(entryCheckbox("Zulu"));
     fireEvent.click(screen.getByRole("button", { name: /^confirm$/ }));
 
-    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("Too many entries"));
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("validationError"));
+    // details.message is an untranslated server string.
+    expect(mockToast.error).not.toHaveBeenCalledWith("Too many entries");
     expect(props.onCreated).not.toHaveBeenCalled();
     expect(props.onOpenChange).not.toHaveBeenCalled();
   });
 
-  it("falls back to a generic error when the refusal has no message", async () => {
+  it("translates a refusal without a message from its error code", async () => {
     decryptFrom(ENTRIES);
     mockFetch
       .mockResolvedValueOnce(listResponse(ENTRIES))
@@ -405,7 +407,20 @@ describe("CreateDelegationDialog entry loading and submit", () => {
     await screen.findByText("Alpha");
     fireEvent.click(entryCheckbox("Zulu"));
     fireEvent.click(screen.getByRole("button", { name: /^confirm$/ }));
-    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("Failed to create delegation"));
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("forbidden"));
+  });
+
+  it("falls back to the unknown error when the refusal carries no code", async () => {
+    decryptFrom(ENTRIES);
+    mockFetch
+      .mockResolvedValueOnce(listResponse(ENTRIES))
+      .mockResolvedValueOnce(new Response("oops", { status: 500 }));
+    renderDialog();
+    pickToken();
+    await screen.findByText("Alpha");
+    fireEvent.click(entryCheckbox("Zulu"));
+    fireEvent.click(screen.getByRole("button", { name: /^confirm$/ }));
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("unknownError"));
   });
 
   it("re-enables confirm after the delegation request throws", async () => {
@@ -420,7 +435,7 @@ describe("CreateDelegationDialog entry loading and submit", () => {
     const confirm = screen.getByRole("button", { name: /^confirm$/ });
     fireEvent.click(confirm);
 
-    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("Failed to create delegation"));
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("createFailed"));
     expect(confirm).toBeEnabled();
   });
 

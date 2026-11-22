@@ -7,8 +7,8 @@
  * the assertion lands on the clipboard mutation and reverting the guard reds it.
  * The sibling suites stub CopyButton out, which is why this file exists.
  *
- * The accordion card's funnel is NOT covered here — see the it.todo below for
- * what is missing and why.
+ * The accordion card's funnel is covered in password-card.test.tsx (see the
+ * note at the end of this file).
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import "@testing-library/jest-dom/vitest";
@@ -127,21 +127,7 @@ describe("secure-note body copy honours requireReprompt", () => {
   });
 });
 
-/**
- * NOT COVERED — the accordion card's quick-copy.
- *
- * An earlier version of this file had a harness here that re-implemented
- * password-card.tsx's `guard` helper instead of rendering the card, so stripping
- * all seven wraps from production left it green. It proved the helper's shape,
- * not that production uses it, which is worse than no test: a vacuous case reads
- * as coverage. It was removed rather than left in place.
- *
- * Rendering the real PasswordCard here hangs — the import alone does, before any
- * assertion runs — and diagnosing that is its own task. The production guard IS
- * applied (password-card.tsx wraps all seven fetchers it hands to
- * EntryActionsMenu, plus the eleven overflow-menu handlers via runCopy), and the
- * same gate is proven end-to-end on the secure-note surface above and on the
- * row/menu surface in use-entry-actions-reprompt.test.tsx. What is missing is a
- * regression pin specific to the card: removing a wrap there reds nothing today.
- */
-it.todo("accordion quick-copy: deny/allow through the real PasswordCard render");
+// The accordion card's quick-copy funnel is covered by password-card.test.tsx,
+// which renders the real PasswordCard: "withholds a reprompt-protected password
+// until the passphrase is verified", "writes nothing and reports nothing when the
+// reprompt is declined" and "gates the quick-copy getter behind the reprompt".

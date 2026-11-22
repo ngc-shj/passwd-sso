@@ -66,4 +66,23 @@ describe("PasskeyFields", () => {
     render(<PasskeyFields {...baseProps} showCredentialId={false} />);
     expect(screen.getByPlaceholderText("CredPH")).toHaveAttribute("type", "password");
   });
+
+  const fieldHandlers = [
+    ["RP ID", "onRelyingPartyIdChange", "example.com"],
+    ["RP Name", "onRelyingPartyNameChange", "Example"],
+    ["Username", "onUsernameChange", "alice"],
+    ["Credential ID", "onCredentialIdChange", "cred-1"],
+    ["Creation", "onCreationDateChange", "2024-05-06"],
+    ["Device", "onDeviceInfoChange", "YubiKey 5"],
+  ] as const;
+
+  it.each(fieldHandlers)("routes a change in the %s field to %s only", (label, handler, value) => {
+    const handlers = Object.fromEntries(fieldHandlers.map(([, name]) => [name, vi.fn()]));
+    render(<PasskeyFields {...baseProps} {...handlers} />);
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    expect(handlers[handler]).toHaveBeenCalledWith(value);
+    for (const [name, fn] of Object.entries(handlers)) {
+      if (name !== handler) expect(fn).not.toHaveBeenCalled();
+    }
+  });
 });

@@ -11,7 +11,7 @@
  */
 
 import React from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
@@ -216,3 +216,160 @@ describe("QRCaptureDialog", () => {
     expect(screen.queryByTestId("dialog")).toBeNull();
   });
 });
+
+function uploadFile() {
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  fireEvent.change(input, { target: { files: [new File(["data"], "qr.png", { type: "image/png" })] } });
+  return input;
+}
+
+describe("QRCaptureDialog — file upload housekeeping", () => {
+  it("shows qrImageLoadFailed and releases the object URL when the image cannot be decoded", async () => {
+    installImageMock({ width: 200, height: 200, trigger: "error" });
+    render(<QRCaptureDialog open={true} onOpenChange={vi.fn()} onTotpDetected={vi.fn()} />);
+
+    uploadFile();
+
+    expect(await screen.findByText("qrImageLoadFailed")).toBeInTheDocument();
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock");
+    expect(mockScanImageForQR).not.toHaveBeenCalled();
+  });
+
+  it("releases the object URL after a decoded image is scanned", async () => {
+    installImageMock({ width: 200, height: 200 });
+    mockScanImageForQR.mockReturnValue(null);
+    render(<QRCaptureDialog open={true} onOpenChange={vi.fn()} onTotpDetected={vi.fn()} />);
+
+    uploadFile();
+
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:mock"));
+    expect(mockScanImageForQR).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears the file input so the same file can be chosen again", () => {
+    installImageMock({ width: 200, height: 200 });
+    render(<QRCaptureDialog open={true} onOpenChange={vi.fn()} onTotpDetected={vi.fn()} />);
+
+    const input = uploadFile();
+
+    expect(input.value).toBe("");
+  });
+
+  it("ignores a change event that carries no file", () => {
+    render(<QRCaptureDialog open={true} onOpenChange={vi.fn()} onTotpDetected={vi.fn()} />);
+
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    fireEvent.change(input, { target: { files: [] } });
+
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it("opens the hidden file picker from the upload button", () => {
+    render(<QRCaptureDialog open={true} onOpenChange={vi.fn()} onTotpDetected={vi.fn()} />);
+    const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+    const click = vi.spyOn(input, "click");
+
+    fireEvent.click(screen.getByRole("button", { name: "qrUploadImage" }));
+
+    expect(click).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("QRCaptureDialog — screen capture", () => {
+  let stopTrack: ReturnType<typeof vi.fn>;
+  let getDisplayMedia: ReturnType<typeof vi.fn>;
+  let closeBitmap: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    stopTrack = vi.fn();
+    closeBitmap = vi.fn();
+    const track = { stop: stopTrack };
+    const stream = { getVideoTracks: () => [track], getTracks: () => [track] };
+    getDisplayMedia = vi.fn().mockResolvedValue(stream);
+    Object.defineProperty(navigator, "mediaDevices", {
+      value: { getDisplayMedia },
+      configurable: true,
+    });
+  });
+
+  afterEach(() => {
+    Reflect.deleteProperty(navigator, "mediaDevices");
+    vi.unstubAllGlobals();
+  });
+
+  function installImageCapture() {
+    const bitmap = { width: 300, height: 200, close: closeBitmap };
+    vi.stubGlobal(
+      "ImageCapture",
+      class {
+        grabFrame() {
+          return Promise.resolve(bitmap);
+        }
+      },
+    );
+  }
+
+  it("scans a grabbed frame, reports the TOTP, closes the dialog and stops the share", async () => {
+    installImageCapture();
+    mockScanImageForQR.mockReturnValue("otpauth://totp/X?secret=S");
+    mockParseOtpauthUri.mockReturnValue({ secret: "S" });
+    const onTotpDetected = vi.fn();
+    const onOpenChange = vi.fn();
+    render(
+      <QRCaptureDialog open={true} onOpenChange={onOpenChange} onTotpDetected={onTotpDetected} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "qrCaptureScreen" }));
+
+    await waitFor(() => expect(onTotpDetected).toHaveBeenCalledWith({ secret: "S" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+    expect(closeBitmap).toHaveBeenCalledTimes(1);
+    expect(stopTrack).toHaveBeenCalledTimes(1);
+  });
+
+  it("caps the requested capture size at MAX_IMAGE_DIMENSION", async () => {
+    installImageCapture();
+    mockScanImageForQR.mockReturnValue(null);
+    render(<QRCaptureDialog open={true} onOpenChange={vi.fn()} onTotpDetected={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "qrCaptureScreen" }));
+
+    await waitFor(() => expect(getDisplayMedia).toHaveBeenCalledTimes(1));
+    expect(getDisplayMedia).toHaveBeenCalledWith({
+      video: { width: { max: 4096 }, height: { max: 4096 } },
+    });
+  });
+
+  it("shows qrCaptureFailed and stops the share when ImageCapture is unsupported", async () => {
+    render(<QRCaptureDialog open={true} onOpenChange={vi.fn()} onTotpDetected={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "qrCaptureScreen" }));
+
+    expect(await screen.findByText("qrCaptureFailed")).toBeInTheDocument();
+    expect(stopTrack).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: "qrCaptureScreen" })).toBeEnabled();
+  });
+
+  it("shows no error when the user cancels the screen-share prompt", async () => {
+    getDisplayMedia.mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    render(<QRCaptureDialog open={true} onOpenChange={vi.fn()} onTotpDetected={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "qrCaptureScreen" }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "qrCaptureScreen" })).toBeEnabled(),
+    );
+    expect(screen.queryByText("qrCaptureFailed")).not.toBeInTheDocument();
+    expect(stopTrack).not.toHaveBeenCalled();
+  });
+
+  it("disables the capture button and shows the scanning label while the share is pending", async () => {
+    getDisplayMedia.mockReturnValue(new Promise(() => {}));
+    render(<QRCaptureDialog open={true} onOpenChange={vi.fn()} onTotpDetected={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "qrCaptureScreen" }));
+
+    expect(await screen.findByRole("button", { name: "qrScanning" })).toBeDisabled();
+  });
+});
+

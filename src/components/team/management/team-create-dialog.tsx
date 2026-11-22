@@ -18,11 +18,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { Building2, Loader2, Lock } from "lucide-react";
 import { toast } from "sonner";
 import { API_PATH, VAULT_STATUS } from "@/lib/constants";
-import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
+import { useVault } from "@/lib/vault/vault-context";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { readApiErrorBody, getApiErrorFieldErrors } from "@/lib/http/read-api-error-body";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
-import { formatLockedUntil } from "@/components/vault/vault-lock-screen";
+import { formatLockedUntil, resolveUnlockError } from "@/components/vault/vault-lock-screen";
 import { generateTeamSymmetricKey, createTeamKeyEscrow } from "@/lib/crypto/crypto-team";
 import { fetchApi } from "@/lib/url-helpers";
 import { slugRegex, SLUG_MIN_LENGTH, SLUG_MAX_LENGTH, NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
@@ -76,28 +76,22 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
         setPassphrase("");
       }
     } catch (err) {
-      if (err instanceof VaultUnlockError) {
-        switch (err.code) {
-          case API_ERROR.UNAUTHORIZED:
-            setOpen(false);
-            toast.error(tVault("sessionExpired"));
-            break;
-          case API_ERROR.ACCOUNT_LOCKED:
-            setUnlockError(formatLockedUntil(err.lockedUntil, tVault));
-            break;
-          case API_ERROR.RATE_LIMIT_EXCEEDED:
-            setUnlockError(tVault("rateLimited"));
-            break;
-          case API_ERROR.SERVICE_UNAVAILABLE:
-            setUnlockError(tVault("retryLater"));
-            break;
-          default:
-            setUnlockError(tVault("unlockError"));
-        }
+      const resolved = resolveUnlockError(err, {
+        lockedUntil: (lockedUntil) => formatLockedUntil(lockedUntil, tVault),
+        rateLimited: tVault("rateLimited"),
+        unavailable: tVault("retryLater"),
+        fallback: tVault("unlockError"),
+      });
+      if (resolved.kind === "sessionExpired") {
+        // A direct setOpen(false) does not fire onOpenChange, so the form
+        // would otherwise reopen with this session's input.
+        setOpen(false);
+        reset();
+        toast.error(tVault("sessionExpired"));
       } else {
-        setUnlockError(tVault("unlockError"));
+        setUnlockError(resolved.message);
+        setPassphrase("");
       }
-      setPassphrase("");
     } finally {
       setUnlocking(false);
     }

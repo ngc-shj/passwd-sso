@@ -8,7 +8,8 @@ import { CopyCancelledError } from "./copy-cancelled-error";
 /**
  * The single site in `src/` that writes a value whose exposure this product
  * bounds in time — a vault-blob or overview value, the generated password, the
- * recovery key — to the system clipboard.
+ * recovery key, and secret-bearing URLs (share links carrying `#key=`, Send
+ * links, emergency-access and team invite links) — to the system clipboard.
  *
  * It never throws. Every path returns a CopyOutcome, because the defect this
  * module exists to remove is a copy that fails invisibly: before it, the fetch
@@ -49,12 +50,23 @@ function isClipboardAvailable(): boolean {
  * Overwrite the clipboard after CLIPBOARD_CLEAR_TIMEOUT_MS, but only if it still
  * holds what we put there.
  *
- * When the read-back is unavailable we blank it anyway. That is not a rare
- * branch: `readText` is not exposed to page script in Firefox and is
- * permission-gated in WebKit, so the fallback is the dominant path there. The
- * trade is deliberate — bounding a decrypted secret's residency outranks
- * preserving an unrelated clipboard value, at the cost of clobbering something
- * the user copied in between.
+ * What this achieves depends on the engine, because every clipboard call made
+ * here runs outside a user gesture:
+ *   - Chromium lets a focused document write without a gesture, so the timed
+ *     clear works, and so does the refocus retry below. Without the
+ *     `clipboard-read` permission the read-back rejects and the clear blanks
+ *     without comparing.
+ *   - Firefox and Safari require transient activation for every write. Neither
+ *     a timer nor a `focus` event provides it, so on those engines nothing here
+ *     ever clears: the secret stays until something else overwrites it. (Whether
+ *     page script can call `readText` at all also varies by browser version.)
+ *     Clearing there would need a gesture-triggered clear — a separate design
+ *     decision this module does not make.
+ *
+ * When the read-back is unavailable we blank it anyway. The trade is
+ * deliberate — bounding a decrypted secret's residency outranks preserving an
+ * unrelated clipboard value, at the cost of clobbering something the user
+ * copied in between.
  *
  * Scheduled outside any React lifecycle and deliberately NOT cancelled on
  * unmount or client-side navigation: the secret outlives the component, so the
@@ -80,12 +92,61 @@ function scheduleClear(copiedValue: string): void {
       try {
         await navigator.clipboard.writeText("");
       } catch {
-        // Both the read-back and the blanking write failed — a backgrounded tab,
-        // or a revoked permission. Best-effort by construction; there is no
-        // further recovery, and the secret's residency is unbounded from here.
+        // Both the read-back and the blanking write failed — typically a
+        // backgrounded tab, which Chromium refuses until it has focus again.
+        await retryClearOnRefocus(copiedValue);
       }
     }
   }, CLIPBOARD_CLEAR_TIMEOUT_MS);
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * One more attempt at the clear, the next time the document regains focus.
+ *
+ * The listener holds only a digest of the value, never the plaintext, so a
+ * failed clear does not also keep the secret alive in this page's heap for as
+ * long as the tab stays open. There is no `visibilitychange` listener: a tab
+ * becoming visible is not yet focused, and would spend the single retry on an
+ * attempt Chromium still refuses.
+ *
+ * Exactly one attempt — a failure here does not re-register. Best-effort and,
+ * per the engine notes on scheduleClear, effective on Chromium only; the retry
+ * is also lost if the page unloads before the user returns to it.
+ */
+async function retryClearOnRefocus(copiedValue: string): Promise<void> {
+  let heldDigest: string;
+  try {
+    heldDigest = await sha256Hex(copiedValue);
+  } catch {
+    return;
+  }
+
+  const onFocus = async () => {
+    // A `focus` on the window can arrive before the document reports focus;
+    // a write then would be refused, so wait for a focus that counts.
+    if (!document.hasFocus()) return;
+    window.removeEventListener("focus", onFocus);
+    try {
+      let current: string | null = null;
+      try {
+        current = await navigator.clipboard.readText();
+      } catch {
+        // Read-back unavailable: blank without comparing, the same trade as
+        // the timed clear.
+      }
+      if (current === null || (await sha256Hex(current)) === heldDigest) {
+        await navigator.clipboard.writeText("");
+      }
+    } catch {
+      // The retry failed too. Nothing further is attempted.
+    }
+  };
+  window.addEventListener("focus", onFocus);
 }
 
 /**

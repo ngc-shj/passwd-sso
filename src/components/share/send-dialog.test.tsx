@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import React from "react";
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 const { mockCopySecret } = vi.hoisted(() => ({ mockCopySecret: vi.fn() }));
@@ -130,6 +130,8 @@ import { SendDialog } from "./send-dialog";
 import { toast } from "sonner";
 import { COPY_OUTCOME } from "@/lib/clipboard/copy-secret";
 import { SEND_MAX_FILE_SIZE } from "@/lib/validations";
+import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
+import { installClipboard, uninstallClipboard } from "@/__tests__/helpers/mock-clipboard";
 
 describe("SendDialog", () => {
   beforeEach(() => {
@@ -359,18 +361,65 @@ describe("SendDialog create flows", () => {
     expect(toast.success).toHaveBeenCalledTimes(1);
   });
 
-  it("copies the share URL to the clipboard", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
-    vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse({ url: "/s/tok" }));
-    render(<SendDialog open={true} onOpenChange={() => {}} />);
-    fillText();
-    fireEvent.click(screen.getByRole("button", { name: "create" }));
-    await screen.findByText("createAnother");
+  describe("copying the share URL", () => {
+    const SEND_URL = `${window.location.origin}/s/tok`;
 
-    const copyUrl = screen.getAllByRole("button").filter((b) => b.textContent === "")[0];
-    fireEvent.click(copyUrl);
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(`${window.location.origin}/s/tok`));
+    afterEach(() => {
+      vi.useRealTimers();
+      uninstallClipboard();
+      mockCopySecret.mockReset();
+    });
+
+    // Drives the real helper so the clipboard write and the scheduled clear are
+    // observed on the clipboard itself, not inferred from a mock call.
+    async function createAndFindUrlCopyButton(): Promise<HTMLElement> {
+      const { copySecretToClipboard } = await vi.importActual<
+        typeof import("@/lib/clipboard/copy-secret")
+      >("@/lib/clipboard/copy-secret");
+      mockCopySecret.mockImplementation(copySecretToClipboard);
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse({ url: "/s/tok" }));
+      render(<SendDialog open={true} onOpenChange={() => {}} />);
+      fillText();
+      fireEvent.click(screen.getByRole("button", { name: "create" }));
+      const field = await screen.findByDisplayValue(SEND_URL);
+      return within(field.parentElement as HTMLElement).getByRole("button");
+    }
+
+    it("writes the share URL to the clipboard and blanks it after the clear timeout", async () => {
+      const clip = installClipboard({ readText: vi.fn().mockResolvedValue(SEND_URL) });
+      const copyUrl = await createAndFindUrlCopyButton();
+      vi.useFakeTimers();
+
+      fireEvent.click(copyUrl);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(clip.writeText).toHaveBeenCalledWith(SEND_URL);
+
+      await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_TIMEOUT_MS);
+      expect(clip.writeText).toHaveBeenLastCalledWith("");
+    });
+
+    it("shows the copied tick instead of a toast when the write succeeds", async () => {
+      installClipboard();
+      const copyUrl = await createAndFindUrlCopyButton();
+
+      fireEvent.click(copyUrl);
+
+      await waitFor(() => expect(copyUrl.querySelector(".lucide-check")).not.toBeNull());
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it("reports a rejected write with the write-failed toast, not a create failure", async () => {
+      installClipboard({
+        writeText: vi.fn().mockRejectedValue(new DOMException("denied", "NotAllowedError")),
+      });
+      const copyUrl = await createAndFindUrlCopyButton();
+
+      fireEvent.click(copyUrl);
+
+      await waitFor(() => expect(toast.error).toHaveBeenCalledWith("copyWriteFailed"));
+      expect(toast.error).not.toHaveBeenCalledWith("unknownError");
+      expect(copyUrl.querySelector(".lucide-check")).toBeNull();
+    });
   });
 
   it("returns to an empty form on create another", async () => {

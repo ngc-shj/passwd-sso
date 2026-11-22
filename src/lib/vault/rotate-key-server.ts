@@ -353,7 +353,9 @@ export async function applyVaultRotation(
   // Use updateMany with full ownership scope — never use single-row `update`.
   const cekRewrapsAttempted = attachmentCekRewraps.length;
   let cekRewrapsSucceeded = 0;
-  let cekRewrapsFailed = 0;
+  // A rewrap that misses its row aborts the whole rotation, so a committed
+  // result never carries a failure; the field stays in the response shape.
+  const cekRewrapsFailed = 0;
 
   for (const rewrap of attachmentCekRewraps) {
     // Defense-in-depth: the upload/migrate boundaries already pin this to
@@ -378,7 +380,6 @@ export async function applyVaultRotation(
       },
     });
     if (updateResult.count !== 1) {
-      cekRewrapsFailed += 1;
       throw new AttachmentCekManifestMismatchError();
     }
     cekRewrapsSucceeded += 1;
