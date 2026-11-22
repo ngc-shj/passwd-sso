@@ -180,3 +180,13 @@ The branch diff was reviewed by Codex in three partitions (clipboard and share; 
 **Pre-PR gate:** `scripts/pre-pr.sh` reports 99/99 passed on HEAD 68ae9286e.
 - **Functionality — R17 (Major), fixed.** `passkeyReauthDeadEndKey` was adopted by 3 of its 4 consumers. `signin-reauth-panel` still invited a retry for UNAUTHORIZED, PASSKEY_REAUTH_UNAVAILABLE and PASSKEY_REAUTH_CREDENTIAL_MISMATCH. It now shows the dead-end message, and the sign-in page supplies those labels. Red-proof: the pre-fix panel fails all three new cases.
 - **Functionality — R2 (Major), fixed.** The recovery flow and its page compared against a literal 10. Both now use `PASSPHRASE_MIN_LENGTH`, like the sibling flows.
+
+## D22 — Coverage measured at HEAD (supersedes D16's numbers)
+
+- **Run:** single-process `vitest run --coverage`, all thresholds active, HEAD 82290f40a (Phase 3 round-1 testing review).
+- **Result:** exit 0; 1,293 files / 27,344 tests; 1,130 files measured.
+- **Aggregate:** 92.13 statements / 93.35 lines / 85.05 branches, against floors of 75 / 75 / 65.
+- **Lowest file:** `src/lib/blob-store/stream.ts` at 65.62%, against the perFile floor of 60.
+- **Security-directory globs:** each clears its floor by +2.0 to +4.2 points.
+- **Exact-path ratchets:** the four exact-path ratchets clear their floors.
+- **Why D16 is superseded:** D16's figures came from a run made before `perFile` was enrolled. In that run `service-account-card.tsx` stood at 19.71%, mid-edit.

@@ -62,6 +62,7 @@
   "invitedWithLink": "Invitation sent. Invite URL copied to clipboard.",
   "inviteFailed": "Failed to send invitation",
   "invitedLinkNotCopied": "Invitation sent. Copy the invite link below.",
+  "invitedLinkUnavailable": "Invitation sent, but the invite link could not be shown. Cancel this invitation and send it again to get a new link.",
   "inviteLinkShownOnce": "Invite link for {email}. Copy it now — it won't be shown again.",
   "inviteLinkDone": "Done",
   "alreadyMember": "User is already a member",

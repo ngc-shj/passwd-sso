@@ -11,6 +11,10 @@
  * T2 — anchored /^使用$/ and the label itself is renamed → warning
  * T3 — unanchored literal whose only containing value is removed → warning
  * T4 — unanchored literal still present in another value → no warning
+ *
+ * M1–M10 — per selector kind (class, id, data-testid, aria-label, data-slot),
+ *      a selector that only moved is not flagged and one really removed is
+ *      flagged
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -171,5 +175,121 @@ describe("check-e2e-selectors — class and id selectors that only moved", () =>
     const r = runGate();
     expect(r.stdout).toContain("id='grantee-email' removed from source");
     expect(r.status).toBe(1);
+  });
+});
+
+// Sections 3, 5 and 7 make the same moved-or-removed decision for data-testid,
+// aria-label and data-slot, each with its own `^\+\+\+` header filter.
+describe("check-e2e-selectors — data-testid, aria-label and data-slot that only moved", () => {
+  it("M5: a data-testid re-indented into a new wrapper is not flagged", () => {
+    writeSpec(`page.locator('[data-testid="entry-row"]');\n`);
+    commitComponentChange(
+      `export const A = () => (\n  <li data-testid="entry-row">x</li>\n);\n`,
+      `export const A = () => (\n  <ul>\n    <li data-testid="entry-row">x</li>\n  </ul>\n);\n`,
+    );
+    const r = runGate();
+    expect(r.stdout).not.toContain("removed from source");
+    expect(r.status).toBe(0);
+  });
+
+  it("M6: a data-testid that is really removed is flagged", () => {
+    writeSpec(`page.locator('[data-testid="entry-row"]');\n`);
+    commitComponentChange(
+      `export const A = () => <li data-testid="entry-row">x</li>;\n`,
+      `export const A = () => <li data-testid="entry-item">x</li>;\n`,
+    );
+    const r = runGate();
+    expect(r.stdout).toContain("data-testid='entry-row' removed from source");
+    expect(r.status).toBe(1);
+  });
+
+  it("M7: an aria-label re-indented into a new wrapper is not flagged", () => {
+    writeSpec(`page.getByRole("button", { name: "Dismiss" });\n`);
+    commitComponentChange(
+      `export const A = () => (\n  <button aria-label="Dismiss">x</button>\n);\n`,
+      `export const A = () => (\n  <div>\n    <button aria-label="Dismiss">x</button>\n  </div>\n);\n`,
+    );
+    const r = runGate();
+    expect(r.stdout).not.toContain("removed from source");
+    expect(r.status).toBe(0);
+  });
+
+  it("M8: an aria-label that is really removed is flagged", () => {
+    writeSpec(`page.getByRole("button", { name: "Dismiss" });\n`);
+    commitComponentChange(
+      `export const A = () => <button aria-label="Dismiss">x</button>;\n`,
+      `export const A = () => <button aria-label="Close">x</button>;\n`,
+    );
+    const r = runGate();
+    expect(r.stdout).toContain("aria-label containing 'Dismiss' removed from source");
+    expect(r.status).toBe(1);
+  });
+
+  it("M9: a data-slot re-indented into a new wrapper is not flagged", () => {
+    writeSpec(`page.locator("[data-slot='card']");\n`);
+    commitComponentChange(
+      `export const A = () => (\n  <div data-slot="card">x</div>\n);\n`,
+      `export const A = () => (\n  <section>\n    <div data-slot="card">x</div>\n  </section>\n);\n`,
+    );
+    const r = runGate();
+    expect(r.stdout).not.toContain("removed from source");
+    expect(r.status).toBe(0);
+  });
+
+  it("M10: a data-slot that is really removed is flagged", () => {
+    writeSpec(`page.locator("[data-slot='card']");\n`);
+    commitComponentChange(
+      `export const A = () => <div data-slot="card">x</div>;\n`,
+      `export const A = () => <div data-slot="panel">x</div>;\n`,
+    );
+    const r = runGate();
+    expect(r.stdout).toContain("data-slot='card' removed from source");
+    expect(r.status).toBe(1);
+  });
+});
+
+function writeFile(rel, body) {
+  mkdirSync(dirname(join(root, rel)), { recursive: true });
+  writeFileSync(join(root, rel), body);
+}
+
+// Sections 3 and 7 used to diff the whole tree, so a selector in a test file
+// counted as source: adding it to a mock masked a real removal, and removing
+// it from a test alone was reported as a source removal.
+describe("check-e2e-selectors — data-testid and data-slot are judged on source files only", () => {
+  it.each([
+    ["data-testid", `[data-testid="entry-row"]`, `data-testid="entry-row"`, `data-testid="entry-item"`, "data-testid='entry-row' removed from source"],
+    ["data-slot", `[data-slot='card']`, `data-slot="card"`, `data-slot="panel"`, "data-slot='card' removed from source"],
+  ])("M11 %s: a copy added only in a test file does not mask a real source removal", (_kind, selector, attr, renamed, message) => {
+    writeSpec(`page.locator('${selector}');\n`);
+    writeComponent(`export const A = () => <div ${attr}>x</div>;\n`);
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    git("checkout", "-q", "-b", "feature");
+    writeComponent(`export const A = () => <div ${renamed}>x</div>;\n`);
+    writeFile("src/components/dialog.test.tsx", `render(<div ${attr}>mock</div>);\n`);
+    git("add", "-A");
+    git("commit", "-q", "-m", "change");
+    const r = runGate();
+    expect(r.stdout).toContain(message);
+    expect(r.status).toBe(1);
+  });
+
+  it.each([
+    ["data-testid", `[data-testid="entry-row"]`, `data-testid="entry-row"`],
+    ["data-slot", `[data-slot='card']`, `data-slot="card"`],
+  ])("M12 %s: a removal inside a test file alone is not reported", (_kind, selector, attr) => {
+    writeSpec(`page.locator('${selector}');\n`);
+    writeComponent(`export const A = () => <div ${attr}>x</div>;\n`);
+    writeFile("src/components/dialog.test.tsx", `render(<div ${attr}>mock</div>);\n`);
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    git("checkout", "-q", "-b", "feature");
+    writeFile("src/components/dialog.test.tsx", `render(<div>mock</div>);\n`);
+    git("add", "-A");
+    git("commit", "-q", "-m", "change");
+    const r = runGate();
+    expect(r.stdout).not.toContain("removed from source");
+    expect(r.status).toBe(0);
   });
 });

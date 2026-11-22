@@ -36,13 +36,18 @@ export default function RecoveryPage() {
   return (
     <div className="flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-md space-y-6">
-        <Link
-          href="/dashboard"
-          className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          {tCommon("back")}
-        </Link>
+        {/* After a committed reset the dashboard must be reached by a full
+            reload (continueToDashboard); a client-side link would keep the
+            VaultProvider's pre-reset state. */}
+        {step !== "reset-invalidation-failed" && (
+          <Link
+            href="/dashboard"
+            className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            {tCommon("back")}
+          </Link>
+        )}
 
         <div className="flex flex-col items-center gap-2 text-center">
           <ShieldCheck className="h-10 w-10 text-muted-foreground" />

@@ -80,6 +80,9 @@ const CRITICAL_ACTIONS = new Set([
   "MASTER_KEY_ROTATION_REVOKE",
   "MASTER_KEY_ROTATION_EXECUTE",
   "RECOVERY_PASSPHRASE_RESET",
+  // The passphrase change commits a new vault wrap; its committed-phase row
+  // must land with that write, like the recovery reset above.
+  "VAULT_PASSPHRASE_CHANGE",
   "VAULT_RESET_EXECUTED",
   "ADMIN_VAULT_RESET_EXECUTE",
   // Releases the vault owner's escrowed key material to a grantee. Two emitters

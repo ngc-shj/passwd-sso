@@ -118,4 +118,40 @@ describe("useLocalStorage", () => {
     expect(result.current[0]).toEqual({ a: false, b: true });
     expect(writesTo(setItem, KEY)).toHaveLength(1);
   });
+  describe("an identity update followed by a key change", () => {
+    const OTHER_KEY = `${KEY}-other`;
+
+    function renderWithKey() {
+      return renderHook(
+        ({ storageKey }: { storageKey: string }) => useLocalStorage(storageKey, DEFAULTS),
+        { initialProps: { storageKey: KEY }, reactStrictMode: true },
+      );
+    }
+
+    it("does not write the next key's hydrated value back to it", () => {
+      localStorage.setItem(OTHER_KEY, JSON.stringify({ a: false }));
+      setItem.mockClear();
+      const { result, rerender } = renderWithKey();
+
+      act(() => result.current[1]((prev) => prev));
+      rerender({ storageKey: OTHER_KEY });
+
+      expect(result.current[0]).toEqual({ a: false, b: true });
+      expect(writesTo(setItem, OTHER_KEY)).toHaveLength(0);
+      expect(localStorage.getItem(OTHER_KEY)).toBe(JSON.stringify({ a: false }));
+    });
+
+    it("still persists a real update made under the new key", () => {
+      localStorage.setItem(OTHER_KEY, JSON.stringify({ a: false }));
+      setItem.mockClear();
+      const { result, rerender } = renderWithKey();
+
+      act(() => result.current[1]((prev) => prev));
+      rerender({ storageKey: OTHER_KEY });
+      act(() => result.current[1]((prev) => ({ ...prev, b: false })));
+
+      expect(writesTo(setItem, OTHER_KEY)).toHaveLength(1);
+      expect(localStorage.getItem(OTHER_KEY)).toBe(JSON.stringify({ a: false, b: false }));
+    });
+  });
 });

@@ -236,6 +236,26 @@ describe("RecoveryPage", () => {
     expect(mockHardNavigate).toHaveBeenCalledWith("/ja/dashboard");
   }, 15_000);
 
+  describe("the client-side back link to the dashboard", () => {
+    it("is offered before the reset", () => {
+      render(<RecoveryPage />);
+
+      expect(screen.getByRole("link", { name: "back" })).toHaveAttribute("href", "/dashboard");
+    });
+
+    it("is not offered once the reset committed with invalidation failed; Continue does a full reload", async () => {
+      await reachNewPassphraseStep();
+      mockFetchApi.mockResolvedValueOnce(json({ error: "SESSION_INVALIDATE_FAILED" }, 500));
+      fillPassphrases(NEW_PASSPHRASE, NEW_PASSPHRASE);
+      fireEvent.click(screen.getByRole("button", { name: "resetPassphrase" }));
+      await screen.findByRole("alert", {}, { timeout: 8000 });
+
+      expect(screen.queryByRole("link")).not.toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "continueToDashboard" }));
+      expect(mockHardNavigate).toHaveBeenCalledWith("/ja/dashboard");
+    }, 15_000);
+  });
+
   it("shows the unknown error when the wrapped key cannot be unwrapped", async () => {
     mockFetchApi.mockResolvedValueOnce(
       json({ ...JSON.parse(await verifyResponse().text()), authTag: "00".repeat(16) }),

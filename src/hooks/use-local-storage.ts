@@ -43,10 +43,13 @@ export function useLocalStorage<T>(
     }
   }, [key, defaultValue]);
 
-  // Set by setValue, consumed by the write effect: the updater stays pure (React
-  // may run it twice), and a value that only came from hydration is never
-  // written back.
-  const pendingWriteRef = useRef(false);
+  // Set by setValue to the key it was called for, consumed by the write effect:
+  // the updater stays pure (React may run it twice), and a value that only came
+  // from hydration is never written back. Holding the key, not a boolean, keeps
+  // an identity update (`prev => prev`, which changes nothing and so never runs
+  // the write effect) from leaving a flag that would persist the next key's
+  // hydrated value.
+  const pendingWriteRef = useRef<string | null>(null);
   // The value the write effect last saw. StrictMode re-runs mount effects with
   // the value unchanged; without this the re-run would persist the default
   // while a setValue from that same commit is still queued.
@@ -55,8 +58,9 @@ export function useLocalStorage<T>(
   useEffect(() => {
     if (seenValueRef.current === storedValue) return;
     seenValueRef.current = storedValue;
-    if (!pendingWriteRef.current) return;
-    pendingWriteRef.current = false;
+    const pendingKey = pendingWriteRef.current;
+    pendingWriteRef.current = null;
+    if (pendingKey !== key) return;
     try {
       localStorage.setItem(key, JSON.stringify(storedValue));
     } catch {
@@ -65,9 +69,9 @@ export function useLocalStorage<T>(
   }, [key, storedValue]);
 
   const setValue = useCallback((value: T | ((prev: T) => T)) => {
-    pendingWriteRef.current = true;
+    pendingWriteRef.current = key;
     setStoredValue((prev) => (value instanceof Function ? value(prev) : value));
-  }, []);
+  }, [key]);
 
   return [storedValue, setValue];
 }

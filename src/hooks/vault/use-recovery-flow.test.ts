@@ -239,4 +239,66 @@ describe("useRecoveryFlow", () => {
       expect(isZeroed(captured[0])).toBe(true);
     });
   });
+  describe("typed secret strings", () => {
+    async function readyToReset() {
+      const hook = await verified();
+      act(() => {
+        hook.result.current.setNewPassphrase(PASSPHRASE);
+        hook.result.current.setConfirmPassphrase(PASSPHRASE);
+      });
+      return hook;
+    }
+
+    it("clears the typed recovery key once verification hands off to the reset step", async () => {
+      const { result } = await verified();
+
+      expect(result.current.step).toBe("new-passphrase");
+      expect(result.current.recoveryKeyInput).toBe("");
+    });
+
+    it("keeps the typed recovery key when the server refuses verification", async () => {
+      mockFetchApi.mockResolvedValueOnce(json({ error: "INVALID_RECOVERY_KEY" }, 400));
+      const { result } = renderHook(() => useRecoveryFlow());
+      const formatted = await formatRecoveryKey(RECOVERY_KEY);
+      act(() => result.current.setRecoveryKeyInput(formatted));
+
+      await act(() => result.current.handleVerify(ev()));
+
+      expect(result.current.error).toBe("invalidRecoveryKey");
+      expect(result.current.recoveryKeyInput).toBe(formatted);
+    });
+
+    it("clears the new passphrase and its confirmation after a committed reset", async () => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockResolvedValueOnce(json({}));
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(mockHardNavigate).toHaveBeenCalledWith("/en/dashboard");
+      expect(result.current.newPassphrase).toBe("");
+      expect(result.current.confirmPassphrase).toBe("");
+    }, 15_000);
+
+    it("clears the new passphrase and its confirmation when the reset committed but invalidation failed", async () => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockResolvedValueOnce(json({ error: "SESSION_INVALIDATE_FAILED" }, 500));
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.step).toBe("reset-invalidation-failed");
+      expect(result.current.newPassphrase).toBe("");
+      expect(result.current.confirmPassphrase).toBe("");
+    }, 15_000);
+
+    it("keeps the new passphrase and its confirmation when the reset is refused", async () => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockResolvedValueOnce(new Response("", { status: 500 }));
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.error).toBe("unknownError");
+      expect(result.current.newPassphrase).toBe(PASSPHRASE);
+      expect(result.current.confirmPassphrase).toBe(PASSPHRASE);
+    }, 15_000);
+  });
 });

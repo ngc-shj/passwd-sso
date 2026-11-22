@@ -20,7 +20,7 @@ vi.mock("next-intl", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { error: vi.fn(), success: vi.fn() },
+  toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
 }));
 
 vi.mock("@/lib/url-helpers", () => ({
@@ -252,6 +252,51 @@ describe("TeamInviteByEmailSection", () => {
     it("a code-less 409 shows the generic message, not alreadyInvited", async () => {
       await inviteWith(conflict());
       await waitFor(() => expect(toast.error).toHaveBeenCalledWith("unknownError"));
+    });
+  });
+  describe("a created invitation whose response carries no usable token", () => {
+    async function inviteWith(json: () => Promise<unknown>) {
+      mockFetchApi.mockResolvedValue({ ok: true, status: 201, json });
+      const onSuccess = vi.fn();
+      render(<TeamInviteByEmailSection teamId="team-1" onSuccess={onSuccess} />);
+      fireEvent.change(screen.getByPlaceholderText("inviteEmailPlaceholder"), {
+        target: { value: "bob@example.com" },
+      });
+      await act(async () => {
+        fireEvent.click(screen.getByText("inviteSend"));
+      });
+      return onSuccess;
+    }
+
+    it("is reported as sent with the link-unavailable message when the body is not JSON", async () => {
+      const onSuccess = await inviteWith(() => Promise.reject(new SyntaxError("Unexpected token")));
+
+      expect(onSuccess).toHaveBeenCalled();
+      expect(toast.warning).toHaveBeenCalledWith("invitedLinkUnavailable");
+      expect(toast.error).not.toHaveBeenCalled();
+    });
+
+    it.each([
+      ["missing", {}],
+      ["not a string", { token: 42 }],
+      ["empty", { token: "" }],
+    ])("shows no link and copies nothing when the token is %s", async (_label, body) => {
+      const onSuccess = await inviteWith(async () => body);
+
+      expect(onSuccess).toHaveBeenCalled();
+      expect(toast.warning).toHaveBeenCalledWith("invitedLinkUnavailable");
+      expect(screen.queryByLabelText(/^inviteLinkShownOnce/)).not.toBeInTheDocument();
+      expect(screen.queryByDisplayValue(/invite\/undefined/)).not.toBeInTheDocument();
+      expect(navigator.clipboard.writeText).not.toHaveBeenCalled();
+    });
+
+    it("keeps showing and copying the link when the token is valid", async () => {
+      await inviteWith(async () => ({ token: "abc123" }));
+
+      expect(toast.warning).not.toHaveBeenCalled();
+      expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+        "https://example.com/dashboard/teams/invite/abc123",
+      );
     });
   });
 });

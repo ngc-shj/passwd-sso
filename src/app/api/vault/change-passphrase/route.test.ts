@@ -2,17 +2,24 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaUser, mockRateLimiter, mockCreateRateLimiter, mockLogAudit, mockWithUserTenantRls, mockInvalidateUserSessions } = vi.hoisted(() => {
+const { mockAuth, mockPrismaUser, mockTx, mockRateLimiter, mockCreateRateLimiter, mockLogAudit, mockLogAuditInTx, mockWithUserTenantRls, mockWithTenantRls, mockInvalidateUserSessions } = vi.hoisted(() => {
   const mockRateLimiter = { check: vi.fn() };
+  const mockPrismaUser = { findUnique: vi.fn(), update: vi.fn() };
+  // The tx withTenantRls hands its callback; its user.update is the same spy
+  // the ambient path used, so update-arg assertions still see it.
+  const mockTx = { user: mockPrismaUser };
   return {
   mockAuth: vi.fn(),
-  mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
+  mockPrismaUser,
+  mockTx,
   mockRateLimiter,
   // Recording factory — assertRedisFailClosed's factory-attribution step
   // reads mockCreateRateLimiter.mock.{calls,results}.
   mockCreateRateLimiter: vi.fn((_opts: unknown) => mockRateLimiter),
   mockLogAudit: vi.fn(),
+  mockLogAuditInTx: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithTenantRls: vi.fn(async (_p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => fn(mockTx)),
   mockInvalidateUserSessions: vi.fn().mockResolvedValue({
     sessions: 0,
     extensionTokens: 0,
@@ -43,12 +50,16 @@ vi.mock("@/lib/crypto/verifier-version", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -260,5 +271,94 @@ describe("POST /api/vault/change-passphrase", () => {
         tenantId: "test-tenant-id",
       }),
     );
+  });
+  describe("VAULT_PASSPHRASE_CHANGE audit", () => {
+    const post = () =>
+      POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
+    const completionCalls = () =>
+      mockLogAudit.mock.calls.filter(
+        ([params]) => (params as { action?: string }).action === "VAULT_PASSPHRASE_CHANGE",
+      );
+
+    it("records the committed change inside the transaction that updates the user", async () => {
+      const res = await post();
+
+      expect(res.status).toBe(200);
+      expect(mockWithTenantRls).toHaveBeenCalledWith(expect.anything(), "test-tenant-id", expect.any(Function));
+      expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+      expect(mockLogAuditInTx).toHaveBeenCalledWith(
+        mockTx,
+        "test-tenant-id",
+        expect.objectContaining({
+          action: "VAULT_PASSPHRASE_CHANGE",
+          scope: "PERSONAL",
+          userId: "user-1",
+          metadata: { phase: "committed" },
+        }),
+      );
+    });
+
+    it("records the completion with invalidationFailed false and the revoked counts when invalidation succeeds", async () => {
+      mockInvalidateUserSessions.mockResolvedValueOnce({
+        sessions: 2,
+        extensionTokens: 1,
+        apiKeys: 0,
+        mcpAccessTokens: 0,
+        mcpRefreshTokens: 0,
+        delegationSessions: 0,
+        operatorTokens: 0,
+        cacheTombstoneFailures: 0,
+      });
+
+      const res = await post();
+
+      expect(res.status).toBe(200);
+      expect(completionCalls()).toHaveLength(1);
+      expect(completionCalls()[0][0]).toEqual(
+        expect.objectContaining({
+          scope: "PERSONAL",
+          userId: "user-1",
+          metadata: expect.objectContaining({
+            phase: "completed",
+            invalidationFailed: false,
+            invalidatedSessions: 2,
+            invalidatedExtensionTokens: 1,
+          }),
+        }),
+      );
+    });
+
+    it("records the completion with invalidationFailed true and returns SESSION_INVALIDATE_FAILED when invalidation throws", async () => {
+      mockInvalidateUserSessions.mockRejectedValueOnce(new Error("db down"));
+
+      const res = await post();
+
+      expect(res.status).toBe(500);
+      expect((await res.json()).error).toBe("SESSION_INVALIDATE_FAILED");
+      expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+      expect(completionCalls()).toHaveLength(1);
+      expect(completionCalls()[0][0]).toEqual(
+        expect.objectContaining({
+          metadata: expect.objectContaining({
+            phase: "completed",
+            invalidationFailed: true,
+            invalidatedSessions: null,
+          }),
+        }),
+      );
+    });
+
+    it("writes no passphrase-change audit when the current passphrase is wrong", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({
+        ...userWithVault,
+        passphraseVerifierHmac: "f".repeat(64),
+      });
+
+      const res = await post();
+
+      expect(res.status).toBe(401);
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+      expect(completionCalls()).toHaveLength(0);
+    });
   });
 });

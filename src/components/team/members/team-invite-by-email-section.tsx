@@ -21,6 +21,12 @@ import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { COPY_OUTCOME, copySecretToClipboard } from "@/lib/clipboard/copy-secret";
 
+function readToken(data: unknown): string | null {
+  if (typeof data !== "object" || data === null || !("token" in data)) return null;
+  const { token } = data;
+  return typeof token === "string" && token !== "" ? token : null;
+}
+
 interface Props {
   teamId: string;
   onSuccess: () => void;
@@ -61,15 +67,27 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
       if (!res.ok) {
         throw new Error("Failed");
       }
-      const data = await res.json();
-      const inviteUrl = appUrl(`/dashboard/teams/invite/${data.token}`);
-      setIssuedLink({ email, url: inviteUrl });
+      // The invitation exists from here on: nothing below may be reported as
+      // a failed invitation.
       setInvEmail("");
       onSuccess();
-      // The invitation exists from here on: a clipboard refusal, or no
-      // clipboard at all (a non-secure origin), must not be reported as a
-      // failed invitation. The URL redeems the invitation, so it is copied with
-      // the same bounded residency as any other secret.
+
+      let token: string | null;
+      try {
+        token = readToken(await res.json());
+      } catch {
+        token = null;
+      }
+      if (!token) {
+        toast.warning(t("invitedLinkUnavailable"));
+        return;
+      }
+
+      const inviteUrl = appUrl(`/dashboard/teams/invite/${token}`);
+      setIssuedLink({ email, url: inviteUrl });
+      // A clipboard refusal, or no clipboard at all (a non-secure origin),
+      // leaves the link in the field below. The URL redeems the invitation, so
+      // it is copied with the same bounded residency as any other secret.
       const outcome = await copySecretToClipboard(() => inviteUrl);
       toast.success(
         t(outcome === COPY_OUTCOME.OK ? "invitedWithLink" : "invitedLinkNotCopied"),

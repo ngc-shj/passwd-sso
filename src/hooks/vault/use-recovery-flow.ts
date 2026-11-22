@@ -129,6 +129,8 @@ export function useRecoveryFlow() {
       recoveryKeyRef.current?.fill(0);
       recoveryKeyRef.current = key;
       key = null;
+      // The parsed bytes now live in recoveryKeyRef; drop the typed string.
+      setRecoveryKeyInput("");
       setStep("new-passphrase");
     } catch {
       setError(tApi("unknownError"));
@@ -217,6 +219,8 @@ export function useRecoveryFlow() {
       recoveryKeyBytes.fill(0);
       recoveryKeyRef.current = null;
       setVerifiedData(null);
+      setNewPassphrase("");
+      setConfirmPassphrase("");
       setHasRecoveryKey(true);
 
       if (invalidationFailed) {

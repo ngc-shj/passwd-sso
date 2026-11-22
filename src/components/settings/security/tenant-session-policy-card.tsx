@@ -38,6 +38,7 @@ import {
   EXTENSION_TOKEN_ABSOLUTE_TIMEOUT_DEFAULT,
   VAULT_AUTO_LOCK_MIN,
   VAULT_AUTO_LOCK_MAX,
+  VAULT_AUTO_LOCK_DEFAULT,
 } from "@/lib/validations";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
@@ -211,6 +212,7 @@ export function TenantSessionPolicyCard() {
     });
     if (extAbs.error) return extAbs.error;
 
+    let effectiveAutoLock = VAULT_AUTO_LOCK_DEFAULT;
     if (vaultAutoLockEnabled) {
       const vault = checkRange({
         raw: vaultAutoLockMinutes,
@@ -220,11 +222,16 @@ export function TenantSessionPolicyCard() {
         maxKey: "vaultAutoLockValidationMax",
       });
       if (vault.error) return vault.error;
-      // Cross-field: vault_auto_lock must not exceed the idle timeouts.
-      const resolvedIdleCap = Math.min(idle.num, extIdle.num);
-      if (vault.num > resolvedIdleCap) {
-        return t("vaultAutoLockExceedsIdleCap", { n: resolvedIdleCap });
-      }
+      effectiveAutoLock = vault.num;
+    }
+    // Cross-field: vault_auto_lock must not exceed the idle timeouts. The
+    // server coalesces a disabled (null) auto-lock to VAULT_AUTO_LOCK_DEFAULT
+    // before this comparison, so the check runs in both states.
+    const resolvedIdleCap = Math.min(idle.num, extIdle.num);
+    if (effectiveAutoLock > resolvedIdleCap) {
+      return vaultAutoLockEnabled
+        ? t("vaultAutoLockExceedsIdleCap", { n: resolvedIdleCap })
+        : t("vaultAutoLockDefaultExceedsIdleCap", { n: VAULT_AUTO_LOCK_DEFAULT });
     }
     return null;
   };
@@ -265,8 +272,10 @@ export function TenantSessionPolicyCard() {
           await inlineReauth.triggerOnStaleError();
           return;
         }
-        // The server's `details.message` is untranslated diagnostic text;
-        // the client-side validate() above already names each bad field.
+        // The server's `details.message` is untranslated diagnostic text, so
+        // it is never shown. validate() above pre-checks every range and the
+        // auto-lock-vs-idle cap; a refusal it cannot predict (e.g. a policy
+        // changed concurrently) gets the generic message.
         setError(t("sessionPolicySaveFailed"));
         toast.error(t("sessionPolicySaveFailed"));
       }

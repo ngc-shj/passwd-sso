@@ -7,7 +7,8 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
-import { logAuditAsync, tenantAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, logAuditInTx, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
+import { withTenantRls } from "@/lib/tenant-rls";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
 import { z } from "zod";
@@ -16,7 +17,10 @@ import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
 import { hexIv, hexAuthTag, hexSalt, hexHash, WRAPPED_SECRET_KEY_MAX } from "@/lib/validations/common";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
+import {
+  invalidateUserSessions,
+  type InvalidateUserSessionsResult,
+} from "@/lib/auth/session/user-session-invalidation";
 import { getSessionToken } from "@/app/api/sessions/helpers";
 import { errorLogFields } from "@/lib/logger/error-fields";
 
@@ -103,9 +107,13 @@ async function handlePOST(request: NextRequest) {
     return errorResponse(API_ERROR.INVALID_PASSPHRASE);
   }
 
-  // Update: re-wrapped secret key + new verifier (keyVersion unchanged)
-  await withUserTenantRls(session.user.id, async () =>
-    prisma.user.update({
+  // Update: re-wrapped secret key + new verifier (keyVersion unchanged). The
+  // fact-of-change audit is written in the same transaction, so a passphrase
+  // change can never commit without its audit trail (as recovery-key/recover).
+  // withTenantRls(tx), not the ambient withUserTenantRls, so logAuditInTx
+  // shares the user.update transaction.
+  await withTenantRls(prisma, user.tenantId, async (tx) => {
+    await tx.user.update({
       where: { id: session.user.id },
       data: {
         accountSalt: data.accountSalt,
@@ -115,8 +123,14 @@ async function handlePOST(request: NextRequest) {
         passphraseVerifierHmac: hmacVerifier(data.newVerifierHash),
         passphraseVerifierVersion: VERIFIER_VERSION,
       },
-    }),
-  );
+    });
+
+    await logAuditInTx(tx, user.tenantId, {
+      ...personalAuditBase(request, session.user.id),
+      action: AUDIT_ACTION.VAULT_PASSPHRASE_CHANGE,
+      metadata: { phase: "committed" },
+    });
+  });
 
   // C6 (OWASP A07-1): invalidate all OTHER sessions + bearer tokens across
   // all tenants. The current device just proved possession of the OLD
@@ -126,15 +140,16 @@ async function handlePOST(request: NextRequest) {
   // passphrase change). Vault still re-locks because the key wrap changed.
   // Failure here returns 500 — the passphrase change already committed and
   // the client must instruct the user to manually sign out other devices.
+  let invalidationResult: InvalidateUserSessionsResult | null = null;
   try {
-    const result = await invalidateUserSessions(session.user.id, {
+    invalidationResult = await invalidateUserSessions(session.user.id, {
       allTenants: true,
       reason: "change_passphrase",
       excludeSessionToken: getSessionToken(request),
     });
-    if (result.cacheTombstoneFailures > 0) {
+    if (invalidationResult.cacheTombstoneFailures > 0) {
       getLogger().warn(
-        { userId: session.user.id, failures: result.cacheTombstoneFailures },
+        { userId: session.user.id, failures: invalidationResult.cacheTombstoneFailures },
         "vault.changePassphrase.tombstoneFailures",
       );
     }
@@ -143,6 +158,29 @@ async function handlePOST(request: NextRequest) {
       { userId: session.user.id, error: errorLogFields(err) },
       "vault.changePassphrase.invalidateFailed",
     );
+  }
+
+  // Completion detail (best-effort, as vault/reset and rotate-key): the
+  // invalidation outcome is known only after the transaction. Losing this on a
+  // crash loses the counts, not the fact-of-change recorded above.
+  await logAuditAsync({
+    ...personalAuditBase(request, session.user.id),
+    action: AUDIT_ACTION.VAULT_PASSPHRASE_CHANGE,
+    metadata: {
+      phase: "completed",
+      invalidationFailed: invalidationResult === null,
+      invalidatedSessions: invalidationResult?.sessions ?? null,
+      invalidatedExtensionTokens: invalidationResult?.extensionTokens ?? null,
+      invalidatedApiKeys: invalidationResult?.apiKeys ?? null,
+      invalidatedMcpAccessTokens: invalidationResult?.mcpAccessTokens ?? null,
+      invalidatedMcpRefreshTokens: invalidationResult?.mcpRefreshTokens ?? null,
+      invalidatedDelegationSessions: invalidationResult?.delegationSessions ?? null,
+      invalidatedOperatorTokens: invalidationResult?.operatorTokens ?? null,
+      cacheTombstoneFailures: invalidationResult?.cacheTombstoneFailures ?? null,
+    },
+  });
+
+  if (invalidationResult === null) {
     return errorResponse(API_ERROR.SESSION_INVALIDATE_FAILED);
   }
 

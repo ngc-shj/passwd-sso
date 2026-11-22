@@ -157,14 +157,14 @@ e2e_testids=$(grep -rohE "data-testid=[\"'][^\"']+[\"']" "$E2E_DIR/" \
   | sed -E "s/data-testid=[\"']//; s/[\"']$//" \
   | sort -u || true)
 
-if [ -n "$e2e_testids" ]; then
+if [ -n "$e2e_testids" ] && [ -n "$changed_src" ]; then
   for testid in $e2e_testids; do
     # Check if this testid was removed from any source file
-    removed=$(git diff "${BASE}...HEAD" \
+    removed=$(git diff "${BASE}...HEAD" -- $changed_src \
       | grep -E '^\-.*data-testid=.*'"$testid" \
       | grep -v '^\-\-\-' || true)
     if [ -n "$removed" ]; then
-      added=$(git diff "${BASE}...HEAD" \
+      added=$(git diff "${BASE}...HEAD" -- $changed_src \
         | grep -E '^\+.*data-testid=.*'"$testid" \
         | grep -vE '^\+\+\+' || true)
       if [ -z "$added" ]; then
@@ -313,13 +313,13 @@ e2e_slots=$(grep -rohE "data-slot=[\"'][^\"']+[\"']" "$E2E_DIR/" \
   | sed -E "s/data-slot=[\"']//; s/[\"']$//" \
   | sort -u || true)
 
-if [ -n "$e2e_slots" ]; then
+if [ -n "$e2e_slots" ] && [ -n "$changed_src" ]; then
   for slot in $e2e_slots; do
-    removed=$(git diff "${BASE}...HEAD" \
+    removed=$(git diff "${BASE}...HEAD" -- $changed_src \
       | grep -E '^\-.*data-slot=.*'"$slot" \
       | grep -v '^\-\-\-' || true)
     if [ -n "$removed" ]; then
-      added=$(git diff "${BASE}...HEAD" \
+      added=$(git diff "${BASE}...HEAD" -- $changed_src \
         | grep -E '^\+.*data-slot=.*'"$slot" \
         | grep -vE '^\+\+\+' || true)
       if [ -z "$added" ]; then

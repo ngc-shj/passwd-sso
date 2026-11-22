@@ -52,9 +52,9 @@ function fakeGit(edit = (m) => m) {
   return () => `${edit([...realMembers]).join("\0")}\0`;
 }
 
-function runGate(summaryPath) {
+function runGate(...args) {
   try {
-    const stdout = execFileSync("node", [GATE, summaryPath], { cwd: REPO, encoding: "utf8", stdio: "pipe" });
+    const stdout = execFileSync("node", [GATE, ...args], { cwd: REPO, encoding: "utf8", stdio: "pipe" });
     return { code: 0, output: stdout };
   } catch (err) {
     return { code: err.status ?? 1, output: `${err.stdout}${err.stderr}` };
@@ -341,6 +341,12 @@ describe("output layer: the coverage summary", () => {
     ]);
   });
 
+  it.each([["null"], ["[]"], ["5"]])("refuses a summary whose JSON is %s, not an object", (json) => {
+    expect(checkCoverageSummaryFile(writeTmp("summary.json", json), realMembers, REPO)).toEqual([
+      expect.stringMatching(/^COVERAGE_SUMMARY_UNPARSEABLE: .* is not a JSON object$/),
+    ]);
+  });
+
   it("refuses a summary holding only total", () => {
     expect(checkCoverageSummaryFile(writeTmp("summary.json", JSON.stringify(summaryOf([]))), realMembers, REPO)).toEqual([
       expect.stringMatching(/^COVERAGE_SUMMARY_EMPTY: /),
@@ -351,6 +357,12 @@ describe("output layer: the coverage summary", () => {
     const { code, output } = runGate(join(tmpdir(), "no-such-coverage-summary.json"));
     expect(code).toBe(1);
     expect(output).toContain("COVERAGE_SUMMARY_MISSING");
+  });
+
+  it("exits 1 with the usage line when run without a summary path", () => {
+    const { code, output } = runGate();
+    expect(code).toBe(1);
+    expect(output).toContain("usage: check-coverage-scope.mjs <coverage-summary.json>");
   });
 
   it("refuses an empty member list", () => {
