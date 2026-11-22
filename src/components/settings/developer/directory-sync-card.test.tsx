@@ -508,6 +508,26 @@ describe("DirectorySyncCard edit", () => {
     expect(sentBody("PUT /api/directory-sync/cfg-del").credentials).toEqual({ clientSecret: "rotated" });
   });
 
+  it("enables save when only a credential is re-entered", async () => {
+    route({ "PUT /api/directory-sync/cfg-del": () => jsonRes({}) });
+    await openEdit();
+    expect(saveButton()).toBeDisabled();
+    type("azureClientSecret", "rotated");
+    expect(saveButton()).toBeEnabled();
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(callsTo("PUT /api/directory-sync/cfg-del")).toHaveLength(1));
+    expect(sentBody("PUT /api/directory-sync/cfg-del").credentials).toEqual({ clientSecret: "rotated" });
+  });
+
+  it("disables save again when the re-entered credential is cleared", async () => {
+    route({});
+    await openEdit();
+    type("azureClientSecret", "rotated");
+    expect(saveButton()).toBeEnabled();
+    type("azureClientSecret", "");
+    expect(saveButton()).toBeDisabled();
+  });
+
   it.each([
     [400, { error: "VALIDATION_ERROR" }, "validationError"],
     [403, { error: "FORBIDDEN" }, "syncFailed"],

@@ -487,6 +487,30 @@ describe("ServiceAccountCard", () => {
     });
   });
 
+  it("clears the create form when the dialog is closed with Cancel", async () => {
+    setupFetchAccounts([]);
+    await act(async () => {
+      render(<ServiceAccountCard />);
+    });
+    await waitFor(() => {
+      expect(screen.getByText("noServiceAccounts")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("createServiceAccount"));
+    fireEvent.change(screen.getByPlaceholderText("saNamePlaceholder"), {
+      target: { value: "abandoned-sa" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("saDescriptionPlaceholder"), {
+      target: { value: "abandoned description" },
+    });
+    fireEvent.click(within(screen.getByTestId("dialog")).getByText("cancel"));
+    expect(screen.queryByTestId("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("createServiceAccount"));
+
+    expect(screen.getByPlaceholderText("saNamePlaceholder")).toHaveValue("");
+    expect(screen.getByPlaceholderText("saDescriptionPlaceholder")).toHaveValue("");
+  });
+
   it("token create button is disabled for inactive service account", async () => {
     setupFetchAccounts([
       {

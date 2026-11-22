@@ -37,12 +37,4 @@ describe("NotificationBell module", () => {
     expect(mod.NotificationBell).toBeDefined();
     expect(typeof mod.NotificationBell).toBe("function");
   });
-
-  it("POLL_INTERVAL_MS is 60 seconds (verified via source)", async () => {
-    // The polling interval of 60s is defined in the component.
-    // Full integration testing of setInterval requires React render context.
-    // This test verifies the module loads without errors.
-    const mod = await import("./notification-bell");
-    expect(mod.NotificationBell).toBeDefined();
-  });
 });

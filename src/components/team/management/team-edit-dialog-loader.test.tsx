@@ -231,7 +231,7 @@ describe("TeamEditDialogLoader", () => {
       expect(await screen.findByTestId("edit-dialog")).toBeInTheDocument();
     } else {
       // The decrypt failure is the error state (no edit dialog over a refused entry).
-      expect(await screen.findByText(/operation failed|notFound/)).toBeInTheDocument();
+      expect(await screen.findByText("loadError")).toBeInTheDocument();
       expect(screen.queryByTestId("edit-dialog")).not.toBeInTheDocument();
     }
   });
@@ -263,8 +263,8 @@ describe("TeamEditDialogLoader", () => {
     if (opens) {
       expect(await screen.findByTestId("edit-dialog")).toBeInTheDocument();
     } else {
-      // The AES-GCM refusal (a DOMException, rendered as notFound) is the error state.
-      expect(await screen.findByText(/operation failed|notFound/)).toBeInTheDocument();
+      // The AES-GCM refusal (a DOMException) is the translated load error, not its own message.
+      expect(await screen.findByText("loadError")).toBeInTheDocument();
       expect(screen.queryByTestId("edit-dialog")).not.toBeInTheDocument();
     }
     expect(mockDecryptData).toHaveBeenCalled();
@@ -281,7 +281,7 @@ describe("TeamEditDialogLoader", () => {
         tags: [],
       }),
     });
-    mockGetEntryDecryptionKey.mockRejectedValue(new Error("notFound"));
+    mockGetEntryDecryptionKey.mockRejectedValue(new Error("Team key version 3 is unavailable"));
 
     render(
       <TeamEditDialogLoader
@@ -293,14 +293,12 @@ describe("TeamEditDialogLoader", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText("notFound")).toBeInTheDocument();
-    });
-
+    expect(await screen.findByText("loadError")).toBeInTheDocument();
+    expect(screen.queryByText(/unavailable/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("edit-dialog")).not.toBeInTheDocument();
   });
 
-  it("shows an error when decryption returns invalid JSON", async () => {
+  it("shows the translated load error, never the plaintext a JSON SyntaxError quotes", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -311,7 +309,7 @@ describe("TeamEditDialogLoader", () => {
         tags: [],
       }),
     });
-    mockDecryptData.mockResolvedValue("{invalid json");
+    mockDecryptData.mockResolvedValue("hunter2-plaintext is not json");
 
     render(
       <TeamEditDialogLoader
@@ -323,9 +321,8 @@ describe("TeamEditDialogLoader", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText(/Unexpected token|Expected property name/i)).toBeInTheDocument();
-    });
+    expect(await screen.findByText("loadError")).toBeInTheDocument();
+    expect(screen.queryByText(/hunter2-plaintext/)).not.toBeInTheDocument();
 
     expect(screen.queryByTestId("edit-dialog")).not.toBeInTheDocument();
   });

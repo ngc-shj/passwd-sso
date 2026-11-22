@@ -47,7 +47,7 @@ vi.mock("@/lib/auth/webauthn/passkey-reauth-client", () => ({
 }));
 
 import { TeamPolicySettings } from "./team-policy-settings";
-import { POLICY_MIN_PW_LENGTH_MAX } from "@/lib/validations";
+import { MAX_CIDRS, POLICY_MIN_PW_LENGTH_MAX } from "@/lib/validations";
 
 const DEFAULT_DATA = {
   minPasswordLength: 8,
@@ -203,6 +203,41 @@ describe("TeamPolicySettings load and save", () => {
     expect(screen.getByPlaceholderText("teamAllowedCidrsPlaceholder")).toHaveValue(
       "10.0.0.0/8\n192.168.0.0/16",
     );
+  });
+
+  it("enables save for a CIDR-only edit and sends the parsed CIDRs", async () => {
+    mockApi();
+    render(<TeamPolicySettings teamId="team-1" />);
+    const save = await screen.findByRole("button", { name: "save" });
+    expect(save).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText("teamAllowedCidrsPlaceholder"), {
+      target: { value: "10.0.0.0/8\n 172.16.0.0/12 " },
+    });
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+
+    await waitFor(() => expect(putCalls()).toHaveLength(1));
+    const [, init] = putCalls()[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).toEqual({
+      ...DEFAULT_DATA,
+      teamAllowedCidrs: ["10.0.0.0/8", "172.16.0.0/12"],
+    });
+  });
+
+  it("blocks saving more CIDRs than allowed and shows the limit error", async () => {
+    mockApi();
+    render(<TeamPolicySettings teamId="team-1" />);
+    const save = await screen.findByRole("button", { name: "save" });
+    const tooMany = Array.from({ length: MAX_CIDRS + 1 }, (_, i) => `10.0.${i % 256}.${Math.floor(i / 256)}/32`);
+
+    fireEvent.change(screen.getByPlaceholderText("teamAllowedCidrsPlaceholder"), {
+      target: { value: tooMany.join("\n") },
+    });
+    fireEvent.click(save);
+
+    expect(await screen.findByText(`teamAllowedCidrsMax:${JSON.stringify({ max: MAX_CIDRS })}`)).toBeInTheDocument();
+    expect(putCalls()).toHaveLength(0);
   });
 
   it("toasts validationError on a 400 save response", async () => {

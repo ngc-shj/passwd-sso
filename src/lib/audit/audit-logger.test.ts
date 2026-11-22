@@ -128,7 +128,7 @@ describe("refusedEmitLogger", () => {
     // logger without it is filtered out for a different reason than the one
     // this design reasoned about.
     const { refusedEmitLogger } = await import("./audit-logger");
-    expect((refusedEmitLogger.bindings() as Record<string, unknown>)._app).toBeTruthy();
+    expect((refusedEmitLogger.bindings() as Record<string, unknown>)._app).toEqual(expect.stringMatching(/./));
   });
 
   it("is enabled unconditionally, unlike auditLogger", async () => {

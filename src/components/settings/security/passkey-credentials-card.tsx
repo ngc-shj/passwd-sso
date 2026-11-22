@@ -102,6 +102,7 @@ interface PasskeyCredentialsCardProps {
 
 export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardProps = {}) {
   const t = useTranslations("WebAuthn");
+  const tApi = useTranslations("ApiErrors");
   const locale = useLocale();
   const { status, getSecretKey, getKeyVersion } = useVault();
 
@@ -196,7 +197,7 @@ export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardP
         }
         const err = await readApiErrorBody(optionsRes);
         if (err?.error === API_ERROR.RATE_LIMIT_EXCEEDED) {
-          toast.error(t("serviceUnavailable"));
+          toast.error(tApi("rateLimitExceeded"));
         } else if (err?.error === API_ERROR.SERVICE_UNAVAILABLE) {
           toast.error(t("serviceUnavailable"));
         } else {

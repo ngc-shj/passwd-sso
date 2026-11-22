@@ -47,6 +47,7 @@ import {
   OPERATOR_TOKEN_NAME_MAX_LENGTH,
 } from "@/lib/constants/auth/operator-token";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { passkeyReauthDeadEndKey } from "@/lib/auth/webauthn/passkey-reauth-dead-end";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
@@ -199,15 +200,9 @@ export function OperatorTokenCard() {
         // presented) — staying in this dialog would strand the user, so
         // route them to a fresh sign-in instead, same as the retry path
         // below does when it hits a second stale-session response.
-        if (
-          result.error === API_ERROR.PASSKEY_REAUTH_UNAVAILABLE ||
-          result.error === API_ERROR.PASSKEY_REAUTH_CREDENTIAL_MISMATCH
-        ) {
-          toast.error(
-            result.error === API_ERROR.PASSKEY_REAUTH_UNAVAILABLE
-              ? tAuth("reauthUnavailable")
-              : tAuth("reauthCredentialMismatch"),
-          );
+        const deadEndKey = passkeyReauthDeadEndKey(result.error);
+        if (deadEndKey) {
+          toast.error(tAuth(deadEndKey));
           setReauthOpen(false);
           setRecentSessionOpen(true);
           return;

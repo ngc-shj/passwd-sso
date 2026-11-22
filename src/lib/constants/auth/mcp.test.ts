@@ -119,8 +119,8 @@ describe("isAcceptableRedirectUri", () => {
     expect(isAcceptableRedirectUri(uri)).toBe(false);
   });
 
-  it("does not throw on an unparseable input", () => {
-    expect(() => isAcceptableRedirectUri("http://[")).not.toThrow();
+  it("refuses an unparseable input instead of throwing", () => {
+    expect(isAcceptableRedirectUri("http://[")).toBe(false);
   });
 });
 

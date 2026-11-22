@@ -1058,7 +1058,7 @@ describe("PasskeyCredentialsCard credential actions", () => {
     }
 
     it.each([
-      ["RATE_LIMIT_EXCEEDED", 429, "serviceUnavailable"],
+      ["RATE_LIMIT_EXCEEDED", 429, "rateLimitExceeded"],
       ["SERVICE_UNAVAILABLE", 503, "serviceUnavailable"],
       ["INTERNAL_ERROR", 500, "registerError"],
     ])("maps an options %s refusal to %s", async (error, status, toastKey) => {

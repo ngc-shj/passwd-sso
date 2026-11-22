@@ -35,6 +35,7 @@ export function TeamEditDialogLoader({
 }: TeamEditDialogLoaderProps) {
   const t = useTranslations("PasswordForm");
   const td = useTranslations("PasswordDetail");
+  const tl = useTranslations("PasswordList");
   const { getEntryDecryptionKey } = useTeamVault();
   const [data, setData] = useState<TeamEntryFormEditData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -56,7 +57,11 @@ export function TeamEditDialogLoader({
       try {
         const res = await fetchApi(apiPath.teamPasswordById(teamId, id));
         if (!res.ok) {
-          throw new Error(td("notFound"));
+          if (!cancelled) {
+            setData(null);
+            setError(td("notFound"));
+          }
+          return;
         }
         const raw = await res.json();
 
@@ -161,10 +166,12 @@ export function TeamEditDialogLoader({
           blobIv: raw.blobIv as string | undefined,
         });
         setError(null);
-      } catch (e) {
+      } catch {
+        // Never the error's own message: a JSON.parse SyntaxError quotes the
+        // decrypted plaintext, and key/decrypt/network errors are untranslated.
         if (!cancelled) {
           setData(null);
-          setError(e instanceof Error ? e.message : td("notFound"));
+          setError(tl("loadError"));
         }
       }
     }
@@ -174,7 +181,7 @@ export function TeamEditDialogLoader({
     return () => {
       cancelled = true;
     };
-  }, [getEntryDecryptionKey, id, open, td, teamId]);
+  }, [getEntryDecryptionKey, id, open, td, teamId, tl]);
 
   if (!data) {
     return (

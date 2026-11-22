@@ -514,6 +514,8 @@ describe("a sink that throws", () => {
       throw new Error("stderr closed");
     });
     expect(() => handleServerError(refusal())).not.toThrow();
+    // The throwing write was reached: the guard under test actually ran.
+    expect(write).toHaveBeenCalledTimes(1);
   });
 
   it("writes no such line when the sink works", () => {

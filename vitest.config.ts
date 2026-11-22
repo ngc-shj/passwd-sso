@@ -46,6 +46,27 @@ export default defineConfig({
         // Without this, statement-level erosion is ungated: v8 counts
         // statements and lines separately and they do diverge.
         statements: 75,
+        // Every measured file, on top of the aggregate: a nearly untested file
+        // used to average away under the floors above (one component sat at
+        // 2/84). Every file measured at >=65 when this was enrolled; a file with
+        // no statements (type-only modules) scores 100.
+        perFile: { statements: 60, lines: 60 },
+        // Security directories, at the measured aggregate minus 2: the
+        // per-file floor alone would let a 98% directory fall to 61% unnoticed.
+        // check-coverage-scope.test.mjs fails if a glob stops matching files.
+        "src/lib/crypto/**": { statements: 96, lines: 97, branches: 90 },
+        "src/lib/proxy/**": { statements: 96, lines: 96, branches: 92 },
+        "src/lib/security/**": { statements: 95, lines: 95, branches: 89 },
+        "src/lib/audit/**": { statements: 93, lines: 94, branches: 89 },
+        "src/lib/tenant/**": { statements: 94, lines: 95, branches: 90 },
+        "src/lib/auth/**": { statements: 92, lines: 94, branches: 88 },
+        "src/lib/vault/**": { statements: 78, lines: 79, branches: 76 },
+        // Store-backed security modules whose tests landed with the scope
+        // change; each refusal arm has its own test. Measured minus 2.
+        "src/lib/vault/rotate-key-server.ts": { statements: 98, lines: 98, branches: 98 },
+        "src/lib/auth/access/delegation.ts": { statements: 98, lines: 98, branches: 95 },
+        "src/lib/team/team-attachment-lock.ts": { statements: 98, lines: 98, branches: 98 },
+        "src/lib/extension-connect-request.ts": { statements: 98, lines: 98, branches: 89 },
         "src/lib/auth/session/auth-or-token.ts": { lines: 80, branches: 70 },
         "src/lib/crypto/crypto-server.ts": { lines: 80, branches: 70 },
         "src/lib/crypto/crypto-team.ts": { lines: 80, branches: 70 },

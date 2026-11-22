@@ -280,4 +280,55 @@ describe("SecurityKeySignInForm — §Sec-7 WebAuthn / PRF", () => {
     expect(mockStashPrf).not.toHaveBeenCalled();
     expect(sessionStorage.getItem("psso:webauthn-signin")).toBeNull();
   });
+
+  it("(storage blocked) still navigates after a successful verify and reports no failure", async () => {
+    const setItem = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new DOMException("The operation is insecure.", "SecurityError");
+    });
+    try {
+      mockStartPasskeyAuthentication.mockResolvedValueOnce({
+        responseJSON: { id: "cred-1" },
+        prfOutput: null,
+      });
+      mockFetch
+        .mockResolvedValueOnce(okJson({ options: {}, challengeId: "ch-1", prfSalt: null }))
+        .mockResolvedValueOnce(okJson({ ok: true }));
+
+      render(<SecurityKeySignInForm />);
+      fireEvent.change(screen.getByPlaceholderText("emailForSecurityKey"), {
+        target: { value: "user@example.com" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: /signInWithSecurityKey/ }));
+
+      await waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith("/dashboard"));
+      expect(setItem).toHaveBeenCalled();
+      expect(screen.queryByText("securityKeySignInFailed")).not.toBeInTheDocument();
+    } finally {
+      setItem.mockRestore();
+    }
+  });
+
+  it("(unreadable verify body) still navigates and sets the auto-unlock flag", async () => {
+    mockStartPasskeyAuthentication.mockResolvedValueOnce({
+      responseJSON: { id: "cred-1" },
+      prfOutput: makePrfSentinel(),
+    });
+    mockFetch
+      .mockResolvedValueOnce(okJson({ options: {}, challengeId: "ch-1", prfSalt: "salt" }))
+      .mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+      } as unknown as Response);
+
+    render(<SecurityKeySignInForm />);
+    fireEvent.change(screen.getByPlaceholderText("emailForSecurityKey"), {
+      target: { value: "user@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /signInWithSecurityKey/ }));
+
+    await waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith("/dashboard"));
+    expect(sessionStorage.getItem("psso:webauthn-signin")).toBe("1");
+    expect(mockStashPrf).not.toHaveBeenCalled();
+    expect(screen.queryByText("securityKeySignInFailed")).not.toBeInTheDocument();
+  });
 });

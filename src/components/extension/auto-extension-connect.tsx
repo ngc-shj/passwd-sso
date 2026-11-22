@@ -19,6 +19,7 @@ import { CheckCircle2, XCircle, Loader2, KeyRound } from "lucide-react";
 import { withBasePath } from "@/lib/url-helpers";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
+import { passkeyReauthDeadEndKey } from "@/lib/auth/webauthn/passkey-reauth-dead-end";
 import { abortInFlightCeremony } from "@/lib/auth/webauthn/webauthn-client";
 import { signOut } from "next-auth/react";
 
@@ -55,6 +56,7 @@ interface AutoExtensionConnectProps {
 
 export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectProps = {}) {
   const t = useTranslations("Extension");
+  const tAuth = useTranslations("Auth");
   const locale = useLocale();
   const hasConnectParam = useClientSnapshot(readHasConnectParam, false);
   const [didRun, setDidRun] = useState(false);
@@ -200,6 +202,16 @@ export function AutoExtensionConnect({ onActiveChange }: AutoExtensionConnectPro
         // of leaving the user clicking the passkey button forever.
         if (result.error === "UNAUTHORIZED") {
           await redirectToFullSignIn();
+          return;
+        }
+        // No binding, the bound credential is gone, or a different passkey
+        // was presented: another ceremony can never succeed either, so switch
+        // to the recent-session (sign in again) card, as useInlineReauth does.
+        const deadEndKey = passkeyReauthDeadEndKey(result.error);
+        if (deadEndKey) {
+          setRequiresReauth(false);
+          setRequiresRecentSession(true);
+          setReauthError(tAuth(deadEndKey));
           return;
         }
         setReauthError(

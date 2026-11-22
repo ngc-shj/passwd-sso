@@ -198,6 +198,17 @@ export function ServiceAccountCard() {
     });
   };
 
+  // Cancel calls this too: a controlled open change does not fire
+  // onOpenChange, so a direct setter would reopen with the old input.
+  const handleCreateOpenChange = (open: boolean) => {
+    setCreateOpen(open);
+    if (!open) {
+      setCreateName("");
+      setCreateDescription("");
+      setCreateNameError("");
+    }
+  };
+
   const handleCreate = async () => {
     if (!createName.trim()) {
       setCreateNameError(t("saNameRequired"));
@@ -829,14 +840,7 @@ export function ServiceAccountCard() {
       {/* Create SA dialog */}
       <Dialog
         open={createOpen}
-        onOpenChange={(open) => {
-          setCreateOpen(open);
-          if (!open) {
-            setCreateName("");
-            setCreateDescription("");
-            setCreateNameError("");
-          }
-        }}
+        onOpenChange={handleCreateOpenChange}
       >
         <DialogContent>
           <DialogHeader>
@@ -868,10 +872,10 @@ export function ServiceAccountCard() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+            <Button variant="outline" onClick={() => handleCreateOpenChange(false)}>
               {tCommon("cancel")}
             </Button>
-            <Button onClick={handleCreate} disabled={creating || !createName.trim()}>
+            <Button onClick={handleCreate}disabled={creating || !createName.trim()}>
               {creating && <Loader2 className="h-4 w-4 animate-spin mr-1" />}
               {tCommon("create")}
             </Button>

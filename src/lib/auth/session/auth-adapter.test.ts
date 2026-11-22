@@ -107,6 +107,7 @@ vi.mock("@/lib/auth/session/session-cache", () => ({
 }));
 
 import { createCustomAdapter } from "./auth-adapter";
+import { decryptAccountToken } from "@/lib/crypto/account-token-crypto";
 import type { tenantClaimStorage } from "@/lib/tenant/tenant-claim-storage";
 import { CLAIM_BINDING_MODE } from "@/lib/auth/jackson-providers";
 import type { ClaimTenantResolution } from "@/lib/tenant/tenant-management";
@@ -1201,15 +1202,24 @@ describe("createCustomAdapter", () => {
       });
       mockPrismaAccount.create.mockResolvedValue({});
       const adapter = createCustomAdapter();
-      await expect(
-        adapter.linkAccount!({
+      await adapter.linkAccount!({
+        userId: "u-1",
+        type: "oidc",
+        provider: "saml:acme",
+        providerAccountId: "g-1",
+        refresh_token: "rt",
+      });
+
+      const writeData = mockPrismaAccount.create.mock.calls[0][0].data;
+      expect(writeData.provider).toBe("saml:acme");
+      // The ciphertext is bound to the colon-bearing provider verbatim.
+      expect(
+        decryptAccountToken(writeData.refresh_token, {
           userId: "u-1",
-          type: "oidc",
           provider: "saml:acme",
           providerAccountId: "g-1",
-          refresh_token: "rt",
         }),
-      ).resolves.not.toThrow();
+      ).toBe("rt");
     });
   });
 

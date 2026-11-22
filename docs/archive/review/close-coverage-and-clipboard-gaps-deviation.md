@@ -81,3 +81,43 @@
 - **Shared fixture:** `src/__tests__/helpers/emergency-vault-fixtures.ts` builds real-crypto grantee vault payloads. It was added so the page test and the hook test do not each carry a copy.
 - **eslint-disable removed:** the profile page's `eslint-disable-line react-hooks/exhaustive-deps` is gone. `fetchTeam` is now a `useCallback([teamId])`.
 - **R19 side-fix:** `src/__tests__/ui/audit-log-action-groups.test.ts` reads source text. It now also reads the hook that holds the action groups.
+
+## D14 — side-fix class: dialog closes that bypass the onOpenChange reset (found by batch E)
+
+- **Defect:** a dialog's `onOpenChange` reset is skipped when a button closes the dialog by calling the raw open-setter with `false`. Changing a controlled `open` prop does not fire `onOpenChange`.
+- **Member set:** an AST scan (scratchpad `dialog-close-bypass.ts`) returned 17 candidates, each triaged by hand.
+- **Real defects, both fixed** with a reopen test that is red on the pre-fix copy:
+  - `travel-mode-card` Cancel kept the typed master passphrase.
+  - `service-account-card` create Cancel kept a cancelled form.
+- **Not defects:** the other 15 candidates. The direct close sits inside the reset function itself, or the opener re-initialises state before opening.
+- **Scanner blind spot (for Phase 3):** the scanner only matches dialogs whose `open` is local state with a `setX` setter. Dialogs whose open state a parent passes down as a prop were not swept.
+
+## D15 — side-fix: team-policy-settings CIDR edits
+
+- **Save never enabled:** a CIDR-only edit left Save disabled, because the parsed list lived outside the dirty-checked `policy`. The textarea now writes the parsed list into `policy.teamAllowedCidrs`.
+- **Limit check never fired:** the MAX_CIDRS check had been reading a stale value. With the live value it now fires, so the plan also renders its error, which had never been shown. The message key already existed.
+
+## D16 — Floors enrolled (C2) and the CI-path red-proof
+
+- **Global aggregate after C3:** 91.66 statements / 92.86 lines / 84.52 branches.
+- **Floors enrolled:** `perFile` 60/60, plus seven security-directory globs and four exact-path security modules, each set at the measured value minus 2.
+- **CI path, 3 shards plus merge:** every shard passed (152 s, 102 s, 126 s at 4 workers). The merge passed the floors, and `check-coverage-scope` reported OK for all 1,128 members.
+- **C2a red-proof** (shard → merge, scratch config narrowed to `team-attachment-lock.ts`):
+  - allow run: exit 0, with 1 summary key;
+  - skipping its test: exit 1, with "does not meet per-file threshold (60%) for src/lib/team/team-attachment-lock.ts".
+- **check-vitest-coverage-include.mjs:** check 2 now resolves glob threshold keys instead of reporting them as missing files. Red on a scratch config naming `src/lib/vaultx/**` (exit 1); green on the real config.
+- **R4-T4-4:** check-fail-closed-routes-have-test's real-repo case took 18.4 s under coverage, which is under the 30 s rule, so it stays in app-test.
+
+## D17 — Lateral propagation (requested by the user): 13 defect classes swept
+
+Every class was swept from a code-derived member set. Each fixed member has a test that fails on the pre-fix copy.
+
+- **#9 — untranslated or raw text reaching the user.** The password and team edit loaders rendered `err.message`, which includes the JSON.parse SyntaxError carrying a prefix of the decrypted plaintext. Both now show translated keys.
+- **#13 — a committed server action reported as a failure.** The passkey sign-in button and the security-key form treated a blocked `sessionStorage` write, or an unreadable PRF body, after a successful verify as a sign-in failure.
+- **#5 (prop-controlled dialogs).** `share-dialog` kept the previous share's access password (and copied, expiry and maxViews state) across reopen.
+- **#7 — dirty check.** `directory-sync-card` never enabled Save for a credentials-only edit.
+- **#3 — divergent error-code mappings.**
+  - `auto-extension-connect` offered a retry for `PASSKEY_REAUTH_UNAVAILABLE`/`CREDENTIAL_MISMATCH`. The mapping is now shared as `passkeyReauthDeadEndKey`.
+  - `passkey-credentials-card` mapped a 429 to "service unavailable".
+- **#12 — tests asserting nothing.** 15 weak or decorative tests across 14 files were fixed. The other 71 scanner hits were triaged as false positives; the scanner-tuning proposals are recorded.
+- **#6, #8, #10, #11 — no new defects.** Each scanner was proven on its pre-fix seed.

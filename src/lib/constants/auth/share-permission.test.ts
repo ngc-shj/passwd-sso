@@ -434,16 +434,22 @@ describe("applySharePermissions — ENTRY_TYPE_VALUES sync", () => {
     }
   });
 
-  it("applySharePermissions works without error for all entry types", () => {
-    const sampleData = { title: "Test", password: "secret", username: "user" };
+  it("applies each entry type's own field sets under HIDE_PASSWORD and OVERVIEW_ONLY", () => {
     for (const entryType of ENTRY_TYPE_VALUES) {
-      // Should not throw for any valid entry type
-      expect(() =>
-        applySharePermissions(sampleData, [SHARE_PERMISSION.HIDE_PASSWORD], entryType),
-      ).not.toThrow();
-      expect(() =>
-        applySharePermissions(sampleData, [SHARE_PERMISSION.OVERVIEW_ONLY], entryType),
-      ).not.toThrow();
+      const sensitive = [...SENSITIVE_FIELDS[entryType]];
+      const overview = [...OVERVIEW_FIELDS[entryType]];
+      // Every sensitive and overview key of this type, plus one key in neither set.
+      const data = Object.fromEntries(
+        [...sensitive, ...overview, "unlistedField"].map((k) => [k, `v-${k}`]),
+      );
+
+      const hidden = applySharePermissions(data, [SHARE_PERMISSION.HIDE_PASSWORD], entryType);
+      expect(Object.keys(hidden).sort()).toEqual(
+        Object.keys(data).filter((k) => !SENSITIVE_FIELDS[entryType].has(k)).sort(),
+      );
+
+      const overviewOnly = applySharePermissions(data, [SHARE_PERMISSION.OVERVIEW_ONLY], entryType);
+      expect(Object.keys(overviewOnly).sort()).toEqual([...new Set(overview)].sort());
     }
   });
 });

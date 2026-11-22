@@ -219,5 +219,18 @@ describe("TravelModeCard flows", () => {
     expect(screen.getByLabelText("passphrasePlaceholder")).toHaveValue("");
     expect(screen.queryByText("passphraseRequired")).not.toBeInTheDocument();
   });
+
+  it("clears the typed passphrase when the dialog is closed with Cancel", async () => {
+    renderActive();
+    fireEvent.change(screen.getByLabelText("passphrasePlaceholder"), {
+      target: { value: SENTINEL_NOT_A_SECRET_ZJYK },
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "cancel" }));
+    await waitFor(() => expect(screen.queryByText("disableTitle")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /^disable$/ }));
+
+    expect(screen.getByLabelText("passphrasePlaceholder")).toHaveValue("");
+  });
 });
 

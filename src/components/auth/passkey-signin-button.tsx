@@ -82,7 +82,9 @@ export function PasskeySignInButton() {
         return;
       }
 
-      const verifyData = await verifyRes.json();
+      // The session cookie is already set: from here on nothing may report the
+      // sign-in as failed. An unreadable body only forgoes the PRF handoff.
+      const verifyData = await verifyRes.json().catch(() => null);
 
       // 4. If PRF output was obtained and server returned PRF-wrapped key,
       // hand both to the dashboard in-memory (NOT sessionStorage, which XSS can
@@ -90,13 +92,18 @@ export function PasskeySignInButton() {
       // client-side router.push below; a full reload drops it → manual unlock.
       // Ownership of the buffer transfers to the handoff: null it out so the
       // finally below does not zeroize what the consumer must still read.
-      if (prfOutput && verifyData.prf) {
+      if (prfOutput && verifyData?.prf) {
         stashPrf({ prfOutput, prfData: verifyData.prf });
         prfOutput = null;
       }
 
       // 5. Set flag for vault auto-unlock after dashboard navigation
-      sessionStorage.setItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN, "1");
+      try {
+        sessionStorage.setItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN, "1");
+      } catch {
+        // sessionStorage unavailable (e.g. storage blocked) — the vault then
+        // asks for a manual unlock instead of auto-unlocking.
+      }
 
       // 6. Navigate to callback destination (preserves ext_connect for extension).
       // API callbacks (e.g. iOS /api/mobile/authorize) live outside the [locale]

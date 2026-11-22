@@ -110,6 +110,7 @@ export function PasswordEditDialogLoader({
 }: PasswordEditDialogLoaderProps) {
   const t = useTranslations("PasswordForm");
   const td = useTranslations("PasswordDetail");
+  const tl = useTranslations("PasswordList");
   const { encryptionKey, userId } = useVault();
   const [data, setData] = useState<PersonalPasswordEditData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -130,7 +131,8 @@ export function PasswordEditDialogLoader({
       try {
         const res = await fetchApi(apiPath.passwordById(id));
         if (!res.ok) {
-          throw new Error(td("notFound"));
+          if (!cancelled) setError(td("notFound"));
+          return;
         }
         const raw = await res.json();
 
@@ -237,9 +239,11 @@ export function PasswordEditDialogLoader({
           folderId: raw.folderId ?? null,
         });
         setError(null);
-      } catch (e) {
+      } catch {
+        // Never the error's own message: a JSON.parse SyntaxError quotes the
+        // decrypted plaintext, and decrypt/network errors are untranslated.
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : td("notFound"));
+          setError(tl("loadError"));
         }
       }
     }
@@ -249,7 +253,7 @@ export function PasswordEditDialogLoader({
     return () => {
       cancelled = true;
     };
-  }, [encryptionKey, id, open, td, userId]);
+  }, [encryptionKey, id, open, td, tl, userId]);
 
   if (!data) {
     return (

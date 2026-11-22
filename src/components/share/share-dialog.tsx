@@ -210,8 +210,17 @@ export function ShareDialog({
   if (prevOpenState === null || prevOpenState.open !== open || prevOpenState.entryParam !== entryParam) {
     setPrevOpenState({ open, entryParam });
     if (open) {
+      // The parent keeps this component mounted while closed, so everything
+      // the previous session typed or was shown once is cleared here. A
+      // policy-required password stays on (the policy effect refreshes it).
       setCreatedUrl(null);
+      setCreatedAccessPassword(null);
+      setCopied(false);
+      setPasswordCopied(false);
       setPermission(SHARE_PERMISSION.VIEW_ALL);
+      setExpiresIn("1d");
+      setMaxViews("");
+      setRequirePassword(passwordRequired);
       setLoadingLinks(true);
     }
   }

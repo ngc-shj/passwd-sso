@@ -83,6 +83,16 @@ export function TravelModeCard() {
     }
   };
 
+  // Cancel calls this too: a controlled open change does not fire
+  // onOpenChange, so a direct setter would keep the typed passphrase.
+  const handleDisableDialogChange = (open: boolean) => {
+    setShowDisableDialog(open);
+    if (!open) {
+      setPassphrase("");
+      setDisableError(null);
+    }
+  };
+
   if (loading) return null;
 
   return (
@@ -138,13 +148,7 @@ export function TravelModeCard() {
       </AlertDialog>
 
       {/* Disable Dialog with passphrase */}
-      <Dialog open={showDisableDialog} onOpenChange={(open) => {
-        setShowDisableDialog(open);
-        if (!open) {
-          setPassphrase("");
-          setDisableError(null);
-        }
-      }}>
+      <Dialog open={showDisableDialog} onOpenChange={handleDisableDialogChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{t("disableTitle")}</DialogTitle>
@@ -171,7 +175,7 @@ export function TravelModeCard() {
             <div className="flex justify-end gap-2">
               <Button
                 variant="outline"
-                onClick={() => setShowDisableDialog(false)}
+                onClick={() => handleDisableDialogChange(false)}
               >
                 {t("cancel")}
               </Button>

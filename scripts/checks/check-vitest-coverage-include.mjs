@@ -218,13 +218,20 @@ for (const entry of includes) {
   }
 }
 
-// Check 2: coverage.thresholds file-path keys must exist
+// Check 2: coverage.thresholds path keys must exist; glob keys must match a file
 for (const [key] of Object.entries(thresholds)) {
   if (GLOBAL_THRESHOLD_KEYS.has(key)) {
     resolvedThresholds++;
     continue;
   }
-  // Treat as file path
+  if (key.includes("*")) {
+    if (resolveGlob(key).length === 0) {
+      errors.push(`coverage.thresholds glob "${key}" matches no files`);
+    } else {
+      resolvedThresholds++;
+    }
+    continue;
+  }
   if (!existsSync(resolve(ROOT, key))) {
     errors.push(`coverage.thresholds key "${key}" is a file path that does not exist`);
   } else {

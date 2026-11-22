@@ -101,11 +101,14 @@ describe("sweepOnce per-entry error isolation (C4/INV-C4b/RT7)", () => {
       }),
     } as unknown as Parameters<typeof sweepOnce>[0];
 
-    await expect(
-      sweepOnce(mockPrisma, 100, {
-        intervalMs: 3_600_000,
-        emitHeartbeatAudit: false,
-      }),
-    ).resolves.toBeDefined();
+    const counts = await sweepOnce(mockPrisma, 100, {
+      intervalMs: 3_600_000,
+      emitHeartbeatAudit: false,
+    });
+
+    // Every entry is still visited and flagged -1; none aborts the sweep.
+    expect(counts).toEqual(
+      Object.fromEntries(RETENTION_REGISTRY.map((e) => [e.table, -1])),
+    );
   });
 });

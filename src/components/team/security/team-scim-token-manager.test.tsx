@@ -227,15 +227,30 @@ describe("ScimTokenManager", () => {
   });
 
   it("creates token: button disabled while creating", async () => {
-    let resolveFetch: (v: unknown) => void = () => {};
-    const pending = new Promise((r) => (resolveFetch = r));
-    mockFetch.mockImplementation(() => pending);
+    let resolveCreate: (v: unknown) => void = () => {};
+    const pendingCreate = new Promise((r) => (resolveCreate = r));
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? pendingCreate
+        : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+    );
     await act(async () => {
       render(<ScimTokenManager locale="en" />);
     });
-    // Tokens are still loading; we just verify the component renders without crash
-    expect(document.querySelector("body")).toBeDefined();
-    resolveFetch({ ok: true, json: () => Promise.resolve([]) });
+
+    fireEvent.click(screen.getByRole("button", { name: "scimCreateToken" }));
+    const createButtons = screen.getAllByRole("button", { name: "scimCreateToken" });
+    const confirm = createButtons[createButtons.length - 1];
+    expect(confirm).toBeEnabled();
+    await act(async () => {
+      fireEvent.click(confirm);
+    });
+    expect(confirm).toBeDisabled();
+
+    await act(async () => {
+      resolveCreate({ ok: false, json: () => Promise.resolve({}) });
+    });
+    await waitFor(() => expect(confirm).toBeEnabled());
   });
 
   it("opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned on create", async () => {

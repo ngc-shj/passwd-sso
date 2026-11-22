@@ -402,3 +402,56 @@ describe("ShareDialog — copying the created share URL", () => {
     expect(copyButton.querySelector(".lucide-copy")).not.toBeNull();
   });
 });
+
+describe("ShareDialog — reopening after a session", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function renderOpen(open: boolean) {
+    return (
+      <ShareDialog
+        open={open}
+        onOpenChange={vi.fn()}
+        passwordEntryId="p1"
+        decryptedData={{ title: "x", username: "u", password: "pw" }}
+      />
+    );
+  }
+
+  it("does not show the previous link's access password next to a new link created without one", async () => {
+    mockFetch
+      .mockResolvedValueOnce(okJson({ items: [] }))
+      .mockResolvedValueOnce(okJson({ url: "/s/first", accessPassword: "old-access-pw" }))
+      .mockResolvedValueOnce(okJson({ items: [] }))
+      .mockResolvedValueOnce(okJson({ items: [] }))
+      .mockResolvedValueOnce(okJson({ url: "/s/second" }))
+      .mockResolvedValueOnce(okJson({ items: [] }));
+    const { rerender } = render(renderOpen(true));
+    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.click(screen.getByRole("button", { name: /create/ }));
+    expect(await screen.findByDisplayValue("old-access-pw")).toBeInTheDocument();
+
+    rerender(renderOpen(false));
+    rerender(renderOpen(true));
+    fireEvent.click(screen.getByRole("button", { name: /create/ }));
+
+    expect(await screen.findByDisplayValue("https://app.example.com/s/second")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("old-access-pw")).not.toBeInTheDocument();
+  });
+
+  it("clears the password toggle and max views the previous session set", () => {
+    mockFetch.mockResolvedValue(okJson({ items: [] }));
+    const { rerender } = render(renderOpen(true));
+    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.change(screen.getByPlaceholderText("maxViewsPlaceholder"), { target: { value: "5" } });
+    expect(screen.getByRole("switch")).toBeChecked();
+    expect(screen.getByPlaceholderText("maxViewsPlaceholder")).toHaveValue(5);
+
+    rerender(renderOpen(false));
+    rerender(renderOpen(true));
+
+    expect(screen.getByRole("switch")).not.toBeChecked();
+    expect(screen.getByPlaceholderText("maxViewsPlaceholder")).toHaveValue(null);
+  });
+});

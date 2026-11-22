@@ -152,6 +152,18 @@ describe("config layer: the real vitest.config.ts", () => {
     expect(thresholds["src/lib/proxy/auth-gate.ts"]).toEqual({ lines: 95, branches: 92 });
   });
 
+  it("floors every file and each security directory", async () => {
+    const { thresholds } = (await loadConfig("")).default.test.coverage;
+    expect(thresholds.perFile).toEqual({ statements: 60, lines: 60 });
+    for (const dir of ["crypto", "proxy", "security", "audit", "tenant", "auth", "vault"]) {
+      expect(thresholds[`src/lib/${dir}/**`]).toMatchObject({
+        statements: expect.any(Number),
+        lines: expect.any(Number),
+        branches: expect.any(Number),
+      });
+    }
+  });
+
   it("drops thresholds on a coverage shard, so the checks must not read that view", async () => {
     const cfg = await loadConfig("1");
     expect(cfg.default.test.coverage.thresholds).toBeUndefined();
