@@ -1,12 +1,13 @@
 // @vitest-environment jsdom
 import React from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
-const { mockSetup } = vi.hoisted(() => ({
+const { mockSetup, mockGetStrength } = vi.hoisted(() => ({
   mockSetup: vi.fn(),
+  mockGetStrength: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
@@ -44,7 +45,7 @@ vi.mock("@/components/ui/card", () => ({
 }));
 
 vi.mock("./passphrase-strength", () => ({
-  getStrength: () => ({ level: 0, labelKey: null }),
+  getStrength: mockGetStrength,
   STRENGTH_COLORS: [] as string[],
 }));
 
@@ -59,6 +60,7 @@ import { VaultSetupWizard } from "./vault-setup-wizard";
 describe("VaultSetupWizard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetStrength.mockReturnValue({ level: 0, labelKey: null });
   });
 
   it("renders info banner with contextMessage when provided", () => {
@@ -95,5 +97,106 @@ describe("VaultSetupWizard", () => {
     expect(screen.getByLabelText("passphrase")).toBeInTheDocument();
     expect(screen.getByLabelText("confirmPassphrase")).toBeInTheDocument();
     expect(screen.getByText("setupButton")).toBeInTheDocument();
+  });
+});
+
+const VALID_PASSPHRASE = "correct horse battery";
+
+function typeInto(label: string, value: string) {
+  fireEvent.change(screen.getByLabelText(label), { target: { value } });
+}
+
+describe("VaultSetupWizard form behavior", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockGetStrength.mockReturnValue({ level: 0, labelKey: null });
+  });
+
+  it("shows the min-length hint while the passphrase is shorter than the minimum", () => {
+    render(<VaultSetupWizard />);
+    typeInto("passphrase", "short");
+
+    expect(screen.getByText("passphraseMinLength")).toBeInTheDocument();
+  });
+
+  it("hides the min-length hint once the passphrase reaches the minimum", () => {
+    render(<VaultSetupWizard />);
+    typeInto("passphrase", VALID_PASSPHRASE);
+
+    expect(screen.queryByText("passphraseMinLength")).toBeNull();
+  });
+
+  it("shows the strength label returned for the typed passphrase", () => {
+    mockGetStrength.mockReturnValue({ level: 3, labelKey: "strengthStrong" });
+    render(<VaultSetupWizard />);
+    typeInto("passphrase", VALID_PASSPHRASE);
+
+    expect(mockGetStrength).toHaveBeenLastCalledWith(VALID_PASSPHRASE);
+    expect(screen.getByText("strengthStrong")).toBeInTheDocument();
+  });
+
+  it("shows the mismatch hint when the confirmation differs", () => {
+    render(<VaultSetupWizard />);
+    typeInto("passphrase", VALID_PASSPHRASE);
+    typeInto("confirmPassphrase", `${VALID_PASSPHRASE}x`);
+
+    expect(screen.getByText("passphraseMismatch")).toBeInTheDocument();
+    expect(screen.getByText("setupButton")).toBeDisabled();
+  });
+
+  it("keeps submit disabled for a matching passphrase below the minimum length", () => {
+    render(<VaultSetupWizard />);
+    typeInto("passphrase", "short");
+    typeInto("confirmPassphrase", "short");
+
+    expect(screen.getByText("setupButton")).toBeDisabled();
+  });
+
+  it("calls setup with the passphrase when a valid matching pair is submitted", async () => {
+    mockSetup.mockResolvedValue(undefined);
+    render(<VaultSetupWizard />);
+    typeInto("passphrase", VALID_PASSPHRASE);
+    typeInto("confirmPassphrase", VALID_PASSPHRASE);
+
+    fireEvent.click(screen.getByText("setupButton"));
+
+    await waitFor(() => expect(mockSetup).toHaveBeenCalledWith(VALID_PASSPHRASE));
+    expect(screen.queryByText("setupError")).toBeNull();
+  });
+
+  it("does not call setup when the form is submitted with an invalid pair", () => {
+    const { container } = render(<VaultSetupWizard />);
+    typeInto("passphrase", VALID_PASSPHRASE);
+    typeInto("confirmPassphrase", "different passphrase");
+
+    const form = container.querySelector("form");
+    if (!form) throw new Error("form not rendered");
+    fireEvent.submit(form);
+
+    expect(mockSetup).not.toHaveBeenCalled();
+  });
+
+  it("shows the setup error when setup rejects", async () => {
+    mockSetup.mockRejectedValue(new Error("boom"));
+    render(<VaultSetupWizard />);
+    typeInto("passphrase", VALID_PASSPHRASE);
+    typeInto("confirmPassphrase", VALID_PASSPHRASE);
+
+    fireEvent.click(screen.getByText("setupButton"));
+
+    expect(await screen.findByText("setupError")).toBeInTheDocument();
+    expect(screen.getByText("setupButton")).not.toBeDisabled();
+  });
+
+  it("toggles the passphrase input between hidden and visible", () => {
+    render(<VaultSetupWizard />);
+    const input = screen.getByLabelText("passphrase");
+    expect(input).toHaveAttribute("type", "password");
+
+    const toggle = input.parentElement?.querySelector("button");
+    if (!toggle) throw new Error("toggle not rendered");
+    fireEvent.click(toggle);
+
+    expect(input).toHaveAttribute("type", "text");
   });
 });
