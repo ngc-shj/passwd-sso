@@ -571,3 +571,65 @@ In `copy-reprompt-surfaces.test.tsx`, replace the stale todo with a comment poin
 | C8  | Dead branches                                                      | locked |
 | C9  | Custom-field type change clears stale boolean                      | locked |
 | C10 | Stale it.todo                                                      | locked |
+
+## Implementation Checklist
+
+**Below-target member set (C3).** 145 files, listed in `close-coverage-and-clipboard-gaps-below-target.txt`. It was derived with the replacing config, and the coverage key count equals the member count (1,120).
+
+**Batches.** Each batch owns a disjoint set of files.
+
+- **A — Coverage infra (C1, C2c, quality-bar scanner, wiring).**
+  - `vitest.config.ts`: `include`, `exclude` and `reporter`; `COVERAGE_THRESHOLDS` exported. `perFile` and the C2b keys are added later, after the C3 measurement.
+  - `scripts/checks/lib/coverage-members.mjs`
+  - `scripts/checks/check-coverage-scope.mjs`, with its self-test
+  - `scripts/checks/check-coverage-ignore-hints.mjs`, with its self-test
+  - `scripts/checks/scan-test-assertions.mjs`, with its self-test
+  - `.github/workflows/ci.yml`: the `changes.app` filter, and the `app-coverage` step that runs `check-coverage-scope`
+  - `scripts/pre-pr.sh`: `app_paths`, plus `run_step` lines for ignore-hints and state-updater-purity
+- **B — Clipboard, toasts and dead branches (C4, C4b, C5, C8, C10).**
+  - Clipboard sites: `share-dialog.tsx`, `send-dialog.tsx`, `create-grant-dialog.tsx`, `grant-card.tsx`, `team-invite-by-email-section.tsx`, and their tests
+  - `src/lib/clipboard/copy-secret.ts` and its test
+  - `create-delegation-dialog.tsx`
+  - `share-send-view.tsx`
+  - `src/app/[locale]/dashboard/emergency-access/page.tsx` (the `Grant.token` removal, plus the C3 test)
+  - `messages/{en,ja}/EmergencyAccess.json`, and the delegation dialog's namespace files
+  - `eslint.config.mjs` and `scripts/__tests__/eslint-clipboard-and-toast.test.mjs`
+  - `copy-reprompt-surfaces.test.tsx`
+- **C — Unlock mapping and pure updaters (C6, C7 fixes plus gate, C9).**
+  - `vault-lock-screen.tsx`
+  - `team-create-dialog.tsx` (plus the C3 raise)
+  - `notification-bell.tsx`
+  - `entry-history-section.tsx`
+  - `use-local-storage.ts` (plus the C3 raise; replaces the existing test)
+  - `entry-custom-fields-totp-section.tsx`
+  - `scripts/checks/check-state-updater-purity.mjs`, with its self-test
+- **D — C3 lib, hooks and root.**
+  - Store-backed modules: `rotate-key-server.ts`, `delegation.ts`, `team-attachment-lock.ts`
+  - Other lib and hooks: `extension-connect-request.ts`, `access-request-state.ts`, `vault-list-adapter.ts`, `form-scope-config.ts`, `use-entry-actions.ts`
+  - The three type-only modules (directive removal)
+  - `instrumentation-client.ts`
+- **E — C3 components.** The rest of the below-target `src/components/**` files, excluding `grant-card` and `team-create-dialog`.
+- **F — C3 logic-heavy pages (characterise, then extract).** `share-links`, `emergency-access/[id]/vault`, `recovery`, `audit-logs`, `admin/teams/[teamId]/general/profile`, `emergency-access/invite/[token]`, `vault-reset/admin`, `admin/tenant/teams` (pages), and `src/app/s/[token]/page.tsx`.
+- **G — C3 remaining `src/app/[locale]/dashboard/**` files and `src/app/[locale]/*` root files.** Excludes F's pages and the emergency-access page that B owns.
+- **H — C3 remaining `src/app/[locale]/{admin,auth,…}/**`, `src/app/layout.tsx`, `src/app/manifest.ts` and `src/app/s/layout.tsx`.**
+- **Orchestrator.**
+  - C2a `perFile` and the C2b ratchets, after measurement
+  - The C2a red-proof and headroom
+  - The CI budget measurement
+  - The full suite, build and pre-pr runs
+  - Commits
+
+**Reuse inventory.** These must be reused, not reimplemented:
+
+- `copySecretToClipboard` and `reportCopyOutcome` (`src/lib/clipboard`)
+- `formatLockedUntil` (`vault-lock-screen.tsx`)
+- `useRevealSet` timers (`src/hooks/vault/use-reveal-timeout.ts`)
+- `apiErrorToI18nKey`
+- Test helpers in `src/__tests__/helpers/`: `mock-clipboard`, `mock-translator`, `mock-prisma`, `mock-app-navigation`, `passkey-reauth-mocks`, `request-builder`
+- Page-test models: `admin/layout.test.tsx` and `s/[token]/page.test.tsx`
+
+**CI gate parity.**
+
+- `npm run typecheck:test` runs in CI. Every batch must keep its test files type-clean.
+- The new static gates run through `pre-pr.sh` `run_step`, which the `static-checks` job executes.
+- Deferred parity gap: `check-coverage-scope.mjs` on the merged summary. Reason: it needs the merged coverage blob that only `app-coverage` produces. The local equivalent is the shard+merge command in C2a.
