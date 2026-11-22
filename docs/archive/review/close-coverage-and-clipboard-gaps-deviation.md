@@ -178,3 +178,5 @@ The branch diff was reviewed by Codex in three partitions (clipboard and share; 
 - **Functionality:** pending at the time of this entry.
 
 **Pre-PR gate:** `scripts/pre-pr.sh` reports 99/99 passed on HEAD 68ae9286e.
+- **Functionality — R17 (Major), fixed.** `passkeyReauthDeadEndKey` was adopted by 3 of its 4 consumers. `signin-reauth-panel` still invited a retry for UNAUTHORIZED, PASSKEY_REAUTH_UNAVAILABLE and PASSKEY_REAUTH_CREDENTIAL_MISMATCH. It now shows the dead-end message, and the sign-in page supplies those labels. Red-proof: the pre-fix panel fails all three new cases.
+- **Functionality — R2 (Major), fixed.** The recovery flow and its page compared against a literal 10. Both now use `PASSPHRASE_MIN_LENGTH`, like the sibling flows.

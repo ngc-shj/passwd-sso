@@ -19,6 +19,7 @@ import {
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_PATH } from "@/lib/constants";
+import { PASSPHRASE_MIN_LENGTH } from "@/lib/validations";
 import { getStrength } from "@/components/vault/passphrase-strength";
 import { fetchApi, hardNavigate } from "@/lib/url-helpers";
 
@@ -69,7 +70,7 @@ export function useRecoveryFlow() {
 
   const strength = getStrength(newPassphrase);
   const isValid =
-    newPassphrase.length >= 10 && newPassphrase === confirmPassphrase;
+    newPassphrase.length >= PASSPHRASE_MIN_LENGTH && newPassphrase === confirmPassphrase;
 
   async function handleVerify(e: React.FormEvent) {
     e.preventDefault();

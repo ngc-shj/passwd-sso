@@ -102,6 +102,9 @@ export default async function SignInPage({
               passkeyAction: t("reauthAction"),
               passkeyFailed: t("reauthFailed"),
               passkeyCancelled: t("reauthCancelled"),
+              reauthSessionExpired: t("reauthSessionExpired"),
+              reauthUnavailable: t("reauthUnavailable"),
+              reauthCredentialMismatch: t("reauthCredentialMismatch"),
               signInAgainAction: t("recentSessionAction"),
             }}
           />

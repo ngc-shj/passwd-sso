@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { STRENGTH_COLORS } from "@/components/vault/passphrase-strength";
+import { PASSPHRASE_MIN_LENGTH } from "@/lib/validations";
 import { Link } from "@/i18n/navigation";
 import { AlertTriangle, ArrowLeft, Loader2, ShieldCheck } from "lucide-react";
 
@@ -110,7 +111,7 @@ export default function RecoveryPage() {
                   </p>
                 </div>
               )}
-              {newPassphrase && newPassphrase.length < 10 && (
+              {newPassphrase && newPassphrase.length < PASSPHRASE_MIN_LENGTH && (
                 <p className="text-xs text-destructive">
                   {tVault("passphraseMinLength")}
                 </p>

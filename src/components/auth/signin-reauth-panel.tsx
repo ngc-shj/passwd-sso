@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AppIcon } from "@/components/ui/app-icon";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
+import { passkeyReauthDeadEndKey } from "@/lib/auth/webauthn/passkey-reauth-dead-end";
 import { withBasePath } from "@/lib/url-helpers";
 
 /**
@@ -25,6 +26,10 @@ type SignInReauthPanelLabels = {
   passkeyAction: string;
   passkeyFailed: string;
   passkeyCancelled: string;
+  /** Refusals no retry can resolve; each points the user at sign-in again. */
+  reauthSessionExpired: string;
+  reauthUnavailable: string;
+  reauthCredentialMismatch: string;
   signInAgainAction: string;
 };
 
@@ -70,10 +75,13 @@ export function SignInReauthPanel({
         window.location.assign(safeHref);
         return;
       }
+      const deadEnd = passkeyReauthDeadEndKey(result.error);
       setError(
-        result.error === "AUTHENTICATION_CANCELLED"
-          ? labels.passkeyCancelled
-          : labels.passkeyFailed,
+        deadEnd
+          ? labels[deadEnd]
+          : result.error === "AUTHENTICATION_CANCELLED"
+            ? labels.passkeyCancelled
+            : labels.passkeyFailed,
       );
     } catch {
       setError(labels.passkeyFailed);
