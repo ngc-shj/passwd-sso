@@ -58,7 +58,8 @@ export interface EntryActionCallbacks {
  *   resolves to InlineDetailData. Called at factory-call time (per row render),
  *   so it can close over entry-specific context (id, entryType, etc.).
  *
- * Security: clipboard is cleared after CLIPBOARD_CLEAR_TIMEOUT_MS (30s).
+ * Security: a clear is attempted after CLIPBOARD_CLEAR_TIMEOUT_MS (30s); it
+ * only takes effect on Chromium (see the engine notes in copy-secret.ts).
  */
 export function useEntryActions<E extends DisplayEntryLike>(
   getDetailFor: (entry: E) => () => Promise<InlineDetailData>,

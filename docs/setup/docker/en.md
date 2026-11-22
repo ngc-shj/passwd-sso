@@ -409,7 +409,7 @@ npm start
 
 ### Client-side
 
-- Clipboard auto-clears 30 seconds after copy
+- The web app attempts to clear the clipboard 30 seconds after a copy (effective on Chromium only)
 - Password display auto-hides after 30 seconds
 - Confirmation dialog before deletion
 

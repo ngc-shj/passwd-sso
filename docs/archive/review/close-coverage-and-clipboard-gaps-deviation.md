@@ -112,15 +112,15 @@
 
 Every class was swept from a code-derived member set. Each fixed member has a test that fails on the pre-fix copy.
 
-- **#9 — untranslated or raw text reaching the user.** The password and team edit loaders rendered `err.message`, which includes the JSON.parse SyntaxError carrying a prefix of the decrypted plaintext. Both now show translated keys.
-- **#13 — a committed server action reported as a failure.** The passkey sign-in button and the security-key form treated a blocked `sessionStorage` write, or an unreadable PRF body, after a successful verify as a sign-in failure.
-- **#5 (prop-controlled dialogs).** `share-dialog` kept the previous share's access password (and copied, expiry and maxViews state) across reopen.
-- **#7 — dirty check.** `directory-sync-card` never enabled Save for a credentials-only edit.
-- **#3 — divergent error-code mappings.**
+- **class 9 — untranslated or raw text reaching the user.** The password and team edit loaders rendered `err.message`, which includes the JSON.parse SyntaxError carrying a prefix of the decrypted plaintext. Both now show translated keys.
+- **class 13 — a committed server action reported as a failure.** The passkey sign-in button and the security-key form treated a blocked `sessionStorage` write, or an unreadable PRF body, after a successful verify as a sign-in failure.
+- **class 5 (prop-controlled dialogs).** `share-dialog` kept the previous share's access password (and copied, expiry and maxViews state) across reopen.
+- **class 7 — dirty check.** `directory-sync-card` never enabled Save for a credentials-only edit.
+- **class 3 — divergent error-code mappings.**
   - `auto-extension-connect` offered a retry for `PASSKEY_REAUTH_UNAVAILABLE`/`CREDENTIAL_MISMATCH`. The mapping is now shared as `passkeyReauthDeadEndKey`.
   - `passkey-credentials-card` mapped a 429 to "service unavailable".
-- **#12 — tests asserting nothing.** 15 weak or decorative tests across 14 files were fixed. The other 71 scanner hits were triaged as false positives; the scanner-tuning proposals are recorded.
-- **#6, #8, #10, #11 — no new defects.** Each scanner was proven on its pre-fix seed.
+- **class 12 — tests asserting nothing.** 15 weak or decorative tests across 14 files were fixed. The other 71 scanner hits were triaged as false positives; the scanner-tuning proposals are recorded.
+- **class 6, class 8, class 10, class 11 — no new defects.** Each scanner was proven on its pre-fix seed.
 
 ## D18 — Codex security review (requested by the user)
 
@@ -160,3 +160,21 @@ The branch diff was reviewed by Codex in three partitions (clipboard and share; 
   - cloud-key-provider-warm: two TeamWebhook rows are encrypted under a key this environment cannot decrypt.
 - **Not cleaned up:** the DB is shared with the :3000 instance, so the rows were left in place pending the user's permission.
 - **Changed rotate-key tests:** the four rotate-key integration files pass (32 tests).
+
+## D21 — Phase 2 self-R-check (Step 2-5)
+
+**Mechanical pre-steps.** These checks ran; every hit was triaged as follows:
+- **check-timing-safe (2 Critical):** false positives. One is an empty-token presence check; the other is a test mock comparing a cookie name.
+- **check-propagation (223 Major):** name collisions, not real hits. Local `handleSubmit`/`handleVerify` functions in unrelated files, and coverage-include path strings left in docs.
+- **check-hardcoded-reuse (4 non-test):** coincidental values with different meanings (an input type, an HTTP status, a Web Crypto algorithm name, an extension delay).
+- **check-orphaned-checks:** the new `scripts/__tests__` self-tests run through the vitest include glob in app-test.
+- **check-deployment-artifact:** Tier-2. The manual-test artifact carries the Adversarial section.
+- **check-markdown-autolinks:** fixed in this log.
+- **Clean:** check-suppression, check-race-vacuous-guard and check-deny-only-guard; the input-validation and event-dispatch checks also exited 0.
+
+**Sub-agent findings:**
+- **Security, R49/R3 (Major), fixed.** The README, README.ja, SECURITY.md, docs/security/considerations (en and ja), docs/setup/docker, docs/architecture/feature-gap-analysis and the use-entry-actions comment still promised an unconditional 30 s clipboard clear. They now state it is an attempt that takes effect on Chromium only. The extension and CLI claims describe separate implementations and were left unchanged.
+- **Testing, RT7 (Minor), fixed.** Five pool-factory accept cases asserted nothing. Each now asserts the pool holds the accepted value. `scan-test-assertions` over all 170 changed test files reports 0 findings.
+- **Functionality:** pending at the time of this entry.
+
+**Pre-PR gate:** `scripts/pre-pr.sh` reports 99/99 passed on HEAD 68ae9286e.

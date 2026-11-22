@@ -597,7 +597,7 @@ Zero-knowledge architecture — the server stores only ciphertext and cannot dec
 - **Secret Key** — Account-specific salt for defense against server compromise
 - **AAD binding** — Additional Authenticated Data ties ciphertext to user and entry IDs (E2E vault); server-side share links / Sends bind ciphertext to the owning tenant
 - **Session security** — Database sessions (not JWT), tenant/team-policy-driven absolute timeout (default 30 days, configurable down to 5 minutes per policy), auto-lock after a single idle timeout (default 15 min, configurable) regardless of tab visibility
-- **Clipboard clear** — Copied passwords auto-clear after 30 seconds
+- **Clipboard clear** — The web app attempts to clear copied secrets after 30 seconds; effective on Chromium only (Firefox and Safari keep the value until it is overwritten)
 - **CSRF defense** — JSON body + SameSite cookie + CSP + Origin validation against configured `APP_URL` / `AUTH_URL` (fail-closed if unset)
 
 For the full design, see the [Cryptography Whitepaper](docs/security/cryptography-whitepaper.md).
