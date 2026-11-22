@@ -11,7 +11,7 @@ import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
 import { notifyTeamDataChanged } from "@/lib/events";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 
 const ROLE_KEYS: Record<string, string> = {
   [TEAM_ROLE.OWNER]: "roleOwner",
@@ -24,6 +24,19 @@ interface InviteInfo {
   team: { id: string; name: string; slug: string };
   role?: string;
   alreadyMember: boolean;
+}
+
+/** The joined team in an accept response, or null when it is not there. */
+function readInviteInfo(body: unknown): InviteInfo | null {
+  if (typeof body !== "object" || body === null || !("team" in body)) return null;
+  const { team } = body;
+  if (typeof team !== "object" || team === null) return null;
+  if (!("id" in team) || !("name" in team) || !("slug" in team)) return null;
+  const { id, name, slug } = team;
+  if (typeof id !== "string" || typeof name !== "string" || typeof slug !== "string") return null;
+  const role = "role" in body && typeof body.role === "string" ? body.role : undefined;
+  const alreadyMember = "alreadyMember" in body && body.alreadyMember === true;
+  return { team: { id, name, slug }, role, alreadyMember };
 }
 
 export default function AcceptInvitePage({
@@ -40,6 +53,8 @@ export default function AcceptInvitePage({
   const [, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<InviteInfo | null>(null);
+  // Accepted, but the response did not say which team was joined.
+  const [acceptedWithoutDetails, setAcceptedWithoutDetails] = useState(false);
   const acceptedRef = useRef(false);
 
   const handleAccept = async () => {
@@ -68,11 +83,14 @@ export default function AcceptInvitePage({
         return;
       }
 
-      const data: InviteInfo = await res.json();
+      // The membership exists from here on: nothing below may be reported as
+      // a failed acceptance.
       acceptedRef.current = true;
-      setResult(data);
       notifyTeamDataChanged();
       toast.success(t("accepted"));
+      const info = readInviteInfo(await parseJsonBodyOnce(res));
+      if (info) setResult(info);
+      else setAcceptedWithoutDetails(true);
     } catch {
       setError(t("networkError"));
       setLoading(false);
@@ -116,6 +134,17 @@ export default function AcceptInvitePage({
         <Button onClick={() => router.push(`/dashboard/teams/${result.team.id}`)}>
           {result.team.name}
         </Button>
+      </div>
+    );
+  }
+
+  if (acceptedWithoutDetails) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full p-6 text-center">
+        <CheckCircle2 className="h-16 w-16 text-green-500 mb-4" />
+        <h1 className="text-2xl font-bold mb-2">{t("accepted")}</h1>
+        <p className="text-muted-foreground mb-6">{t("acceptedOpenFromSidebar")}</p>
+        <Button onClick={() => router.push("/dashboard")}>{t("passwords")}</Button>
       </div>
     );
   }

@@ -24,7 +24,8 @@ import {
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 import { eaErrorToI18nKey } from "@/lib/http/api-error-codes";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { readNonEmptyStringField } from "@/lib/http/read-body-field";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { COPY_OUTCOME, copySecretToClipboard } from "@/lib/clipboard/copy-secret";
@@ -43,12 +44,6 @@ interface CreatedState {
   /** Null when the response carried no usable token. */
   url: string | null;
   message: CreatedMessageKey;
-}
-
-function readToken(data: unknown): string | null {
-  if (typeof data !== "object" || data === null || !("token" in data)) return null;
-  const { token } = data;
-  return typeof token === "string" && token !== "" ? token : null;
 }
 
 export function CreateGrantDialog({ onCreated }: CreateGrantDialogProps) {
@@ -102,12 +97,7 @@ export function CreateGrantDialog({ onCreated }: CreateGrantDialogProps) {
       // failed creation.
       onCreated();
 
-      let token: string | null;
-      try {
-        token = readToken(await res.json());
-      } catch {
-        token = null;
-      }
+      const token = readNonEmptyStringField(await parseJsonBodyOnce(res), "token");
       if (!token) {
         setCreated({ url: null, message: "grantCreatedLinkUnavailable" });
         return;

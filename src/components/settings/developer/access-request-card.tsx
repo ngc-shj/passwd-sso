@@ -44,7 +44,8 @@ import { SA_TOKEN_SCOPES } from "@/lib/constants/auth/service-account";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { readNonEmptyStringField } from "@/lib/http/read-body-field";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
@@ -231,11 +232,13 @@ export function AccessRequestCard() {
         }
         return;
       }
-      const data = await res.json();
+      // The approval and its token exist from here on: nothing below may be
+      // reported as a failed approval.
       toast.success(t("arApproved"));
-      setJitToken(data.token ?? null);
-      setJitTokenOpen(true);
       fetchRequests();
+      // A null token opens the dialog on its "could not be shown" message.
+      setJitToken(readNonEmptyStringField(await parseJsonBodyOnce(res), "token"));
+      setJitTokenOpen(true);
     } catch {
       toast.error(t("arApproveFailed"));
     } finally {
@@ -504,16 +507,20 @@ export function AccessRequestCard() {
             <DialogTitle>{t("arJitToken")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-2">
-            {jitToken && (
-              <div className="flex items-center gap-2">
-                <Input value={jitToken} readOnly autoComplete="off" className="font-mono text-xs" />
-                <CopyButton getValue={() => jitToken} />
-              </div>
+            {jitToken ? (
+              <>
+                <div className="flex items-center gap-2">
+                  <Input value={jitToken} readOnly autoComplete="off" className="font-mono text-xs" />
+                  <CopyButton getValue={() => jitToken} />
+                </div>
+                <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
+                  {t("arJitTokenWarning")}
+                </p>
+                <p className="text-xs text-muted-foreground">{t("arJitTokenTtl")}</p>
+              </>
+            ) : (
+              <p role="alert" className="text-sm">{t("arJitTokenUnavailable")}</p>
             )}
-            <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
-              {t("arJitTokenWarning")}
-            </p>
-            <p className="text-xs text-muted-foreground">{t("arJitTokenTtl")}</p>
             <Button variant="outline" size="sm" onClick={() => { setJitTokenOpen(false); setJitToken(null); }}>
               OK
             </Button>

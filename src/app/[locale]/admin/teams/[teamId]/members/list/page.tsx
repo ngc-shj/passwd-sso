@@ -53,7 +53,7 @@ import { fetchApi } from "@/lib/url-helpers";
 import { filterMembers } from "@/lib/filter-members";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import type { TeamMemberDisplayApiItem as Member } from "@/lib/team/team-member-display";
 
@@ -64,6 +64,19 @@ interface TeamInfo {
   description: string | null;
   role: string;
   tenantName?: string;
+}
+
+/** The per-member outcomes of a bulk approve/reject response, or null when they are not there. */
+function readOutcomes(body: unknown): string[] | null {
+  if (typeof body !== "object" || body === null || !("results" in body)) return null;
+  const { results } = body;
+  if (!Array.isArray(results)) return null;
+  const outcomes: string[] = [];
+  for (const r of results) {
+    if (typeof r !== "object" || r === null || !("outcome" in r) || typeof r.outcome !== "string") return null;
+    outcomes.push(r.outcome);
+  }
+  return outcomes;
 }
 
 export default function TeamMembersPage({
@@ -330,16 +343,21 @@ export default function TeamMembersPage({
         }
         throw new Error("Failed");
       }
-      const { results } = (await res.json()) as { results: { outcome: string }[] };
-      const approved = results.filter((r) => r.outcome === SCIM_APPROVE_OUTCOME.APPROVED).length;
-      const skipped = results.length - approved;
-      if (approved === 0 && results.every((r) => r.outcome === SCIM_APPROVE_OUTCOME.NOT_FOUND)) {
+      // The batch has been applied from here on: refresh first, then report.
+      fetchAll();
+      const outcomes = readOutcomes(await parseJsonBodyOnce(res));
+      if (!outcomes) {
+        toast.success(t("bulkApproveDone"));
+        return;
+      }
+      const approved = outcomes.filter((o) => o === SCIM_APPROVE_OUTCOME.APPROVED).length;
+      const skipped = outcomes.length - approved;
+      if (approved === 0 && outcomes.every((o) => o === SCIM_APPROVE_OUTCOME.NOT_FOUND)) {
         toast.error(t("requestAlreadyHandled"));
       } else {
         if (approved > 0) toast.success(t("bulkApproved", { count: approved }));
         if (skipped > 0) toast.error(t("bulkApproveSkipped", { count: skipped }));
       }
-      fetchAll();
     } catch {
       toast.error(t("networkError"));
     }
@@ -370,16 +388,21 @@ export default function TeamMembersPage({
         }
         throw new Error("Failed");
       }
-      const { results } = (await res.json()) as { results: { outcome: string }[] };
-      const rejected = results.filter((r) => r.outcome === SCIM_REJECT_OUTCOME.REJECTED).length;
-      const skipped = results.length - rejected;
-      if (rejected === 0 && results.every((r) => r.outcome === SCIM_REJECT_OUTCOME.NOT_FOUND)) {
+      // The batch has been applied from here on: refresh first, then report.
+      fetchAll();
+      const outcomes = readOutcomes(await parseJsonBodyOnce(res));
+      if (!outcomes) {
+        toast.success(t("bulkRejectDone"));
+        return;
+      }
+      const rejected = outcomes.filter((o) => o === SCIM_REJECT_OUTCOME.REJECTED).length;
+      const skipped = outcomes.length - rejected;
+      if (rejected === 0 && outcomes.every((o) => o === SCIM_REJECT_OUTCOME.NOT_FOUND)) {
         toast.error(t("requestAlreadyHandled"));
       } else {
         if (rejected > 0) toast.success(t("bulkRejected", { count: rejected }));
         if (skipped > 0) toast.error(t("bulkRejectSkipped", { count: skipped }));
       }
-      fetchAll();
     } catch {
       toast.error(t("networkError"));
     }

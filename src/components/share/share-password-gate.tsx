@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Lock, Loader2, AlertTriangle } from "lucide-react";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { SHARE_PASSWORD_MAX_ATTEMPTS } from "@/lib/validations/common";
 import { fetchApi } from "@/lib/url-helpers";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
@@ -73,17 +73,24 @@ export function SharePasswordGate({
         return;
       }
 
-      const data = await res.json();
+      const data = await parseJsonBodyOnce(res);
+      const accessToken =
+        typeof data === "object" && data !== null && "accessToken" in data ? data.accessToken : null;
+      // Verification wrote nothing worth keeping without its token: retry.
+      if (typeof accessToken !== "string" || accessToken === "") {
+        setError(t("verifyRetryLater"));
+        return;
+      }
       // Persist for potential page refresh recovery
       try {
-        sessionStorage.setItem(`${SESSION_STORAGE_KEY.SHARE_ACCESS_PREFIX}${token}`, data.accessToken);
+        sessionStorage.setItem(`${SESSION_STORAGE_KEY.SHARE_ACCESS_PREFIX}${token}`, accessToken);
       } catch {
         // sessionStorage unavailable (e.g. private browsing) — proceed anyway
       }
       // The password has done its job. Should loading the content fail, this
       // gate stays on screen, and it must not keep the password there.
       setPassword("");
-      onVerified(data.accessToken);
+      onVerified(accessToken);
     } catch {
       setError(t("verifyRetryLater"));
     } finally {

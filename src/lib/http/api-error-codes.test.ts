@@ -173,13 +173,19 @@ describe("API_ERROR structural invariants", () => {
     // 204 = 203 + REKEY_HISTORY_LEGACY (team-key-rotation-rekey review round 4 N-R4-1).
     // 205 = 204 + TEAM_BUSY (team-lock-busy-error C1).
     // 206 = 205 + TEAM_KEY_RECIPIENT_CHANGED (team-key-recipient-binding C4).
-    expect(Object.keys(API_ERROR).length).toBe(206);
+    // 207 = 206 + VAULT_WRAP_CONFLICT (close-coverage-and-clipboard-gaps
+    // review round 2, S-R2-2: compare-and-swap loss on a vault rewrap).
+    expect(Object.keys(API_ERROR).length).toBe(207);
   });
 });
 
 // ── API_ERROR_STATUS invariants ─────────────────────────────────
 
 describe("API_ERROR_STATUS", () => {
+  it("maps VAULT_WRAP_CONFLICT to 409", () => {
+    expect(API_ERROR_STATUS.VAULT_WRAP_CONFLICT).toBe(409);
+  });
+
   it("maps TEAM_BUSY to 409", () => {
     expect(API_ERROR_STATUS.TEAM_BUSY).toBe(409);
   });

@@ -24,6 +24,7 @@ import type { TeamPolicyClient } from "@/hooks/team/use-team-policy";
 import { getPolicyViolations } from "@/lib/security/password-policy-validation";
 import { AlertTriangle } from "lucide-react";
 import { fetchApi } from "@/lib/url-helpers";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";
 import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
@@ -129,12 +130,10 @@ export function PasswordGenerator({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
-    if (res.ok) {
-      const data = await res.json();
-      setGenerated(data.password);
-    } else {
-      setGenerated("");
-    }
+    const data = res.ok ? await parseJsonBodyOnce(res) : null;
+    const password =
+      typeof data === "object" && data !== null && "password" in data ? data.password : null;
+    setGenerated(typeof password === "string" ? password : "");
   }, [settings]);
 
   // Auto-generate when opened or settings change

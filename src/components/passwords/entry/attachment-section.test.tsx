@@ -277,9 +277,33 @@ describe("AttachmentSection", () => {
       const body = form.get("file");
       expect(body).toBeInstanceOf(Blob);
       // AES-GCM ciphertext (tag split off) is as long as the plaintext, never equal to it.
-      const sent = new TextDecoder().decode(await (body as Blob).arrayBuffer());
+      // Compared as bytes: random ciphertext decoded as UTF-8 can merge bytes into
+      // one character and change the string length.
+      const sent = new Uint8Array(await (body as Blob).arrayBuffer());
       expect(sent).toHaveLength(5);
-      expect(sent).not.toBe("hello");
+      expect(Array.from(sent)).not.toEqual(Array.from(new TextEncoder().encode("hello")));
+    });
+
+    it("reports an upload whose response body cannot be read as uploaded and reloads the list", async () => {
+      const onAttachmentsChange = vi.fn();
+      const reloaded: AttachmentMeta = { ...META, id: "new", filename: "note.txt" };
+      vi.mocked(fetchApi)
+        .mockResolvedValueOnce({
+          ok: true,
+          status: 201,
+          json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+        } as unknown as Response)
+        .mockResolvedValueOnce(okJson([reloaded, META]));
+      const { container } = render(
+        <AttachmentSection entryId="e1" attachments={[META]} onAttachmentsChange={onAttachmentsChange} />,
+      );
+
+      chooseFile(container, new File(["hello"], "note.txt", { type: "text/plain" }));
+
+      await waitFor(() => expect(onAttachmentsChange).toHaveBeenCalledWith([reloaded, META]));
+      expect(mockToast.success).toHaveBeenCalledWith("uploaded");
+      expect(mockToast.error).not.toHaveBeenCalled();
+      expect(vi.mocked(fetchApi).mock.calls[1]).toEqual(["/api/passwords/e1/attachments"]);
     });
 
     it("uses the vault key version and omits keyVersion when none is passed", async () => {

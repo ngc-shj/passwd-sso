@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
-import { act, renderHook } from "@testing-library/react";
-import { useEffect } from "react";
+import { act, render, renderHook } from "@testing-library/react";
+import { createElement, useEffect } from "react";
 import { useLocalStorage } from "./use-local-storage";
 
 const KEY = "use-local-storage-test";
@@ -118,6 +118,24 @@ describe("useLocalStorage", () => {
     expect(result.current[0]).toEqual({ a: false, b: true });
     expect(writesTo(setItem, KEY)).toHaveLength(1);
   });
+
+  it("persists a value a child sets on mount, before the hook's own hydration effect runs", () => {
+    // Child effects run before the parent's, so this setValue is pending
+    // for the hook's own key when the hydration effect runs.
+    function Child({ setValue }: { setValue: (value: typeof DEFAULTS) => void }) {
+      useEffect(() => setValue({ a: false, b: false }), [setValue]);
+      return null;
+    }
+    function Parent() {
+      const [, setValue] = useLocalStorage(KEY, DEFAULTS);
+      return createElement(Child, { setValue });
+    }
+
+    render(createElement(Parent));
+
+    expect(localStorage.getItem(KEY)).toBe(JSON.stringify({ a: false, b: false }));
+  });
+
   describe("an identity update followed by a key change", () => {
     const OTHER_KEY = `${KEY}-other`;
 
@@ -139,6 +157,30 @@ describe("useLocalStorage", () => {
       expect(result.current[0]).toEqual({ a: false, b: true });
       expect(writesTo(setItem, OTHER_KEY)).toHaveLength(0);
       expect(localStorage.getItem(OTHER_KEY)).toBe(JSON.stringify({ a: false }));
+    });
+
+    it("does not write the first key's hydrated value back on an A→B→A return", () => {
+      // OTHER_KEY holds nothing, so the switch to it leaves the value as is.
+      localStorage.setItem(KEY, JSON.stringify({ a: false }));
+      setItem.mockClear();
+      const { result, rerender } = renderWithKey();
+
+      act(() => result.current[1]((prev) => prev));
+      rerender({ storageKey: OTHER_KEY });
+      rerender({ storageKey: KEY });
+
+      expect(result.current[0]).toEqual({ a: false, b: true });
+      expect(setItem).not.toHaveBeenCalled();
+    });
+
+    it("still persists a plain value set without a key change", () => {
+      const { result, rerender } = renderWithKey();
+
+      act(() => result.current[1]({ a: false, b: true }));
+      rerender({ storageKey: KEY });
+
+      expect(writesTo(setItem, KEY)).toHaveLength(1);
+      expect(localStorage.getItem(KEY)).toBe(JSON.stringify({ a: false, b: true }));
     });
 
     it("still persists a real update made under the new key", () => {

@@ -2,24 +2,37 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaUser, mockVerifyCheck, mockResetCheck, mockResetClear, mockLogAudit, mockLogAuditInTx, mockWithUserTenantRls, mockWithTenantRls, mockInvalidateUserSessions, mockCreateRateLimiter } = vi.hoisted(() => {
+const { mockAuth, mockPrismaUser, mockTxUpdateMany, mockTxs, mockVerifyCheck, mockResetCheck, mockResetClear, mockLogAudit, mockLogAuditInTx, mockWithUserTenantRls, mockWithTenantRls, mockInvalidateUserSessions, mockCreateRateLimiter } = vi.hoisted(() => {
   const mockVerifyCheck = vi.fn().mockResolvedValue({ allowed: true });
   const mockResetCheck = vi.fn().mockResolvedValue({ allowed: true });
   const mockResetClear = vi.fn();
-  const mockPrismaUser = { findUnique: vi.fn(), update: vi.fn() };
+  // The ambient client: only the snapshot read may go through it.
+  const mockPrismaUser = { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() };
+  // Each withTenantRls call hands its callback a fresh tx with its own spies,
+  // recorded in mockTxs, so a write made on the ambient client or in a second
+  // transaction is distinguishable from one made on the audited tx.
+  // mockTxUpdateMany is the behaviour (the CAS row count) every tx delegates to.
+  const mockTxUpdateMany = vi.fn();
+  const mockTxs: { user: { update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> } }[] = [];
+  const mockWithTenantRls = vi.fn(async (_p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => {
+    const tx = {
+      user: { update: vi.fn(), updateMany: vi.fn((args: unknown) => mockTxUpdateMany(args)) },
+    };
+    mockTxs.push(tx);
+    return fn(tx);
+  });
   return {
     mockAuth: vi.fn(),
     mockPrismaUser,
+    mockTxUpdateMany,
+    mockTxs,
     mockVerifyCheck,
     mockResetCheck,
     mockResetClear,
     mockLogAudit: vi.fn(),
     mockLogAuditInTx: vi.fn(),
     mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
-    // withTenantRls hands the callback a tx whose user.update is the same spy
-    // the ambient path used, so existing update-arg assertions still see it.
-    mockWithTenantRls: vi.fn(async (_p: unknown, _t: unknown, fn: (tx: unknown) => unknown) =>
-      fn({ user: mockPrismaUser })),
+    mockWithTenantRls,
     mockInvalidateUserSessions: vi.fn().mockResolvedValue({
       sessions: 0,
       extensionTokens: 0,
@@ -138,6 +151,11 @@ describe("POST /api/vault/recovery-key/recover", () => {
     mockResetCheck.mockResolvedValue({ allowed: true });
     mockResetClear.mockResolvedValue(undefined);
     mockPrismaUser.findUnique.mockResolvedValue(userWithRecovery);
+    mockTxs.length = 0;
+    mockTxUpdateMany.mockResolvedValue({ count: 1 });
+    // Resolves like the real client so a write misrouted to the ambient
+    // client is caught by the assertions on it, not by a crash.
+    mockPrismaUser.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.update.mockResolvedValue({});
   });
 
@@ -165,7 +183,7 @@ describe("POST /api/vault/recovery-key/recover", () => {
       })),
       limiter: verifyLimiter,
       expectation: { envelope: "canonical" },
-      assertNoMutation: [mockPrismaUser.update],
+      assertNoMutation: [mockTxUpdateMany, mockPrismaUser.updateMany],
       limiterFactory: recoverLimiterFactoryRecord.replay(),
       failure: { allowed: false, redisErrored: true },
     });
@@ -176,7 +194,7 @@ describe("POST /api/vault/recovery-key/recover", () => {
       invoke: () => POST(createRequest("POST", URL, { body: resetBody })),
       limiter: resetLimiterUnderTest,
       expectation: { envelope: "canonical" },
-      assertNoMutation: [mockPrismaUser.update],
+      assertNoMutation: [mockTxUpdateMany, mockPrismaUser.updateMany],
       limiterFactory: recoverLimiterFactoryRecord.replay(),
       failure: { allowed: false, redisErrored: true },
     });
@@ -268,9 +286,10 @@ describe("POST /api/vault/recovery-key/recover", () => {
       const json = await res.json();
       expect(json.success).toBe(true);
 
-      expect(mockPrismaUser.update).toHaveBeenCalledWith(
+      expect(mockTxs).toHaveLength(1);
+      expect(mockTxs[0].user.updateMany).toHaveBeenCalledWith(
         expect.objectContaining({
-          where: { id: "user-1" },
+          where: { id: "user-1", accountSalt: userWithRecovery.accountSalt },
           data: expect.objectContaining({
             encryptedSecretKey: resetBody.encryptedSecretKey,
             accountSalt: resetBody.accountSalt,
@@ -285,9 +304,13 @@ describe("POST /api/vault/recovery-key/recover", () => {
         }),
       );
 
-      // M1: reset audit is now atomic (logAuditInTx(tx, tenantId, params)).
+      // M1: reset audit is now atomic (logAuditInTx(tx, tenantId, params)),
+      // on the same tx whose update ran, in the one transaction.
+      expect(mockWithTenantRls).toHaveBeenCalledTimes(1);
+      expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+      expect(mockLogAuditInTx.mock.calls[0][0]).toBe(mockTxs[0]);
       expect(mockLogAuditInTx).toHaveBeenCalledWith(
-        expect.anything(),
+        mockTxs[0],
         "test-tenant-id",
         expect.objectContaining({
           action: "RECOVERY_PASSPHRASE_RESET",
@@ -299,6 +322,56 @@ describe("POST /api/vault/recovery-key/recover", () => {
           }),
         }),
       );
+    });
+
+    it("writes the reset only through the transaction, never the ambient client", async () => {
+      const res = await POST(createRequest("POST", URL, { body: resetBody }));
+
+      expect(res.status).toBe(200);
+      expect(mockTxs[0].user.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockPrismaUser.update).not.toHaveBeenCalled();
+      expect(mockPrismaUser.updateMany).not.toHaveBeenCalled();
+    });
+
+    it("returns 409 VAULT_WRAP_CONFLICT when the account salt moved since the snapshot", async () => {
+      // A concurrent wrapping writer committed first: the CAS on the
+      // snapshot's accountSalt matches no row.
+      mockTxUpdateMany.mockResolvedValue({ count: 0 });
+
+      const res = await POST(createRequest("POST", URL, { body: resetBody }));
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("VAULT_WRAP_CONFLICT");
+    });
+
+    it("writes no audit, invalidates no sessions and keeps the limiter when the compare-and-swap loses", async () => {
+      mockTxUpdateMany.mockResolvedValue({ count: 0 });
+
+      await POST(createRequest("POST", URL, { body: resetBody }));
+
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+      expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+      expect(mockResetClear).not.toHaveBeenCalled();
+    });
+
+    it("lets exactly one of two resets from the same snapshot commit", async () => {
+      // The first write moves accountSalt; the second still carries the
+      // snapshot's salt in its WHERE and matches nothing.
+      let storedSalt: string = userWithRecovery.accountSalt;
+      mockTxUpdateMany.mockImplementation(
+        async (args: { where: { accountSalt: string }; data: { accountSalt: string } }) => {
+          if (args.where.accountSalt !== storedSalt) return { count: 0 };
+          storedSalt = args.data.accountSalt;
+          return { count: 1 };
+        },
+      );
+      const post = () => POST(createRequest("POST", URL, { body: resetBody }));
+
+      const statuses = (await Promise.all([post(), post()])).map((r) => r.status).sort();
+
+      expect(statuses).toEqual([200, 409]);
+      expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+      expect(mockInvalidateUserSessions).toHaveBeenCalledTimes(1);
     });
 
     it("passes excludeSessionToken to invalidateUserSessions to preserve the caller's current session", async () => {
@@ -393,7 +466,7 @@ describe("POST /api/vault/recovery-key/recover", () => {
       const replayRes = await POST(createRequest("POST", URL, { body: resetBody }));
       expect(replayRes.status).toBe(401);
       // The DB write must NOT have happened on replay.
-      expect(mockPrismaUser.update).toHaveBeenCalledTimes(1);
+      expect(mockTxUpdateMany).toHaveBeenCalledTimes(1);
     });
   });
 });

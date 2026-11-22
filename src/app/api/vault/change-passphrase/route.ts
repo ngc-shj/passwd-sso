@@ -76,6 +76,7 @@ async function handlePOST(request: NextRequest) {
         vaultSetupAt: true,
         passphraseVerifierHmac: true,
         passphraseVerifierVersion: true,
+        accountSalt: true,
         tenantId: true,
       },
     }),
@@ -110,11 +111,18 @@ async function handlePOST(request: NextRequest) {
   // Update: re-wrapped secret key + new verifier (keyVersion unchanged). The
   // fact-of-change audit is written in the same transaction, so a passphrase
   // change can never commit without its audit trail (as recovery-key/recover).
-  // withTenantRls(tx), not the ambient withUserTenantRls, so logAuditInTx
-  // shares the user.update transaction.
-  await withTenantRls(prisma, user.tenantId, async (tx) => {
-    await tx.user.update({
-      where: { id: session.user.id },
+  // withTenantRls(tx) with the snapshot's tenantId, which is already in hand,
+  // rather than withUserTenantRls, which would resolve the tenant a second time.
+  //
+  // The verifier was checked against the snapshot read above, in another
+  // transaction, so the write is a compare-and-swap on accountSalt — the one
+  // column every vault-wrapping writer (setup, change-passphrase, recover,
+  // rotate-key, vault reset) moves. Two requests proving the same old
+  // passphrase both pass the check; only the first to commit rewraps, and the
+  // other gets 409 with no audit row and no session invalidation.
+  const committed = await withTenantRls(prisma, user.tenantId, async (tx) => {
+    const { count } = await tx.user.updateMany({
+      where: { id: session.user.id, accountSalt: user.accountSalt },
       data: {
         accountSalt: data.accountSalt,
         encryptedSecretKey: data.encryptedSecretKey,
@@ -124,13 +132,19 @@ async function handlePOST(request: NextRequest) {
         passphraseVerifierVersion: VERIFIER_VERSION,
       },
     });
+    if (count === 0) return false;
 
     await logAuditInTx(tx, user.tenantId, {
       ...personalAuditBase(request, session.user.id),
       action: AUDIT_ACTION.VAULT_PASSPHRASE_CHANGE,
       metadata: { phase: "committed" },
     });
+    return true;
   });
+
+  if (!committed) {
+    return errorResponse(API_ERROR.VAULT_WRAP_CONFLICT);
+  }
 
   // C6 (OWASP A07-1): invalidate all OTHER sessions + bearer tokens across
   // all tenants. The current device just proved possession of the OLD

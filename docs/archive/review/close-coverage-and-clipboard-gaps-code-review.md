@@ -142,3 +142,81 @@ None flagged.
 
 ### Adjacent (D1 edge) — resolved
 - **Action:** `useLocalStorage` wrote back a hydrated value the user never set after `setValue(prev => prev)` followed by a key change. `pendingWriteRef` now records the key it was set for.
+
+---
+
+# Review round 2
+
+Scope: the round-1 fixes, `git diff 82290f40a..5dc2f7d16`. Round 2 also measured predicates against round 1's state (R43), not only against main.
+
+## Round-1 findings re-verified
+
+- **F1, S1, S2, F2, T1–T6, D1 edge:** all resolved.
+- **F3:** continuing, re-raised as N2 below.
+- **D1 edge:** the A→B→A variant is re-raised as N3 below.
+
+## New findings
+
+- **T2-1 [Critical]** `src/app/api/vault/change-passphrase/route.test.ts` — the test aliased the transaction client to the ambient `prisma` mock. A mutant that moved `user.update` outside the transaction, or split the audit write into a second transaction, stayed green. The recover route test had the same hole.
+- **S-R2-1 [Major]** `scripts/checks/check-e2e-selectors.sh` — scoping sections 3 and 7 to `changed_src` lost git's rename pairing. A selector removed from a renamed `.tsx` passed silently. This is an R43 boundary widening introduced by the round-1 T3 fix.
+- **S-R2-2 [Minor]** change-passphrase (and its recover sibling) — the verifier is checked against a snapshot read in another transaction, and the update is unconditional. Two concurrent holders of the old passphrase both pass, and the last write wins.
+- **N1 [Minor]** change-passphrase and recover — a comment falsely claimed `withUserTenantRls` cannot share a transaction (R29).
+- **N2 [Minor]** `src/app/[locale]/recovery/page.tsx` — the Back link stayed clickable while a reset was in flight. A reset that then committed landed on the stale VaultProvider.
+- **N3 [Minor]** `src/hooks/use-local-storage.ts` — `pendingWriteRef` survived an A→B→A key change and wrote back the hydrated value.
+- **N4 [Minor]** api-key, SCIM, SA token and JIT approve — a committed create was reported as failed when the 2xx body was unreadable. This is the fourth expansion of D17 class 13, so the class is escalated to contract C11 with a CI guard (R42).
+- **T2-2 [Minor]** — the completion audit metadata pinned only 4 of its 10 keys.
+- **T2-3 [Minor]** `scripts/__tests__/check-e2e-selectors.test.mjs` — M12 did not pin the removed-side pathspec. A whole-tree `removed=` mutant passed all self-tests.
+- **T2-4 [Minor]** D22 — said "four" exact-path ratchets (there are 13) and recorded no reproducing command.
+
+## Resolution Status (round 2)
+
+### T2-1 [Critical] Transaction aliasing in the vault route tests — resolved
+- **Action:** the tests now give the transaction client its own mock, distinct from the ambient `prisma`. They assert that the wrap update and the committed audit row are written through the same transaction client.
+- **Red-proof:** the update-outside-transaction and split-transaction mutants are red in both route tests.
+- **Modified files:** `src/app/api/vault/change-passphrase/route.test.ts`, `src/app/api/vault/recovery-key/recover/route.test.ts`.
+
+### S-R2-1 [Major] Rename pairing lost in the e2e-selector gate — resolved
+- **Action:** `changed_src` is computed with `--no-renames`. A renamed file then appears as a delete plus an add, so its removed selectors are seen.
+- **Self-tests:** M12b (removed side) and M13–M14 (rename with a removed data-testid or data-slot), each red on the round-1 gate.
+- **Modified files:** `scripts/checks/check-e2e-selectors.sh`, `scripts/__tests__/check-e2e-selectors.test.mjs`.
+
+### S-R2-2 [Minor] No compare-and-swap on the vault wrap — resolved
+- **Action:** change-passphrase and recover now write with `updateMany` keyed on `accountSalt` from the snapshot. That is the column every vault-wrapping writer moves.
+- **Loser of a race:** gets 409 `VAULT_WRAP_CONFLICT`, with no audit row and no session invalidation.
+- **Tests:** conflict and allow pins in both route tests.
+- **Real-DB proof:** `src/__tests__/db-integration/vault-wrap-cas.integration.test.ts` runs as `passwd_app`, so the users RLS policy applies.
+  - **Race setup:** the test holds the user row `FOR UPDATE` and parks both requests on it, confirmed with `pg_blocking_pids`, then releases the lock.
+  - **Assertions:** exactly one request gets 200 and the other gets 409. The stored wrap is the winner's. There is exactly one committed audit row.
+  - **Red-proof:** a mutant without the `accountSalt` predicate gives `[200, 200]`, for each route.
+  - **Stale secret, sent after the first commit:** it is refused by the verifier check (401), not by the compare-and-swap.
+
+### N1 [Minor] False transaction comment — resolved
+- **Action:** the comment now gives the real reason, which is that the snapshot's tenantId is already in hand.
+
+### N2 [Minor] Back link during an in-flight reset — resolved
+- **Action:** the link is also withheld while the new-passphrase step is loading.
+
+### N3 [Minor] pendingWriteRef across A→B→A — resolved
+- **Action:** a pending write is dropped when the key changes away from the key it was set for.
+- **Test:** an A→B→A pin.
+
+### N4 [Minor → class C11] Committed mutation reported as failed — resolved by contract C11
+- **Action:** see the plan's C11 and deviation D23.
+  - The gate `check-mutation-response-read.mjs` found 52 reads in 31 files at the start, and every one was migrated to `parseJsonBodyOnce`.
+  - The deny roots were then extended to `src/lib` client modules, which found 12 more.
+  - The 13 once-shown-secret sites show "created, but cannot be shown" and copy nothing.
+
+### T2-2 / T2-3 / T2-4 [Minor] — resolved
+- **T2-2:** all completion-audit metadata keys are pinned, including the counts.
+- **T2-3:** M12b pins the removed-side pathspec.
+- **T2-4:** D22 is corrected to 13 ratchets and gives the reproducing command.
+
+## Recurring Issue Check (round 2)
+
+| Expert | Findings by rule |
+|---|---|
+| Functionality | R3 → N4; R25 → N3; R29 → N1; R38 → N2 |
+| Security | R43 → S-R2-1; R51 → S-R2-2 |
+| Testing | RT1/RT7 → T2-1; RT7 → T2-2, T2-3; R29 → T2-4 |
+
+All other rules in range were OK or N/A.

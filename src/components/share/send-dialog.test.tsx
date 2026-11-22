@@ -628,3 +628,90 @@ describe("SendDialog close while a send is being created", () => {
     expect(screen.queryByDisplayValue("late-access-pw")).not.toBeInTheDocument();
   });
 });
+
+describe("SendDialog when the created Send's response body cannot be read", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.restoreAllMocks();
+  });
+
+  const unreadable = () => new Response("<html>gateway</html>", { status: 201 });
+
+  it("says the Send was created but its link cannot be shown", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(unreadable());
+    render(<SendDialog open={true} onOpenChange={() => {}} />);
+    fillText();
+    fireEvent.click(screen.getByRole("button", { name: "create" }));
+
+    expect(await screen.findByText("sendCreatedLinkUnavailable")).toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("still completes the creation (parent notified, success toast)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(unreadable());
+    const onCreated = vi.fn();
+    render(<SendDialog open={true} onOpenChange={() => {}} onCreated={onCreated} />);
+    fillText();
+    fireEvent.click(screen.getByRole("button", { name: "create" }));
+
+    await screen.findByText("sendCreatedLinkUnavailable");
+    expect(onCreated).toHaveBeenCalledTimes(1);
+    expect(toast.success).toHaveBeenCalledWith("sendCreateSuccess");
+  });
+
+  it("shows no link and copies nothing", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(unreadable());
+    render(<SendDialog open={true} onOpenChange={() => {}} />);
+    fillText();
+    fireEvent.click(screen.getByRole("button", { name: "create" }));
+
+    await screen.findByText("sendCreatedLinkUnavailable");
+    expect(screen.queryByText("shareUrl")).not.toBeInTheDocument();
+    expect(mockCopySecret).not.toHaveBeenCalled();
+  });
+
+  it("treats a password-protected Send returned without its password as unavailable", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse({ url: "/s/tok" }));
+    render(<SendDialog open={true} onOpenChange={() => {}} />);
+    fillText();
+    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.click(screen.getByRole("button", { name: "create" }));
+
+    expect(await screen.findByText("sendCreatedLinkUnavailable")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(`${window.location.origin}/s/tok`)).not.toBeInTheDocument();
+  });
+
+  it("says the file Send was created but its link cannot be shown", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(unreadable());
+    const onCreated = vi.fn();
+    render(<SendDialog open={true} onOpenChange={() => {}} onCreated={onCreated} />);
+    fireEvent.click(screen.getByRole("tab", { name: "sendFile" }));
+    fireEvent.change(screen.getByPlaceholderText("sendNamePlaceholder"), { target: { value: "Doc" } });
+    selectFile(new File(["abc"], "a.txt"));
+    fireEvent.click(screen.getByRole("button", { name: "create" }));
+
+    expect(await screen.findByText("sendCreatedLinkUnavailable")).toBeInTheDocument();
+    expect(onCreated).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows the link when the body is readable", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(okResponse({ url: "/s/tok" }));
+    render(<SendDialog open={true} onOpenChange={() => {}} />);
+    fillText();
+    fireEvent.click(screen.getByRole("button", { name: "create" }));
+
+    expect(await screen.findByDisplayValue(`${window.location.origin}/s/tok`)).toBeInTheDocument();
+    expect(screen.queryByText("sendCreatedLinkUnavailable")).not.toBeInTheDocument();
+  });
+
+  it("returns to an empty form from the unavailable message on create another", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(unreadable());
+    render(<SendDialog open={true} onOpenChange={() => {}} />);
+    fillText();
+    fireEvent.click(screen.getByRole("button", { name: "create" }));
+
+    fireEvent.click(await screen.findByRole("button", { name: "createAnother" }));
+    expect(screen.queryByText("sendCreatedLinkUnavailable")).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("sendNamePlaceholder")).toHaveValue("");
+  });
+});

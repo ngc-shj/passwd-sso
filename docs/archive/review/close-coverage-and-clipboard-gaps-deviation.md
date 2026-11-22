@@ -188,5 +188,57 @@ The branch diff was reviewed by Codex in three partitions (clipboard and share; 
 - **Aggregate:** 92.13 statements / 93.35 lines / 85.05 branches, against floors of 75 / 75 / 65.
 - **Lowest file:** `src/lib/blob-store/stream.ts` at 65.62%, against the perFile floor of 60.
 - **Security-directory globs:** each clears its floor by +2.0 to +4.2 points.
-- **Exact-path ratchets:** the four exact-path ratchets clear their floors.
+- **Exact-path ratchets:** all 13 exact-path threshold keys clear their floors. That is the 9 pre-existing keys plus the 4 added in C2b.
+- **Reproducing command:** from the repo root at 82290f40a, `npx vitest run --coverage --coverage.reportsDirectory=<dir>`, then read `<dir>/coverage-summary.json`.
+- **Second run:** a run of `vitest run src --coverage` on a `git archive` snapshot of 82290f40a reproduced 1,130 measured files, `stream.ts` at 65.62%, and the glob margins. Its aggregate was 92.08 / 93.30 / 85.04, because `scripts/__tests__` was excluded.
 - **Why D16 is superseded:** D16's figures came from a run made before `perFile` was enrolled. In that run `service-account-card.tsx` stood at 19.71%, mid-edit.
+
+## D23 — C11: member set, and the gate extended to `src/lib`
+
+- **Initial member set:** the gate's output at the start of C11 was 52 reads in 31 files. Scratch record: `scratchpad/c11/gate-member-set.txt`.
+- **Migration:** every member reads through `parseJsonBodyOnce`.
+  - **Once-shown-secret sites:** 13 sites, such as API keys, SCIM/SA/operator/JIT tokens, invite links, share links and webhook secrets. They say the item was created but the value cannot be shown, and copy nothing.
+  - **Other sites:** they keep their normal success feedback.
+- **Scope extension:** the plan named only `src/components`, `src/hooks` and `src/app/**`. That left the vault key-changing flows in `src/lib/vault/vault-context.tsx` outside the gate, so the deny roots now include `src/lib`.
+  - **Exempt as server code:** a module with a value import of `server-only`, `next/headers` or `@/lib/prisma`. Type-only imports do not count.
+  - **Why not `"use client"`:** it would miss `passkey-reauth-client.ts`. The import graph is undecidable without a Program.
+  - **Why the exemption loses nothing:** `fetchApi` throws when `window` is undefined.
+  - **Result on the tree:** 373 files denied and 45 exempt.
+- **New members found by the extension:** 12.
+  - **`rotateKey` success read.** Committed. The client now always switches to the key, salt and wrap it sent. The key version comes from the server when present, otherwise from the client's own `newKeyVersion`. An unreadable body returns `ROTATION_EFFECTS_UNAVAILABLE`, and the dialog adds a persistent "review other sessions and tokens" warning.
+  - **passkey-reauth verify.** Committed; an unreadable body gives `{ok:true, verifiedAt:null}`.
+  - **Error paths.** setup, the unlock paths, `changePassphrase`, migrate, rotate and the reauth options all keep failure semantics through `readApiErrorBody`. An unreadable setup error no longer throws a raw SyntaxError. An unreadable `unlockWithPasskey` verify now zeroes `prfOutput`.
+- **Ledger:** `scratchpad/c11b/ledger.md`, 11 rows. Every control exits 0 and every mutant exits 1, including the pre-change gate on a reintroduced rotate `res.json()`.
+
+## D24 — C11 generalised: a key-changing mutation with an indeterminate outcome locks the vault
+
+- **The gap.** C11 covers an unreadable **2xx** body. The `src/lib` sweep (D23) found its non-2xx twin. A change-passphrase or rotate-key POST can commit and still return to the client as a fetch rejection, a proxy 502/504, or a 5xx without an envelope.
+  - **Old behaviour:** the client kept its old salt, wrap and key.
+  - **Consequence:** after a committed passphrase change, `verifyPassphrase` kept accepting the old passphrase until the vault locked. After a committed rotation, the client kept encrypting under a key whose rows no longer exist.
+- **Design.**
+  - **Definite refusal:** an envelope whose code is on the route's allow-list of pre-commit refusals. The allow-lists come from enumerating both routes; the enumeration is recorded in a comment in `vault-context.tsx`. The vault stays unlocked and the existing error is shown.
+  - **Indeterminate (everything else):** `lock()`, then throw `VaultChangeOutcomeUnknownError`. The dialogs show a persistent toast telling the user to unlock with the new passphrase, or with the old one if that fails. The next unlock reads the authoritative wrap from the server.
+  - **SESSION_INVALIDATE_FAILED:** unchanged, still committed with a warning.
+  - **INTERNAL_ERROR:** deliberately left off the allow-list. A 500 does not prove a rollback, and a wrong lock costs only one unlock.
+  - **rotateKey:** zeroes `newSecretKey` in a `finally` on every path.
+- **Checked and not members:**
+  - **recovery reset and vault reset:** they run from the lock screen, hold no key in memory, and hard-reload on success. A retry succeeds, because the server re-reads the snapshot and does the compare-and-swap.
+- **Members added in this pass:**
+  - **setup:** a zeroization gap.
+  - **recovery-key generation:** an unknown outcome may have replaced the recovery wrap.
+- **Ledger:** `scratchpad/c11c/ledger.md`.
+  - The pre-fix copy is red on 8 tests.
+  - Allow-list mutants:
+    - `overlock` (empty allow-list): red on 3 tests;
+    - `siflock` (SESSION_INVALIDATE_FAILED treated as indeterminate): red on 1;
+    - `nofinally` (no zeroing in `finally`): red on 1.
+  - The dialogs without the new branch are red on 2 tests.
+- **setup:** a `try/finally` now zeroes `secretKey` and `ecdhPrivBytes` on every path. The pre-fix copy is red on fetch reject and on 409. The `setupnocopy` mutant is red on the success pin.
+- **recovery-key generation:**
+  - **Allow-list.** Built from the codes `recovery-key/generate` emits before its single `user.update`. The route enumeration is recorded in a comment in `recovery-key-dialog.tsx`.
+  - **Unknown outcome.** Gives `outcomeUnknown`: the dialog shows no key, does not claim success, and tells the user to generate a new key now because the previous one may no longer work.
+  - **Red-proofs:**
+    - the pre-fix dialog: red on 5 tests;
+    - the `overunknown` mutant (allow-list emptied): red on 4;
+    - the `overallow` mutant (any code treated as a refusal): red on 1.
+- **Side-fix:** `attachment-section.test.tsx` was intermittently flaky. It compared the length of random ciphertext after decoding it as UTF-8, and decoding can merge bytes into one character. It now compares bytes.

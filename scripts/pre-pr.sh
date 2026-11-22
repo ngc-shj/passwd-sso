@@ -464,6 +464,7 @@ queue_step "Static: client-credential-fetch" node scripts/checks/check-client-cr
 queue_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
 queue_step "Static: coverage-ignore hints" node scripts/checks/check-coverage-ignore-hints.mjs
 queue_step "Static: state-updater purity" node scripts/checks/check-state-updater-purity.mjs
+queue_step "Static: mutation-response read" node scripts/checks/check-mutation-response-read.mjs
 queue_step "Static: no-pipe-into-grep-q" bash scripts/checks/check-no-pipe-into-grep-q.sh
 queue_step "Static: doc-paths" node scripts/checks/check-doc-paths.mjs
 queue_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs

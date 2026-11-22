@@ -112,8 +112,11 @@ e2e_class_selectors=$(grep -rohE '\.locator\([[:space:]]*["'"'"'](\.[a-zA-Z0-9_-
   | sed -E "s/.*\.locator\([[:space:]]*[\"']//; s/[\"']$//" \
   | sort -u || true)
 
-# Get the full list of changed .tsx source files (reused by checks 2, 5, 6)
-changed_src=$(git diff "${BASE}...HEAD" --name-only \
+# Get the full list of changed .tsx source files (reused by checks 2, 3, 5, 6, 7).
+# --no-renames lists a renamed file under both paths; with rename detection only
+# the new path is listed, the scoped diffs below see the file as wholly added,
+# and a selector dropped during the move never shows up as a removed line.
+changed_src=$(git diff "${BASE}...HEAD" --name-only --no-renames \
   | grep -E '^src/.*\.tsx$' \
   | grep -v '\.test\.' \
   | grep -v '__tests__' || true)

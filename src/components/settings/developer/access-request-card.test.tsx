@@ -466,6 +466,69 @@ describe("AccessRequestCard", () => {
     expect(screen.queryByDisplayValue("sa_xxx_test_token")).not.toBeInTheDocument();
   });
 
+  describe("when the approval's response body cannot be read", () => {
+    function setupApprove(approveBody: () => Promise<unknown>) {
+      mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+        if (init?.method === "POST" && String(url).includes("/approve")) {
+          return Promise.resolve({ ok: true, status: 201, json: approveBody });
+        }
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ requests: sampleRequests }),
+        });
+      });
+    }
+
+    async function approveFirst() {
+      await act(async () => {
+        render(<AccessRequestCard />);
+      });
+      await screen.findByText("deploy-bot");
+      const approve = screen
+        .getAllByRole("button")
+        .find((b) => b.textContent?.includes("arApprove"));
+      if (!approve) throw new Error("approve button not rendered");
+      await act(async () => {
+        fireEvent.click(approve);
+      });
+    }
+
+    const unreadable = () => Promise.reject(new SyntaxError("Unexpected end of JSON input"));
+    const requestListCalls = () =>
+      mockFetch.mock.calls.filter(([, init]) => !init?.method || init.method === "GET");
+
+    it("says the request was approved but the token cannot be shown", async () => {
+      setupApprove(unreadable);
+      await approveFirst();
+      expect(await screen.findByText("arJitTokenUnavailable")).toBeInTheDocument();
+      expect(mockToast.error).not.toHaveBeenCalled();
+    });
+
+    it("still completes the approval (success toast and list refresh)", async () => {
+      setupApprove(unreadable);
+      await approveFirst();
+      await screen.findByText("arJitTokenUnavailable");
+      expect(mockToast.success).toHaveBeenCalledWith("arApproved");
+      expect(requestListCalls()).toHaveLength(2);
+    });
+
+    it("shows no token, no copy prompt and nothing to copy", async () => {
+      setupApprove(unreadable);
+      await approveFirst();
+      await screen.findByText("arJitTokenUnavailable");
+      expect(screen.queryByText("arJitTokenWarning")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("copy-button")).not.toBeInTheDocument();
+    });
+
+    it("shows the token with its copy button when the body is readable", async () => {
+      setupApprove(() => Promise.resolve({ token: "sa_xxx_test_token" }));
+      await approveFirst();
+      expect(await screen.findByDisplayValue("sa_xxx_test_token")).toBeInTheDocument();
+      expect(screen.getByTestId("copy-button")).toHaveAttribute("data-value", "sa_xxx_test_token");
+      expect(screen.queryByText("arJitTokenUnavailable")).not.toBeInTheDocument();
+    });
+  });
+
   it("shows toast arAlreadyProcessed on 409 approve response", async () => {
     setupFetchRequests();
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {

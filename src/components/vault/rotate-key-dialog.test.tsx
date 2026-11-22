@@ -10,8 +10,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-const { mockRotateKey } = vi.hoisted(() => ({
+const { mockRotateKey, mockToast } = vi.hoisted(() => ({
   mockRotateKey: vi.fn(),
+  mockToast: { success: vi.fn(), warning: vi.fn(), info: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock("next-intl", () => ({
@@ -19,8 +20,12 @@ vi.mock("next-intl", () => ({
     values ? `${key}:${JSON.stringify(values)}` : key,
 }));
 
-vi.mock("@/lib/vault/vault-context", () => ({
+vi.mock("@/lib/vault/vault-context", async (importOriginal) => ({
   useVault: () => ({ rotateKey: mockRotateKey }),
+  ROTATION_EFFECTS_UNAVAILABLE: "ROTATION_EFFECTS_UNAVAILABLE",
+  // The real class: the dialog branches on `instanceof`.
+  VaultChangeOutcomeUnknownError: (await importOriginal<typeof import("@/lib/vault/vault-context")>())
+    .VaultChangeOutcomeUnknownError,
 }));
 
 vi.mock("@/lib/http/api-error-codes", () => ({
@@ -36,7 +41,7 @@ vi.mock("@/lib/ui/ime-guard", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn() },
+  toast: mockToast,
 }));
 
 vi.mock("@/components/ui/dialog", () => ({
@@ -70,6 +75,7 @@ vi.mock("@/components/ui/label", () => ({
 }));
 
 import { RotateKeyDialog } from "./rotate-key-dialog";
+import { VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
 
 describe("RotateKeyDialog", () => {
   let onOpenChange: ReturnType<typeof vi.fn<(open: boolean) => void>>;
@@ -172,6 +178,22 @@ describe("RotateKeyDialog", () => {
     });
   });
 
+  it("closes with a persistent locked-vault notice when the rotation's outcome is unknown", async () => {
+    mockRotateKey.mockRejectedValue(new VaultChangeOutcomeUnknownError());
+    render(<RotateKeyDialog open={true} onOpenChange={onOpenChange} />);
+    fireEvent.change(screen.getByLabelText("rotateKeyPassphrase"), {
+      target: { value: "mypass" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "rotateKeyButton" }));
+
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+    expect(mockToast.error).toHaveBeenCalledWith("rotateKeyOutcomeUnknown", { duration: Infinity });
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(screen.queryByText("rotateKeyFailed")).toBeNull();
+  });
+
   it("falls back to generic failure for non-API errors", async () => {
     mockRotateKey.mockRejectedValue(new Error("network down"));
     render(<RotateKeyDialog open={true} onOpenChange={onOpenChange} />);
@@ -183,5 +205,46 @@ describe("RotateKeyDialog", () => {
     await waitFor(() => {
       expect(screen.getByText("rotateKeyFailed")).toBeInTheDocument();
     });
+  });
+
+  async function submitRotation() {
+    render(<RotateKeyDialog open={true} onOpenChange={onOpenChange} />);
+    fireEvent.change(screen.getByLabelText("rotateKeyPassphrase"), {
+      target: { value: "mypass" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "rotateKeyButton" }));
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+  }
+
+  it("warns persistently that revocation is unconfirmed when the rotation's effects are unavailable", async () => {
+    mockRotateKey.mockResolvedValue("ROTATION_EFFECTS_UNAVAILABLE");
+
+    await submitRotation();
+
+    expect(mockToast.success).toHaveBeenCalledWith("rotateKeySuccess");
+    expect(mockToast.warning).toHaveBeenCalledWith("rotateKeyEffectsUnavailableBanner", { duration: Infinity });
+  });
+
+  it("does not show the unavailable-effects warning when the effects were reported", async () => {
+    mockRotateKey.mockResolvedValue({
+      recoveryKeyInvalidated: false,
+      emergencyGrantsCleared: 0,
+      prfCredentialsCleared: 0,
+      cekRewrapsAttempted: 0,
+      cekRewrapsSucceeded: 0,
+      cekRewrapsFailed: 0,
+      legacyAttachmentsMigrated: 0,
+      invalidatedMcpAccessTokens: 0,
+      invalidatedMcpRefreshTokens: 0,
+      cacheTombstoneFailures: 0,
+      invalidationFailed: true,
+    });
+
+    await submitRotation();
+
+    expect(mockToast.warning).toHaveBeenCalledWith("rotateKeyInvalidationFailedBanner", { duration: Infinity });
+    expect(mockToast.warning).not.toHaveBeenCalledWith("rotateKeyEffectsUnavailableBanner", expect.anything());
   });
 });

@@ -3,7 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import type { ReactNode } from "react";
 import { fetchApi } from "@/lib/url-helpers";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 
 interface TravelModeState {
   active: boolean;
@@ -33,6 +33,12 @@ interface TravelModeContextValue extends TravelModeState {
 }
 
 const TravelModeContext = createContext<TravelModeContextValue | null>(null);
+
+/** The `active` flag a toggle response echoes, or `fallback` when it has none. */
+function readActive(body: unknown, fallback: boolean): boolean {
+  if (typeof body !== "object" || body === null || !("active" in body)) return fallback;
+  return typeof body.active === "boolean" ? body.active : fallback;
+}
 
 export function TravelModeProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<TravelModeState>({
@@ -73,10 +79,11 @@ export function TravelModeProvider({ children }: { children: ReactNode }) {
         const body = await readApiErrorBody(res);
         return { success: false, error: body ? body.error : `HTTP ${res.status}` };
       }
-      const data = await res.json();
+      // Enabled: an unreadable echo means what was asked for.
+      const active = readActive(await parseJsonBodyOnce(res), true);
       setState((prev) => ({
         ...prev,
-        active: data.active,
+        active,
         activatedAt: new Date().toISOString(),
         error: null,
       }));
@@ -103,10 +110,11 @@ export function TravelModeProvider({ children }: { children: ReactNode }) {
           return { success: false, error: body.error, lockedUntil: body.lockedUntil };
         }
 
-        const data = await res.json();
+        // Disabled: an unreadable echo means what was asked for.
+        const active = readActive(await parseJsonBodyOnce(res), false);
         setState((prev) => ({
           ...prev,
-          active: data.active,
+          active,
           activatedAt: null,
           error: null,
         }));

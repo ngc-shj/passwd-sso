@@ -398,6 +398,29 @@ describe("McpConnectionsCard", () => {
     });
   });
 
+  it("revoke all — reports success and clears connections when the response body cannot be read", async () => {
+    setupFetchClients();
+    const listOnly = mockFetch.getMockImplementation();
+    mockFetch.mockImplementation((url: string, init?: RequestInit) =>
+      init?.method === "DELETE"
+        ? Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+          })
+        : listOnly?.(url, init),
+    );
+    await act(async () => { render(<McpConnectionsCard />); });
+    await waitFor(() => expect(screen.getByText("My MCP Agent")).toBeInTheDocument());
+
+    const alertActions = screen.getAllByTestId("alert-action");
+    await act(async () => { fireEvent.click(alertActions[0]); });
+
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("revokeAllDone"));
+    expect(mockToast.error).not.toHaveBeenCalled();
+    expect(screen.getAllByText("notConnected").length).toBe(2);
+  });
+
   it("hides Revoke All when no connections exist", async () => {
     const noConnectionClients = [
       {

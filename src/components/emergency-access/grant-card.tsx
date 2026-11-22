@@ -32,6 +32,7 @@ import {
 } from "@/lib/crypto/crypto-emergency";
 import { eaErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { fetchApi } from "@/lib/url-helpers";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 
 interface Grant {
   id: string;
@@ -197,8 +198,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
         toast.success(permanent ? t("revoked") : t("requestRejected"));
         onRefresh();
       } else {
-        const data = await res.json().catch(() => null);
-        toast.error(translateApiError(data?.error));
+        toast.error(translateApiError((await readApiErrorBody(res))?.error));
       }
     } catch {
       toast.error(t("networkError"));
@@ -214,8 +214,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
         toast.success(t("approved"));
         onRefresh();
       } else {
-        const data = await res.json().catch(() => null);
-        toast.error(translateApiError(data?.error));
+        toast.error(translateApiError((await readApiErrorBody(res))?.error));
       }
     } catch {
       toast.error(t("networkError"));
@@ -231,8 +230,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
         toast.success(t("requested"));
         onRefresh();
       } else {
-        const data = await res.json().catch(() => null);
-        toast.error(translateApiError(data?.error));
+        toast.error(translateApiError((await readApiErrorBody(res))?.error));
       }
     } catch {
       toast.error(t("networkError"));
@@ -268,8 +266,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
         toast.success(t("accepted"));
         onRefresh();
       } else {
-        const data = await res.json().catch(() => null);
-        toast.error(translateApiError(data?.error));
+        toast.error(translateApiError((await readApiErrorBody(res))?.error));
       }
     } catch {
       toast.error(t("networkError"));
@@ -287,8 +284,7 @@ export function GrantCard({ grant, currentUserId, onRefresh }: GrantCardProps) {
         toast.success(t("declined"));
         onRefresh();
       } else {
-        const data = await res.json().catch(() => null);
-        toast.error(translateApiError(data?.error));
+        toast.error(translateApiError((await readApiErrorBody(res))?.error));
       }
     } catch {
       toast.error(t("networkError"));

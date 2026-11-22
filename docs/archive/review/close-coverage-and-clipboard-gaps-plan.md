@@ -513,6 +513,52 @@ Changing a field away from BOOLEAN clears its value. A test for BOOLEAN→TEXT f
 
 In `copy-reprompt-surfaces.test.tsx`, replace the stale todo with a comment pointing at the `password-card.test.tsx` tests that now cover it.
 
+### C11 — A committed mutation is never reported as failed because its response body could not be read
+
+Added in Phase 3 round 2 (user decision: "セキュリティ、あるべき設計").
+
+**Class.** A client mutation (POST/PUT/PATCH/DELETE through `fetchApi`) whose server-side write has already committed (`res.ok`) is reported as failed — or skips its completion (list refresh, `onSuccess`, form reset) — because a later step threw. The usual cause is the response body read: `await res.json()` sits in the same `try` as the mutation, and that try's catch reports failure. For endpoints that mint a once-shown secret (API keys, SCIM/SA/operator/JIT tokens, invite links, share URLs), the secret is lost and the user is told nothing was created.
+
+The class has expanded with each sweep, so its closing artifact is a mutation-verified CI guard:
+
+| When | Members |
+|---|---|
+| plan C4 | create-grant, team-invite |
+| Phase 2 lateral sweep | passkey sign-in ×2 |
+| Phase 3 round 2 | api-key, SCIM, SA token, JIT approve |
+
+**Design.**
+
+- **Single reader.** Every client read of a mutation's response body goes through `parseJsonBodyOnce` (`src/lib/http/read-api-error-body.ts`), which never rejects and returns `null` for an unreadable body. Its doc comment is widened from error-path-only to every mutation response.
+- **Ordering.** After `res.ok`, completion runs before the body is read. Completion is the list refresh, `onSuccess`, the form or dialog state reset, and the success signal.
+- **Unreadable 2xx body, once-shown-secret sites.** Show "created, but the secret could not be shown — revoke it and create a new one". Show no link or token, and copy nothing.
+- **Unreadable 2xx body, other sites.** Show the site's normal success feedback; the body was not needed for it.
+
+**Gate.** `scripts/checks/check-mutation-response-read.mjs`, a ts-morph AST scan over client code: `src/components`, `src/hooks`, `src/app/**` (route handlers under `src/app/api` excluded), and `src/lib` minus server modules. A `src/lib` module counts as server code only when it has a value import of `server-only`, `next/headers` or `@/lib/prisma`; every other module is scanned, so the scope fails closed (D23).
+
+- **What it denies.** A `.json()` call on a value that comes from a mutating `fetchApi` call.
+- **When a call is mutating.** The method is resolved from the options literal. A method the scan cannot resolve statically, including a spread or a variable, counts as mutating, so the gate fails closed.
+- **When it passes.** The `.json()` call is replaced by `parseJsonBodyOnce(res)`.
+- **Control class.** A fail-closed verification gate adjudicated by the TypeScript AST.
+- **Known bypasses.** The response is aliased through a function boundary, or a raw `fetch` is used. Raw `fetch` is already banned in client code by eslint (`CallExpression[callee.name='fetch']`).
+- **Self-test.** `scripts/__tests__/check-mutation-response-read.test.mjs`:
+  - deny cases: a literal POST; an unresolvable method; a `.then(r => r.json())` form;
+  - allow cases: a GET; `parseJsonBodyOnce`;
+  - refusals: an empty file set and a parse error.
+- **Wiring.** A `pre-pr.sh` `queue_step`, which the `static-checks` job runs.
+
+**Member set.** The gate's own output on the tree at the start of C11, recorded in the deviation log, plus each member's triage.
+
+**Acceptance.**
+
+- The gate is green on the tree.
+- The gate is red-proven on a scratch copy that reintroduces a bare `.json()`.
+- Each once-shown-secret site has a test in which an unreadable 2xx body:
+  - shows the created-but-unavailable message;
+  - completes the flow;
+  - shows and copies no secret.
+- An allow pin keeps the valid body's behaviour.
+
 ## Testing strategy
 
 - **Per contract:** as above.
@@ -571,6 +617,7 @@ In `copy-reprompt-surfaces.test.tsx`, replace the stale todo with a comment poin
 | C8  | Dead branches                                                      | locked |
 | C9  | Custom-field type change clears stale boolean                      | locked |
 | C10 | Stale it.todo                                                      | locked |
+| C11 | Mutation responses read through parseJsonBodyOnce + AST gate       | locked |
 
 ## Implementation Checklist
 

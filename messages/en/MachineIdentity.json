@@ -52,6 +52,7 @@
   "tokenNeverUsed": "Never used",
   "tokenNeverExpires": "Never",
   "tokenCreated": "Token created",
+  "tokenCreatedSecretUnavailable": "Token created, but it could not be shown. Revoke it and create a new one.",
   "tokenRevoked2": "Token revoked",
   "tokenCreateFailed": "Failed to create token",
   "tokenRevokeFailed": "Failed to revoke token",
@@ -81,6 +82,7 @@
   "mcpAllowedScopes": "Allowed scopes",
   "mcpIsActive": "Active",
   "mcpCreated": "MCP client registered",
+  "mcpCreatedSecretUnavailable": "MCP client registered, but its secret could not be shown. Delete this client and register it again.",
   "mcpUpdated": "MCP client updated",
   "mcpDeleted": "MCP client deleted",
   "mcpDeleteConfirm": "Delete MCP client \"{name}\"?",
@@ -132,6 +134,7 @@
   "arJitToken": "JIT access token",
   "arJitTokenWarning": "This token cannot be shown again. Copy it now.",
   "arJitTokenTtl": "This token expires when the approved scope's TTL elapses.",
+  "arJitTokenUnavailable": "Request approved, but the access token could not be shown. Revoke it from the service account's tokens, then approve a new request.",
   "arCreate": "New Request",
   "arCreateTitle": "Create Access Request",
   "arCreated": "Access request created",
@@ -214,6 +217,7 @@
     "revokeAllTitle": "Revoke all connections?",
     "revokeAllDescription": "All active MCP connections will be revoked. Connected agents will lose access immediately.",
     "revokeAllSuccess": "All connections revoked ({count})",
+    "revokeAllDone": "All connections revoked",
     "revokeAllError": "Failed to revoke connections."
   }
 }

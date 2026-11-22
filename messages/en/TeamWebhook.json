@@ -9,6 +9,7 @@
   "secret": "Signing secret",
   "secretCopied": "Secret copied. Store it securely — it won't be shown again.",
   "created": "Webhook created",
+  "createdSecretUnavailable": "Webhook created, but its signing secret could not be shown. Delete this webhook and create it again.",
   "deleted": "Webhook deleted",
   "deleteConfirm": "Delete this webhook?",
   "noWebhooks": "No webhooks configured",

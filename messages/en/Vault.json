@@ -38,6 +38,7 @@
   "changePassphraseButton": "Change Passphrase",
   "passphraseChanged": "Passphrase changed successfully.",
   "changePassphraseFailed": "Failed to change passphrase.",
+  "changePassphraseOutcomeUnknown": "We couldn't confirm whether your passphrase was changed, so your vault has been locked. Unlock it with your new passphrase. If that doesn't work, use your old one.",
   "verifierNotSetHint": "Please lock and unlock your vault once before changing your passphrase.",
   "recoverPassphrase": "Forgot passphrase?",
   "resetVault": "Reset vault",
@@ -59,6 +60,7 @@
   "recoveryKeyClose": "Close",
   "recoveryKeyGenerating": "Generating Recovery Key...",
   "recoveryKeyRegenerateWarning": "You already have a Recovery Key. Generating a new one will invalidate the previous key.",
+  "recoveryKeyOutcomeUnknown": "We couldn't confirm whether your new Recovery Key was saved. Your previous Recovery Key may no longer work. Generate a new Recovery Key now and store it in a safe place.",
   "recoveryKeyRegenerateInvalidatedWarning": "Your previous Recovery Key was already invalidated by a vault key rotation. Generate a new Recovery Key below.",
   "vaultMustBeUnlocked": "Vault must be unlocked.",
   "or": "or",
@@ -68,6 +70,7 @@
   "rotateKeyButton": "Rotate Key",
   "rotateKeySuccess": "Encryption key rotated successfully.",
   "rotateKeyFailed": "Failed to rotate encryption key.",
+  "rotateKeyOutcomeUnknown": "We couldn't confirm whether your encryption key was rotated, so your vault has been locked. Unlock it with your passphrase, then try the rotation again if it is still needed.",
   "rotateKeyWarningEa": "All emergency access grants will be invalidated and must be re-confirmed.",
   "rotateKeyWarningTime": "This operation may take a while depending on the number of vault entries.",
   "rotateKeyPassphrase": "Current Passphrase",
@@ -81,5 +84,6 @@
   "outdatedAttachmentFormat": "This attachment cannot be decrypted. Restore from a backup or re-upload the original file.",
   "rotateKeyCacheTombstoneFailureBanner": "Some session caches did not invalidate during rotation (Redis outage). Sign out other devices manually and revoke any active sessions from Settings → Sessions.",
   "rotateKeyInvalidationFailedBanner": "Token revocation after rotation could not be confirmed. Pre-rotation API keys / MCP tokens may still be live; revoke them manually from Settings.",
+  "rotateKeyEffectsUnavailableBanner": "Your encryption key was rotated, but the server's report of what else changed could not be read. Your other sessions, API keys and MCP tokens may still be active; review them in Settings and revoke any you do not recognize.",
   "rotateKeyMcpRevokedBanner": "{count, plural, one {# pre-rotation MCP token was} other {# pre-rotation MCP tokens were}} revoked. You may need to re-mint at /tenant/service-accounts."
 }

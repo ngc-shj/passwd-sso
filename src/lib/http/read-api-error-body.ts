@@ -10,8 +10,16 @@ import type { MainApiErrorBody } from "@/lib/http/api-response";
  * Parse `res`'s JSON body once per `Response`; later calls return the same
  * parse. A body can be read only once, so without this a second reader of an
  * error response (a step-up check, then the caller's own code check) gets
- * `null` in a browser. Never rejects: an unparseable body is `null`. Only for
- * error-path readers — success paths read their body themselves.
+ * `null` in a browser. Never rejects: an unparseable body is `null`.
+ *
+ * The single reader of every mutation response body in client code, success
+ * path included (plan: close-coverage-and-clipboard-gaps, C11). Once `res.ok`,
+ * the write has committed: run the completion (refresh, `onSuccess`, reset)
+ * first, then read the body here and treat `null` as "committed, body
+ * unavailable" — never as a failed mutation. A site that shows a once-shown
+ * secret says it was created but cannot be shown, and shows or copies nothing.
+ * scripts/checks/check-mutation-response-read.mjs denies a bare `.json()` on a
+ * mutating `fetchApi` response.
  */
 export function parseJsonBodyOnce(res: Response): Promise<unknown> {
   let parse = jsonBodyParses.get(res);

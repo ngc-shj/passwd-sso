@@ -17,6 +17,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { fetchApi } from "@/lib/url-helpers";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
@@ -198,13 +199,20 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
         body: JSON.stringify(policy),
       });
       if (res.ok) {
-        const saved = await res.json();
-        const savedCidrsText = (saved.teamAllowedCidrs ?? []).join("\n");
-        setTeamCidrsText(savedCidrsText);
-        setPolicy({ ...DEFAULT_POLICY, ...saved });
-        setInitialPolicy({ ...DEFAULT_POLICY, ...saved });
+        // The policy is saved from here on: nothing below may be reported as
+        // a failed save.
         setFieldErrors({});
         toast.success(t("saveSuccess"));
+        const saved = await parseJsonBodyOnce(res);
+        if (typeof saved !== "object" || saved === null) {
+          // The echo could not be read; what was sent is what was saved.
+          setInitialPolicy(policy as unknown as Record<string, unknown>);
+          return;
+        }
+        const next: PolicyData = { ...DEFAULT_POLICY, ...(saved as Partial<PolicyData>) };
+        setTeamCidrsText((next.teamAllowedCidrs ?? []).join("\n"));
+        setPolicy(next);
+        setInitialPolicy(next as unknown as Record<string, unknown>);
       } else if (res.status === 400) {
         toast.error(t("validationError"));
       } else {

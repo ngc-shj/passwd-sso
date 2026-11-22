@@ -191,6 +191,43 @@ describe("TeamTagInput", () => {
   });
 });
 
+describe("TeamTagInput — a created tag whose response body cannot be read", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("adds the tag found in a reloaded list", async () => {
+    const created = { id: "new-tag", name: "newtag", color: null, parentId: null, depth: 0 };
+    let listed = SAMPLE_TAGS;
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (init?.method === "POST") {
+        listed = [...SAMPLE_TAGS, created];
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+        });
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve(listed) });
+    });
+    const onChange = vi.fn();
+    await act(async () => {
+      render(<TeamTagInput teamId="team-1" selectedTags={[]} onChange={onChange} />);
+    });
+    await act(async () => {
+      fireEvent.click(screen.getByText("addTag"));
+    });
+    const input = await screen.findByPlaceholderText("searchOrCreate");
+    fireEvent.change(input, { target: { value: "newtag" } });
+    await act(async () => {
+      fireEvent.keyDown(input, { key: "Enter" });
+    });
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith([created]));
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+});
+
 describe("TeamTagInput — cross-tenant render denial (§Sec-3)", () => {
   beforeEach(() => {
     vi.clearAllMocks();

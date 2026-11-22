@@ -539,3 +539,62 @@ describe("ShareDialog — closing with a created link", () => {
     expect(screen.queryByDisplayValue("late-access-pw")).not.toBeInTheDocument();
   });
 });
+
+describe("ShareDialog — when the created link's response body cannot be read", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    uninstallClipboard();
+  });
+
+  const unreadable = {
+    ok: true,
+    status: 201,
+    json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+  } as unknown as Response;
+
+  function renderAndCreate(createResponse: Response) {
+    mockFetch
+      .mockResolvedValueOnce(okJson({ items: [] })) // initial fetchLinks
+      .mockResolvedValueOnce(createResponse) // create
+      .mockResolvedValueOnce(okJson({ items: [] })); // refetchLinks
+    render(
+      <ShareDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        passwordEntryId="p1"
+        decryptedData={{ title: "x", username: "u", password: "pw" }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /create/ }));
+  }
+
+  it("says the link was created but cannot be shown", async () => {
+    renderAndCreate(unreadable);
+    expect(await screen.findByText("createdLinkUnavailable")).toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("still completes the creation (success toast and link list refresh)", async () => {
+    renderAndCreate(unreadable);
+    await screen.findByText("createdLinkUnavailable");
+    expect(toast.success).toHaveBeenCalledWith("createSuccess");
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("shows no link and copies nothing", async () => {
+    const clip = installClipboard();
+    renderAndCreate(unreadable);
+    await screen.findByText("createdLinkUnavailable");
+    expect(screen.queryByText("shareUrl")).not.toBeInTheDocument();
+    expect(clip.writeText).not.toHaveBeenCalled();
+  });
+
+  it("shows the link when the body is readable", async () => {
+    renderAndCreate(okJson({ url: "/s/abc123" }));
+    expect(await screen.findByDisplayValue("https://app.example.com/s/abc123")).toBeInTheDocument();
+    expect(screen.queryByText("createdLinkUnavailable")).not.toBeInTheDocument();
+  });
+});

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { useVault } from "@/lib/vault/vault-context";
+import { ROTATION_EFFECTS_UNAVAILABLE, useVault, VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
 import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
@@ -65,6 +65,13 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
         },
       );
       toast.success(t("rotateKeySuccess"));
+      if (effects === ROTATION_EFFECTS_UNAVAILABLE) {
+        // The rotation committed, but whether the other sessions and tokens
+        // were revoked is unknown: say so instead of implying they were.
+        toast.warning(t("rotateKeyEffectsUnavailableBanner"), { duration: Infinity });
+        handleOpenChange(false);
+        return;
+      }
       // Operator banners (#433/P3-F2). Each surfaces only when the
       // corresponding side-effect actually occurred. Persistent toasts so the
       // user can act on them rather than dismissing accidentally.
@@ -84,6 +91,13 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
       }
       handleOpenChange(false);
     } catch (err: unknown) {
+      if (err instanceof VaultChangeOutcomeUnknownError) {
+        // The vault is now locked, which unmounts this dialog: a persistent
+        // toast is the only place the user still sees what happened.
+        toast.error(t("rotateKeyOutcomeUnknown"), { duration: Infinity });
+        handleOpenChange(false);
+        return;
+      }
       const apiErr = err as { error?: string } | undefined;
       const errorCode = apiErr?.error;
 

@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault/vault-context";
+import { PRE_ROUTE_AND_PRE_TX_REFUSALS } from "@/lib/vault/pre-commit-refusals";
 import { computePassphraseVerifier } from "@/lib/crypto/crypto-client";
 import {
   generateRecoveryKey,
@@ -34,10 +35,27 @@ import { fetchApi } from "@/lib/url-helpers";
 // ── Core logic (exported for testing) ───────────────────────────
 
 type FlowSuccess = { ok: true; formattedKey: string };
+/** Nothing was stored: the POST was refused before the write, or never sent. */
 type FlowError = { ok: false; errorCode: string | null };
+/**
+ * The POST was sent but whether the server stored the new wrap is unknown. If
+ * it did, the previous recovery key no longer works and the new one was never
+ * shown, so the user must generate another.
+ */
+type FlowOutcomeUnknown = { ok: false; outcomeUnknown: true };
 
 /** @internal Exported for testing */
-export type GenerateFlowResult = FlowSuccess | FlowError;
+export type GenerateFlowResult = FlowSuccess | FlowError | FlowOutcomeUnknown;
+
+// Codes that prove the generate POST was refused before its write: the shared
+// PRE_ROUTE_AND_PRE_TX_REFUSALS plus VERIFIER_NOT_SET, which
+// recovery-key/generate also returns before its single user.update. After the
+// update it only returns 200 (the audit write never throws); a failing update
+// throws, which is not an envelope.
+const GENERATE_REFUSALS: ReadonlySet<string> = new Set([
+  ...PRE_ROUTE_AND_PRE_TX_REFUSALS,
+  API_ERROR.VERIFIER_NOT_SET,
+]);
 
 /**
  * Pure async flow: generate Recovery Key, wrap secretKey, send to server.
@@ -60,22 +78,30 @@ export async function generateRecoveryKeyFlow(
     recoveryKey = generateRecoveryKey();
     const wrapped = await wrapSecretKeyWithRecovery(secretKey, recoveryKey);
 
-    const res = await fetchApi(API_PATH.VAULT_RECOVERY_KEY_GENERATE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        currentVerifierHash,
-        encryptedSecretKey: wrapped.encryptedSecretKey,
-        secretKeyIv: wrapped.iv,
-        secretKeyAuthTag: wrapped.authTag,
-        hkdfSalt: wrapped.hkdfSalt,
-        verifierHash: wrapped.verifierHash,
-      }),
-    });
+    let res: Response;
+    try {
+      res = await fetchApi(API_PATH.VAULT_RECOVERY_KEY_GENERATE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentVerifierHash,
+          encryptedSecretKey: wrapped.encryptedSecretKey,
+          secretKeyIv: wrapped.iv,
+          secretKeyAuthTag: wrapped.authTag,
+          hkdfSalt: wrapped.hkdfSalt,
+          verifierHash: wrapped.verifierHash,
+        }),
+      });
+    } catch {
+      return { ok: false, outcomeUnknown: true };
+    }
 
     if (!res.ok) {
       const err = await readApiErrorBody(res);
-      return { ok: false, errorCode: err?.error ?? null };
+      if (!err || !GENERATE_REFUSALS.has(err.error)) {
+        return { ok: false, outcomeUnknown: true };
+      }
+      return { ok: false, errorCode: err.error };
     }
 
     const formattedKey = await formatRecoveryKey(recoveryKey);
@@ -145,6 +171,8 @@ export function RecoveryKeyDialog({
     if (result.ok) {
       setFormattedKey(result.formattedKey);
       setStep("display");
+    } else if ("outcomeUnknown" in result) {
+      setError(t("recoveryKeyOutcomeUnknown"));
     } else if (result.errorCode === API_ERROR.INVALID_PASSPHRASE) {
       setError(tApi("invalidPassphrase"));
     } else if (result.errorCode) {

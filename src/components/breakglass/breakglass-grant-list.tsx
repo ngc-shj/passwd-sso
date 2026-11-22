@@ -110,8 +110,7 @@ export function BreakGlassGrantList({ refreshTrigger }: BreakGlassGrantListProps
           toast.error(body?.error ? tApi(apiErrorToI18nKey(body.error)) : tApi("unknownError"));
         }
       } else {
-        const data = await res.json().catch(() => null);
-        const code = typeof data?.error === "string" ? data.error : null;
+        const code = (await readApiErrorBody(res))?.error;
         toast.error(code ? tApi(apiErrorToI18nKey(code)) : tApi("unknownError"));
       }
     } finally {

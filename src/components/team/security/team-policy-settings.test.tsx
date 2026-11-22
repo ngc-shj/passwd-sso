@@ -240,6 +240,21 @@ describe("TeamPolicySettings load and save", () => {
     expect(putCalls()).toHaveLength(0);
   });
 
+  it("reports a save whose response body cannot be read as saved, and leaves nothing unsaved", async () => {
+    mockApi(DEFAULT_DATA, {
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+    });
+    render(<TeamPolicySettings teamId="team-1" />);
+    const save = await editMinLength("12");
+    fireEvent.click(save);
+
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("saveSuccess"));
+    expect(mockToast.error).not.toHaveBeenCalled();
+    await waitFor(() => expect(save).toBeDisabled());
+  });
+
   it("toasts validationError on a 400 save response", async () => {
     mockApi(DEFAULT_DATA, { ok: false, status: 400 });
     render(<TeamPolicySettings teamId="team-1" />);

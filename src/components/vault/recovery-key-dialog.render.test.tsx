@@ -59,9 +59,10 @@ vi.mock("@/lib/crypto/crypto-recovery", () => ({
   wrapSecretKeyWithRecovery: mockWrap,
 }));
 
-vi.mock("@/lib/http/api-error-codes", () => ({
+// The real API_ERROR: the flow classifies refusals by those codes.
+vi.mock("@/lib/http/api-error-codes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/http/api-error-codes")>()),
   apiErrorToI18nKey: (code: string) => `apiErr:${code}`,
-  API_ERROR: { INVALID_PASSPHRASE: "INVALID_PASSPHRASE" },
 }));
 
 vi.mock("@/lib/http/read-api-error-body", () => ({
@@ -271,17 +272,32 @@ describe("RecoveryKeyDialog generate flow", () => {
     submitPassphrase();
 
     expect(await screen.findByText("apiErr:RATE_LIMIT_EXCEEDED")).toBeInTheDocument();
+    expect(screen.queryByText("recoveryKeyOutcomeUnknown")).toBeNull();
   });
 
-  it("shows the unknown-error message when the error body carries no code", async () => {
-    mockFetchApi.mockResolvedValue({ ok: false });
+  it("tells the user to generate a new key, without showing one, when a 502 carries no app error envelope", async () => {
+    mockFetchApi.mockResolvedValue({ ok: false, status: 502 });
     mockReadApiErrorBody.mockResolvedValue(null);
     render(<RecoveryKeyDialog open={true} onOpenChange={vi.fn()} />);
 
     submitPassphrase();
 
-    expect(await screen.findByText("unknownError")).toBeInTheDocument();
+    expect(await screen.findByText("recoveryKeyOutcomeUnknown")).toBeInTheDocument();
+    expect(screen.queryByText(FORMATTED_KEY)).toBeNull();
+    expect(screen.queryByText("recoveryKeyWarning")).toBeNull();
+    expect(vault.setHasRecoveryKey).not.toHaveBeenCalled();
     expect(screen.getByText("recoveryKey")).not.toBeDisabled();
+  });
+
+  it("tells the user to generate a new key, without showing one, when the POST rejects in transit", async () => {
+    mockFetchApi.mockRejectedValue(new TypeError("Failed to fetch"));
+    render(<RecoveryKeyDialog open={true} onOpenChange={vi.fn()} />);
+
+    submitPassphrase();
+
+    expect(await screen.findByText("recoveryKeyOutcomeUnknown")).toBeInTheDocument();
+    expect(screen.queryByText(FORMATTED_KEY)).toBeNull();
+    expect(screen.queryByText("unknownError")).toBeNull();
   });
 
   it("copies the displayed recovery key and confirms with a success toast", async () => {

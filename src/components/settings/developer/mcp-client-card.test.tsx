@@ -525,6 +525,82 @@ describe("McpClientCard", () => {
     expect(screen.queryByDisplayValue("super_secret_value")).not.toBeInTheDocument();
   });
 
+  describe("when the registered client's response body cannot be read", () => {
+    function setupUnreadableCreate() {
+      setupFetchClients([]);
+      const others = mockFetch.getMockImplementation();
+      mockFetch.mockImplementation((url: string, init?: RequestInit) =>
+        init?.method === "POST"
+          ? Promise.resolve({
+              ok: true,
+              status: 201,
+              json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+            })
+          : others?.(url, init),
+      );
+    }
+
+    async function submitCreate() {
+      await act(async () => {
+        render(<McpClientCard />);
+      });
+      await screen.findByText("noMcpClients");
+      const registerBtn = screen
+        .getAllByRole("button")
+        .find((b) => b.textContent?.includes("registerMcpClient"));
+      if (!registerBtn) throw new Error("register button not rendered");
+      await act(async () => {
+        fireEvent.click(registerBtn);
+      });
+      fireEvent.change(screen.getByPlaceholderText("mcpNamePlaceholder"), {
+        target: { value: "New Client" },
+      });
+      fireEvent.change(screen.getByPlaceholderText("mcpRedirectUrisPlaceholder"), {
+        target: { value: "https://new.example.com/callback" },
+      });
+      fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+      const createBtn = screen.getAllByRole("button").find((b) => b.textContent?.includes("create"));
+      if (!createBtn) throw new Error("create button not rendered");
+      await act(async () => {
+        fireEvent.click(createBtn);
+      });
+    }
+
+    const listCalls = () => mockFetch.mock.calls.filter(([, init]) => !init?.method || init.method === "GET");
+
+    it("says the client was registered but its secret cannot be shown", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      expect(await screen.findByText("mcpCreatedSecretUnavailable")).toBeInTheDocument();
+      expect(mockToast.error).not.toHaveBeenCalled();
+    });
+
+    it("still completes the registration (success toast and list refresh)", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      await screen.findByText("mcpCreatedSecretUnavailable");
+      expect(mockToast.success).toHaveBeenCalledWith("mcpCreated");
+      expect(listCalls()).toHaveLength(2);
+    });
+
+    it("shows no secret and offers nothing to copy", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      await screen.findByText("mcpCreatedSecretUnavailable");
+      expect(screen.queryByText("mcpClientSecret")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("copy-button")).not.toBeInTheDocument();
+    });
+
+    it("shows the secret with its copy button when the body is readable", async () => {
+      setupFetchClients([]);
+      await submitCreate();
+      expect(await screen.findByDisplayValue("super_secret_value")).toBeInTheDocument();
+      const copied = screen.getAllByTestId("copy-button").map((b) => b.getAttribute("data-value"));
+      expect(copied).toContain("super_secret_value");
+      expect(screen.queryByText("mcpCreatedSecretUnavailable")).not.toBeInTheDocument();
+    });
+  });
+
   it("create — shows name error on 409 MCP_CLIENT_NAME_CONFLICT", async () => {
     mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
       if (!init?.method || init.method === "GET") {

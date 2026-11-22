@@ -218,6 +218,18 @@ describe("RecoveryPage", () => {
     expect(mockSetHasRecoveryKey).not.toHaveBeenCalled();
   }, 15_000);
 
+  it("tells the user to reload when another request changed the passphrase first (VAULT_WRAP_CONFLICT)", async () => {
+    await reachNewPassphraseStep();
+    mockFetchApi.mockResolvedValueOnce(json({ error: "VAULT_WRAP_CONFLICT" }, 409));
+
+    fillPassphrases(NEW_PASSPHRASE, NEW_PASSPHRASE);
+    fireEvent.click(screen.getByRole("button", { name: "resetPassphrase" }));
+
+    expect(await screen.findByText("vaultWrapConflict", {}, { timeout: 8000 })).toBeInTheDocument();
+    expect(mockHardNavigate).not.toHaveBeenCalled();
+    expect(mockSetHasRecoveryKey).not.toHaveBeenCalled();
+  }, 15_000);
+
   it("tells the user the reset succeeded but other devices stay signed in on SESSION_INVALIDATE_FAILED", async () => {
     await reachNewPassphraseStep();
     mockFetchApi.mockResolvedValueOnce(json({ error: "SESSION_INVALIDATE_FAILED" }, 500));
@@ -242,6 +254,29 @@ describe("RecoveryPage", () => {
 
       expect(screen.getByRole("link", { name: "back" })).toHaveAttribute("href", "/dashboard");
     });
+
+    it("is offered on the new-passphrase step while no reset is in flight", async () => {
+      await reachNewPassphraseStep();
+
+      expect(screen.getByRole("link", { name: "back" })).toHaveAttribute("href", "/dashboard");
+    });
+
+    it("is not offered while a reset is in flight, and returns when it is refused", async () => {
+      await reachNewPassphraseStep();
+      let refuse: (res: Response) => void = () => {};
+      mockFetchApi.mockReturnValueOnce(new Promise<Response>((resolve) => { refuse = resolve; }));
+      fillPassphrases(NEW_PASSPHRASE, NEW_PASSPHRASE);
+      fireEvent.click(screen.getByRole("button", { name: "resetPassphrase" }));
+
+      // Wait for the reset request itself, so the in-flight window is the one
+      // in which the server may commit.
+      await waitFor(() => expect(mockFetchApi).toHaveBeenCalledTimes(2), { timeout: 8000 });
+      expect(screen.getByRole("button", { name: "resetting" })).toBeInTheDocument();
+      expect(screen.queryByRole("link", { name: "back" })).not.toBeInTheDocument();
+
+      refuse(json({ error: "UNAUTHORIZED" }, 401));
+      expect(await screen.findByRole("link", { name: "back" })).toHaveAttribute("href", "/dashboard");
+    }, 15_000);
 
     it("is not offered once the reset committed with invalidation failed; Continue does a full reload", async () => {
       await reachNewPassphraseStep();

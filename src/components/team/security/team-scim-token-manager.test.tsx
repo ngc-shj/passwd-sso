@@ -253,6 +253,64 @@ describe("ScimTokenManager", () => {
     await waitFor(() => expect(confirm).toBeEnabled());
   });
 
+  describe("when the created token's response body cannot be read", () => {
+    function setupCreate(createBody: () => Promise<unknown>) {
+      mockFetch.mockImplementation((_url: string, init?: RequestInit) =>
+        init?.method === "POST"
+          ? Promise.resolve({ ok: true, status: 201, json: createBody })
+          : Promise.resolve({ ok: true, json: () => Promise.resolve([]) }),
+      );
+    }
+
+    async function submitCreate() {
+      await act(async () => {
+        render(<ScimTokenManager locale="en" />);
+      });
+      fireEvent.click(screen.getByRole("button", { name: "scimCreateToken" }));
+      const createButtons = screen.getAllByRole("button", { name: "scimCreateToken" });
+      await act(async () => {
+        fireEvent.click(createButtons[createButtons.length - 1]);
+      });
+    }
+
+    const unreadable = () => Promise.reject(new SyntaxError("Unexpected end of JSON input"));
+
+    it("says the token was created but cannot be shown", async () => {
+      setupCreate(unreadable);
+      await submitCreate();
+      expect(await screen.findByText("scimTokenCreatedUnavailable")).toBeInTheDocument();
+      expect(mockToast.error).not.toHaveBeenCalled();
+    });
+
+    it("still refreshes the token list", async () => {
+      setupCreate(unreadable);
+      await submitCreate();
+      await screen.findByText("scimTokenCreatedUnavailable");
+      const listCalls = mockFetch.mock.calls.filter(([, init]) => init?.method !== "POST");
+      expect(listCalls).toHaveLength(2);
+    });
+
+    it("shows no token and offers nothing to copy", async () => {
+      setupCreate(unreadable);
+      await submitCreate();
+      await screen.findByText("scimTokenCreatedUnavailable");
+      expect(screen.queryByText("scimTokenCreated")).not.toBeInTheDocument();
+      // The one copy button left is the card's endpoint URL, outside the dialog.
+      expect(screen.getAllByTestId("copy-btn")).toHaveLength(1);
+      expect(mockToast.success).not.toHaveBeenCalled();
+    });
+
+    it("shows the token with a copy button when the body is readable", async () => {
+      setupCreate(() => Promise.resolve({ token: "scim-token-xyz" }));
+      await submitCreate();
+      expect(await screen.findByDisplayValue("scim-token-xyz")).toBeInTheDocument();
+      // The card's endpoint URL, plus the dialog's endpoint URL and token.
+      expect(screen.getAllByTestId("copy-btn")).toHaveLength(3);
+      expect(mockToast.success).toHaveBeenCalledWith("scimTokenCreated");
+      expect(screen.queryByText("scimTokenCreatedUnavailable")).not.toBeInTheDocument();
+    });
+  });
+
   it("opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned on create", async () => {
     mockFetch
       .mockResolvedValueOnce({ ok: true, json: () => Promise.resolve([]) })

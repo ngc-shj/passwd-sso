@@ -21,10 +21,17 @@ import {
   notifyUnlockFailure,
   VaultUnlockError,
   throwIfUnlockDataLocked,
+  ROTATION_EFFECTS_UNAVAILABLE,
+  VaultChangeOutcomeUnknownError,
 } from "./vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
 import { stashPrf, clearPrf } from "@/lib/auth/prf-handoff";
-import { encryptData, decryptData } from "@/lib/crypto/crypto-client";
+import { encryptData, decryptData, verifyKey } from "@/lib/crypto/crypto-client";
+// Namespace import used ONLY for a pass-through spy on generateSecretKey that
+// captures the rotation's new key for a zeroization assertion.
+import * as cryptoClient from "@/lib/crypto/crypto-client";
+// Same, for the ECDH private key bytes setup exports.
+import * as cryptoTeam from "@/lib/crypto/crypto-team";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { wrapSecretKeyWithPrf } from "@/lib/auth/webauthn/webauthn-client";
 // Namespace import used ONLY to attach a pass-through spy that captures the
@@ -391,17 +398,142 @@ describe("VaultProvider — setup error path", () => {
   }, 30_000);
 });
 
+describe("VaultProvider — setup zeroizes its local key material", () => {
+  /**
+   * Pass-through spies (crypto stays real) capturing the secret key and the
+   * exported ECDH private key that setup holds in locals.
+   */
+  function captureSetupKeys() {
+    const captured: { secretKey: Uint8Array | null; ecdhPrivBytes: Uint8Array | null } = {
+      secretKey: null,
+      ecdhPrivBytes: null,
+    };
+    const actualGenerate = cryptoClient.generateSecretKey;
+    const actualExport = cryptoTeam.exportPrivateKey;
+    const generateSpy = vi.spyOn(cryptoClient, "generateSecretKey").mockImplementation(() => {
+      const key = actualGenerate();
+      captured.secretKey = key;
+      return key;
+    });
+    const exportSpy = vi.spyOn(cryptoTeam, "exportPrivateKey").mockImplementation(async (key) => {
+      const bytes = await actualExport(key);
+      captured.ecdhPrivBytes = bytes;
+      return bytes;
+    });
+    return {
+      captured,
+      restore: () => {
+        generateSpy.mockRestore();
+        exportSpy.mockRestore();
+      },
+    };
+  }
+
+  /** Run setup against a server whose setup POST gets `response`. */
+  async function setupWith(response: MockFetchResponse | Error) {
+    const { fetchMock } = makeFetchEnv(null);
+    const baseHandler = fetchMock.getMockImplementation();
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/vault/setup") {
+        if (response instanceof Error) throw response;
+        return response;
+      }
+      if (!baseHandler) throw new Error("fetch env has no base handler");
+      return baseHandler(url, init);
+    }) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    const { captured, restore } = captureSetupKeys();
+    let caught: unknown;
+    try {
+      await act(async () => {
+        try {
+          await result.current.setup(PASSPHRASE);
+        } catch (e) {
+          caught = e;
+        }
+      });
+    } finally {
+      restore();
+    }
+    return { result, captured, caught };
+  }
+
+  function allZero(bytes: Uint8Array | null): boolean {
+    if (!bytes) throw new Error("key material was not captured");
+    return bytes.every((b) => b === 0);
+  }
+
+  it("zeroizes the secret key and ECDH private key when the setup POST rejects in transit", async () => {
+    const { result, captured, caught } = await setupWith(new TypeError("Failed to fetch"));
+
+    expect(caught).toBeInstanceOf(TypeError);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(allZero(captured.secretKey)).toBe(true);
+    expect(allZero(captured.ecdhPrivBytes)).toBe(true);
+  }, 30_000);
+
+  it("zeroizes the secret key and ECDH private key when the server refuses setup", async () => {
+    const { result, captured, caught } = await setupWith({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "ALREADY_SETUP" }),
+    });
+
+    expect((caught as Error).message).toBe("ALREADY_SETUP");
+    expect(result.current.encryptionKey).toBeNull();
+    expect(allZero(captured.secretKey)).toBe(true);
+    expect(allZero(captured.ecdhPrivBytes)).toBe(true);
+  }, 30_000);
+
+  it("keeps working copies of the keys after a successful setup while zeroizing the locals", async () => {
+    const { result, captured, caught } = await setupWith({ ok: true, json: async () => ({}) });
+
+    expect(caught).toBeUndefined();
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expect(allZero(captured.secretKey)).toBe(true);
+    expect(allZero(captured.ecdhPrivBytes)).toBe(true);
+    expect(result.current.getSecretKey()?.some((b) => b !== 0)).toBe(true);
+    expect(result.current.getEcdhPrivateKeyBytes()?.some((b) => b !== 0)).toBe(true);
+    let verified = false;
+    await act(async () => {
+      verified = await result.current.verifyPassphrase(PASSPHRASE);
+    });
+    expect(verified).toBe(true);
+  }, 30_000);
+});
+
 describe("VaultProvider — changePassphrase response handling", () => {
   const NEW_PASSPHRASE = "a different long passphrase";
 
-  /** Set up an unlocked vault whose change-passphrase call gets `response`. */
-  async function setUpWithChangeResponse(response: MockFetchResponse) {
-    const { fetchMock } = makeFetchEnv(null);
+  /**
+   * Set up an unlocked vault whose change-passphrase call gets `response`; an
+   * Error makes the POST reject, as fetch does when the connection drops.
+   * `commit` stores the sent wrap server-side first — a change that committed
+   * although its response never reached the client.
+   */
+  async function setUpWithChangeResponse(
+    response: MockFetchResponse | Error,
+    { commit = false }: { commit?: boolean } = {},
+  ) {
+    const { fetchMock, store } = makeFetchEnv(null);
     const sent: { accountSalt?: string } = {};
     const baseHandler = fetchMock.getMockImplementation();
     fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
       if (url === "/api/vault/change-passphrase") {
-        Object.assign(sent, JSON.parse(init?.body as string));
+        const body = JSON.parse(init?.body as string);
+        Object.assign(sent, body);
+        if (commit && store.vault) {
+          store.vault = {
+            ...store.vault,
+            encryptedSecretKey: body.encryptedSecretKey,
+            secretKeyIv: body.secretKeyIv,
+            secretKeyAuthTag: body.secretKeyAuthTag,
+            accountSalt: body.accountSalt,
+            verifierHash: body.newVerifierHash,
+          };
+        }
+        if (response instanceof Error) throw response;
         return response;
       }
       if (!baseHandler) throw new Error("fetch env has no base handler");
@@ -433,6 +565,7 @@ describe("VaultProvider — changePassphrase response handling", () => {
     });
 
     expect(effects).toEqual({ invalidationFailed: true });
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
     expect(hex(result.current.getAccountSalt())).toBe(sent.accountSalt);
     let newOk = false;
     await act(async () => {
@@ -474,6 +607,7 @@ describe("VaultProvider — changePassphrase response handling", () => {
     });
 
     expect(caught).toEqual({ error: "INVALID_PASSPHRASE" });
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
     expect(sent.accountSalt).not.toBe(saltBefore);
     expect(hex(result.current.getAccountSalt())).toBe(saltBefore);
     let oldOk = false;
@@ -481,6 +615,89 @@ describe("VaultProvider — changePassphrase response handling", () => {
       oldOk = await result.current.verifyPassphrase(PASSPHRASE);
     });
     expect(oldOk).toBe(true);
+  }, 60_000);
+
+  async function changeCatching(result: { current: ReturnType<typeof useVault> }) {
+    let caught: unknown;
+    await act(async () => {
+      try {
+        await result.current.changePassphrase(PASSPHRASE, NEW_PASSPHRASE);
+      } catch (e) {
+        caught = e;
+      }
+    });
+    return caught;
+  }
+
+  /** The vault is locked and no key material from before the change remains. */
+  function expectLocked(result: { current: ReturnType<typeof useVault> }) {
+    expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(result.current.getSecretKey()).toBeNull();
+  }
+
+  it("locks the vault and throws VaultChangeOutcomeUnknownError when the POST rejects in transit", async () => {
+    const { result } = await setUpWithChangeResponse(new TypeError("Failed to fetch"));
+
+    const caught = await changeCatching(result);
+
+    expect(caught).toBeInstanceOf(VaultChangeOutcomeUnknownError);
+    expectLocked(result);
+  }, 60_000);
+
+  it("stops accepting the old passphrase and unlocks with the new one after a committed change whose response was lost", async () => {
+    const { result } = await setUpWithChangeResponse(new TypeError("Failed to fetch"), { commit: true });
+
+    await changeCatching(result);
+    let oldOk = true;
+    await act(async () => {
+      oldOk = await result.current.verifyPassphrase(PASSPHRASE);
+    });
+    let unlocked = false;
+    await act(async () => {
+      unlocked = await result.current.unlock(NEW_PASSPHRASE);
+    });
+
+    expect(oldOk).toBe(false);
+    expect(unlocked).toBe(true);
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+  }, 60_000);
+
+  it("locks the vault when a 502 carries no app error envelope (a proxy's HTML page)", async () => {
+    const { result } = await setUpWithChangeResponse({ ok: false, status: 502, json: unreadableBody });
+
+    const caught = await changeCatching(result);
+
+    expect(caught).toBeInstanceOf(VaultChangeOutcomeUnknownError);
+    expectLocked(result);
+  }, 60_000);
+
+  it("locks the vault on INTERNAL_ERROR, which does not prove the change rolled back", async () => {
+    const { result } = await setUpWithChangeResponse({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "INTERNAL_ERROR" }),
+    });
+
+    const caught = await changeCatching(result);
+
+    expect(caught).toBeInstanceOf(VaultChangeOutcomeUnknownError);
+    expectLocked(result);
+  }, 60_000);
+
+  it("stays unlocked on the old wrap when the compare-and-swap refuses the change (VAULT_WRAP_CONFLICT)", async () => {
+    const { result } = await setUpWithChangeResponse({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "VAULT_WRAP_CONFLICT" }),
+    });
+    const saltBefore = hex(result.current.getAccountSalt());
+
+    const caught = await changeCatching(result);
+
+    expect(caught).toEqual({ error: "VAULT_WRAP_CONFLICT" });
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expect(hex(result.current.getAccountSalt())).toBe(saltBefore);
   }, 60_000);
 });
 
@@ -1103,4 +1320,381 @@ describe("VaultProvider — bfcache pageshow guard (INV-C1.6)", () => {
     },
     60_000,
   );
+});
+
+// ── C11: committed mutation responses whose body cannot be read ─────────────
+// After res.ok the server holds the new state; an unreadable body must not
+// leave the client on the old key material. An unreadable error body keeps
+// the failure semantics.
+
+const unreadableBody = async (): Promise<unknown> => {
+  throw new SyntaxError("Unexpected token '<'");
+};
+
+function toHex(bytes: Uint8Array | null): string | undefined {
+  return bytes ? Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("") : undefined;
+}
+
+describe("VaultProvider — rotateKey response handling (C11)", () => {
+  interface RotatePost {
+    accountSalt: string;
+    verificationArtifact: { ciphertext: string; iv: string; authTag: string };
+  }
+
+  /**
+   * Set up an unlocked vault whose rotate-key POST gets `response`; an Error
+   * makes the POST reject, as fetch does when the connection drops.
+   */
+  async function setUpWithRotateResponse(response: MockFetchResponse | Error) {
+    const { fetchMock } = makeFetchEnv(null);
+    const sent: { body: RotatePost | null } = { body: null };
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/vault/rotate-key/data") {
+        return {
+          ok: true,
+          json: async () => ({
+            entries: [],
+            historyEntries: [],
+            mode2Attachments: [],
+            mode0Attachments: [],
+            mode0AttachmentsOverflow: false,
+          }),
+        };
+      }
+      if (url === "/api/vault/rotate-key" && init?.method === "POST") {
+        sent.body = JSON.parse(init.body as string) as RotatePost;
+        if (response instanceof Error) throw response;
+        return response;
+      }
+      return fetchMock(url, init);
+    }) as unknown as typeof fetch;
+
+    const hook = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await hook.result.current.setup(PASSPHRASE);
+    });
+    return { result: hook.result, sent, oldKey: hook.result.current.encryptionKey };
+  }
+
+  async function rotate(result: { current: ReturnType<typeof useVault> }) {
+    let outcome: unknown;
+    let caught: unknown;
+    await act(async () => {
+      try {
+        outcome = await result.current.rotateKey(PASSPHRASE);
+      } catch (e) {
+        caught = e;
+      }
+    });
+    return { outcome, caught };
+  }
+
+  it("switches to the new key, salt and version when the committed rotation's body is unreadable", async () => {
+    const { result, sent, oldKey } = await setUpWithRotateResponse({ ok: true, json: unreadableBody });
+
+    const { caught } = await rotate(result);
+
+    expect(caught).toBeUndefined();
+    const newKey = result.current.encryptionKey;
+    expect(newKey).toBeInstanceOf(CryptoKey);
+    expect(newKey).not.toBe(oldKey);
+    // The key in memory is the one whose verification artifact the server stored.
+    if (!newKey || !sent.body) throw new Error("rotation did not install a key");
+    expect(await verifyKey(newKey, sent.body.verificationArtifact)).toBe(true);
+    expect(toHex(result.current.getAccountSalt())).toBe(sent.body.accountSalt);
+    expect(result.current.getKeyVersion()).toBe(2);
+  }, 60_000);
+
+  it("reports the rotation's effects as unavailable when the committed body is unreadable", async () => {
+    const { result } = await setUpWithRotateResponse({ ok: true, json: unreadableBody });
+
+    const { outcome, caught } = await rotate(result);
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toBe(ROTATION_EFFECTS_UNAVAILABLE);
+    expect(outcome).toBe("ROTATION_EFFECTS_UNAVAILABLE");
+  }, 60_000);
+
+  it("returns the server's rotation effects and key version from a readable body", async () => {
+    const effects = {
+      recoveryKeyInvalidated: true,
+      emergencyGrantsCleared: 1,
+      prfCredentialsCleared: 0,
+      cekRewrapsAttempted: 0,
+      cekRewrapsSucceeded: 0,
+      cekRewrapsFailed: 0,
+      invalidatedMcpAccessTokens: 2,
+      invalidatedMcpRefreshTokens: 0,
+      cacheTombstoneFailures: 0,
+      invalidationFailed: false,
+    };
+    const { result, sent } = await setUpWithRotateResponse({
+      ok: true,
+      json: async () => ({ success: true, keyVersion: 2, rotationEffects: effects }),
+    });
+
+    const { outcome } = await rotate(result);
+
+    expect(outcome).toEqual({ ...effects, legacyAttachmentsMigrated: 0 });
+    expect(result.current.getKeyVersion()).toBe(2);
+    expect(toHex(result.current.getAccountSalt())).toBe(sent.body?.accountSalt);
+  }, 60_000);
+
+  /** The vault is locked and no key material from before the rotation remains. */
+  function expectLocked(result: { current: ReturnType<typeof useVault> }) {
+    expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(result.current.getSecretKey()).toBeNull();
+  }
+
+  /** Capture the secret key the rotation generates (crypto stays real). */
+  function captureNewSecretKey() {
+    const captured: { key: Uint8Array | null } = { key: null };
+    const actualGenerate = cryptoClient.generateSecretKey;
+    const spy = vi.spyOn(cryptoClient, "generateSecretKey").mockImplementation(() => {
+      const key = actualGenerate();
+      captured.key = key;
+      return key;
+    });
+    return { captured, restore: () => spy.mockRestore() };
+  }
+
+  it("locks the vault and throws VaultChangeOutcomeUnknownError when the rotate POST rejects in transit", async () => {
+    const { result } = await setUpWithRotateResponse(new TypeError("Failed to fetch"));
+
+    const { caught } = await rotate(result);
+
+    expect(caught).toBeInstanceOf(VaultChangeOutcomeUnknownError);
+    expectLocked(result);
+  }, 60_000);
+
+  it("zeroizes the rotation's new secret key when the rotate POST rejects in transit", async () => {
+    const { result } = await setUpWithRotateResponse(new TypeError("Failed to fetch"));
+    const { captured, restore } = captureNewSecretKey();
+
+    await rotate(result);
+    restore();
+
+    expect(captured.key).not.toBeNull();
+    expect(captured.key?.every((b) => b === 0)).toBe(true);
+  }, 60_000);
+
+  it("locks the vault when a 502 carries no app error envelope (a proxy's HTML page)", async () => {
+    const { result } = await setUpWithRotateResponse({ ok: false, status: 502, json: unreadableBody });
+
+    const { caught } = await rotate(result);
+
+    expect(caught).toBeInstanceOf(VaultChangeOutcomeUnknownError);
+    expectLocked(result);
+  }, 60_000);
+
+  it("locks the vault on INTERNAL_ERROR, which does not prove the rotation rolled back", async () => {
+    const { result } = await setUpWithRotateResponse({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: "INTERNAL_ERROR" }),
+    });
+
+    const { caught } = await rotate(result);
+
+    expect(caught).toBeInstanceOf(VaultChangeOutcomeUnknownError);
+    expectLocked(result);
+  }, 60_000);
+
+  it("stays unlocked on the old key when the server refuses before committing (KEY_VERSION_MISMATCH)", async () => {
+    const { result, sent, oldKey } = await setUpWithRotateResponse({
+      ok: false,
+      status: 409,
+      json: async () => ({ error: "KEY_VERSION_MISMATCH" }),
+    });
+    const saltBefore = toHex(result.current.getAccountSalt());
+
+    const { caught } = await rotate(result);
+
+    expect(caught).toEqual({ error: "KEY_VERSION_MISMATCH" });
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expect(result.current.encryptionKey).toBe(oldKey);
+    expect(sent.body?.accountSalt).not.toBe(saltBefore);
+    expect(toHex(result.current.getAccountSalt())).toBe(saltBefore);
+    expect(result.current.getKeyVersion()).toBe(1);
+  }, 60_000);
+});
+
+describe("VaultProvider — setup and changePassphrase with an unreadable body (C11)", () => {
+  it("setup unlocks with the key it generated when the 2xx body is unreadable", async () => {
+    const { fetchMock, store } = makeFetchEnv(null);
+    const baseHandler = fetchMock.getMockImplementation();
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (!baseHandler) throw new Error("fetch env has no base handler");
+      const res = await baseHandler(url, init);
+      return url === "/api/vault/setup" ? { ...res, json: unreadableBody } : res;
+    }) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await result.current.setup(PASSPHRASE);
+    });
+
+    const key = result.current.encryptionKey;
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    if (!key || !store.vault) throw new Error("setup did not install a key");
+    expect(await verifyKey(key, store.vault.verificationArtifact)).toBe(true);
+  }, 30_000);
+
+  it("setup throws 'Setup failed' when the error body is unreadable", async () => {
+    globalThis.fetch = vi.fn(async (url: string) => {
+      if (url === "/api/vault/status") {
+        return { ok: true, json: async () => ({ setupRequired: true }) };
+      }
+      if (url === "/api/vault/setup") {
+        return { ok: false, status: 502, json: unreadableBody };
+      }
+      return { ok: false, status: 404, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    let caught: unknown;
+    await act(async () => {
+      try {
+        await result.current.setup(PASSPHRASE);
+      } catch (e) {
+        caught = e;
+      }
+    });
+
+    expect(caught).toBeInstanceOf(Error);
+    expect((caught as Error).message).toBe("Setup failed");
+    expect(result.current.encryptionKey).toBeNull();
+  }, 30_000);
+
+  it("changePassphrase adopts the wrap it sent when the 2xx body is unreadable", async () => {
+    const NEW_PASSPHRASE = "a different long passphrase";
+    const { fetchMock } = makeFetchEnv(null);
+    const baseHandler = fetchMock.getMockImplementation();
+    const sent: { accountSalt?: string } = {};
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/vault/change-passphrase") {
+        Object.assign(sent, JSON.parse(init?.body as string));
+        return { ok: true, json: unreadableBody };
+      }
+      if (!baseHandler) throw new Error("fetch env has no base handler");
+      return baseHandler(url, init);
+    }) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await result.current.setup(PASSPHRASE);
+    });
+    let effects: unknown;
+    await act(async () => {
+      effects = await result.current.changePassphrase(PASSPHRASE, NEW_PASSPHRASE);
+    });
+
+    expect(effects).toEqual({ invalidationFailed: false });
+    expect(toHex(result.current.getAccountSalt())).toBe(sent.accountSalt);
+    let newOk = false;
+    await act(async () => {
+      newOk = await result.current.verifyPassphrase(NEW_PASSPHRASE);
+    });
+    expect(newOk).toBe(true);
+  }, 60_000);
+});
+
+describe("VaultProvider — unlockWithPasskey verify body (C11)", () => {
+  /**
+   * An unlocked-then-locked vault whose secret key is PRF-wrapped under
+   * `prfOutput`; the WebAuthn ceremony (the browser boundary) is stubbed to
+   * return a copy of it, and the verify POST answers with `verifyJson`.
+   */
+  async function setUpPasskeyUnlock(verifyJson: (prf: object) => () => Promise<unknown>) {
+    const { fetchMock } = makeFetchEnv(null);
+    const baseHandler = fetchMock.getMockImplementation();
+    const state: { prf: object } = { prf: {} };
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/webauthn/authenticate/options") {
+        return { ok: true, json: async () => ({ options: {}, challengeId: "c1", prfSalt: "aa".repeat(32) }) };
+      }
+      if (url === "/api/webauthn/authenticate/verify") {
+        return { ok: true, json: verifyJson(state.prf) };
+      }
+      if (!baseHandler) throw new Error("fetch env has no base handler");
+      return baseHandler(url, init);
+    }) as unknown as typeof fetch;
+
+    const hook = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await hook.result.current.setup(PASSPHRASE);
+    });
+    const secretKey = hook.result.current.getSecretKey();
+    if (!secretKey) throw new Error("setup left no secret key");
+    const prfBytes = new Uint8Array(32).fill(0x3c);
+    const wrapped = await wrapSecretKeyWithPrf(secretKey, prfBytes);
+    state.prf = {
+      prfEncryptedSecretKey: wrapped.ciphertext,
+      prfSecretKeyIv: wrapped.iv,
+      prfSecretKeyAuthTag: wrapped.authTag,
+    };
+    const ceremonyOutput = new Uint8Array(prfBytes);
+    vi.spyOn(webauthnClient, "startPasskeyAuthentication").mockResolvedValue({
+      responseJSON: { id: "cred-1" },
+      prfOutput: ceremonyOutput,
+    } as Awaited<ReturnType<typeof webauthnClient.startPasskeyAuthentication>>);
+    act(() => {
+      hook.result.current.lock();
+    });
+    return { result: hook.result, ceremonyOutput };
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("unlocks from a readable verify body carrying the PRF wrapping", async () => {
+    const { result } = await setUpPasskeyUnlock((prf) => async () => ({ verified: true, prf }));
+
+    let ok = false;
+    await act(async () => {
+      ok = await result.current.unlockWithPasskey();
+    });
+
+    expect(ok).toBe(true);
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+  }, 60_000);
+
+  it("stays locked and zeroizes the PRF output when the verify body is unreadable", async () => {
+    const { result, ceremonyOutput } = await setUpPasskeyUnlock(() => unreadableBody);
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.unlockWithPasskey();
+    });
+
+    expect(ok).toBe(false);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(ceremonyOutput.every((b) => b === 0)).toBe(true);
+  }, 60_000);
+
+  it.each([
+    [
+      "PRF fields of the wrong type",
+      () => async () => ({
+        verified: true,
+        prf: { prfEncryptedSecretKey: 1, prfSecretKeyIv: 2, prfSecretKeyAuthTag: 3 },
+      }),
+    ],
+    ["a truthy non-boolean verified", (prf: object) => async () => ({ verified: "yes", prf })],
+  ])("refuses the verify body before unwrapping when it has %s", async (_label, verifyJson) => {
+    const { result, ceremonyOutput } = await setUpPasskeyUnlock(verifyJson);
+    const unwrapSpy = vi.spyOn(webauthnClient, "unwrapSecretKeyWithPrf");
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.unlockWithPasskey();
+    });
+
+    expect(ok).toBe(false);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(ceremonyOutput.every((b) => b === 0)).toBe(true);
+    expect(unwrapSpy).not.toHaveBeenCalled();
+  }, 60_000);
 });

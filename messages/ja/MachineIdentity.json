@@ -52,6 +52,7 @@
   "tokenNeverUsed": "未使用",
   "tokenNeverExpires": "無期限",
   "tokenCreated": "トークンを発行しました",
+  "tokenCreatedSecretUnavailable": "トークンは作成されましたが、表示できませんでした。このトークンを取り消して、新しく作成してください。",
   "tokenRevoked2": "トークンを取り消しました",
   "tokenCreateFailed": "トークンの発行に失敗しました",
   "tokenRevokeFailed": "トークンの取り消しに失敗しました",
@@ -81,6 +82,7 @@
   "mcpAllowedScopes": "許可スコープ",
   "mcpIsActive": "有効",
   "mcpCreated": "MCP クライアントを登録しました",
+  "mcpCreatedSecretUnavailable": "MCP クライアントは登録されましたが、シークレットを表示できませんでした。このクライアントを削除して、もう一度登録してください。",
   "mcpUpdated": "MCP クライアントを更新しました",
   "mcpDeleted": "MCP クライアントを削除しました",
   "mcpDeleteConfirm": "MCP クライアント「{name}」を削除しますか？",
@@ -132,6 +134,7 @@
   "arJitToken": "ジャストインタイム（JIT）アクセストークン",
   "arJitTokenWarning": "このトークンは再表示できません。今すぐコピーしてください。",
   "arJitTokenTtl": "このトークンは承認されたスコープの TTL が経過すると無効になります。",
+  "arJitTokenUnavailable": "リクエストは承認されましたが、アクセストークンを表示できませんでした。サービスアカウントのトークン一覧からこのトークンを取り消し、新しいリクエストを承認してください。",
   "arCreate": "新規リクエスト",
   "arCreateTitle": "アクセスリクエストの作成",
   "arCreated": "アクセスリクエストを作成しました",
@@ -214,6 +217,7 @@
     "revokeAllTitle": "すべての接続を取り消しますか？",
     "revokeAllDescription": "すべてのアクティブなMCP接続が取り消されます。接続中のエージェントは即座にアクセスを失います。",
     "revokeAllSuccess": "すべての接続を取り消しました（{count}件）",
+    "revokeAllDone": "すべての接続を取り消しました",
     "revokeAllError": "接続の取り消しに失敗しました。"
   }
 }

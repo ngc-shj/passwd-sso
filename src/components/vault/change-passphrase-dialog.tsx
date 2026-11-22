@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { useVault } from "@/lib/vault/vault-context";
+import { useVault, VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
 import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,13 @@ export function ChangePassphraseDialog({
       }
       handleOpenChange(false);
     } catch (err: unknown) {
+      if (err instanceof VaultChangeOutcomeUnknownError) {
+        // The vault is now locked, which unmounts this dialog: a persistent
+        // toast is the only place the user still sees what happened.
+        toast.error(t("changePassphraseOutcomeUnknown"), { duration: Infinity });
+        handleOpenChange(false);
+        return;
+      }
       const apiErr = err as { error?: string } | undefined;
       const errorCode = apiErr?.error;
 

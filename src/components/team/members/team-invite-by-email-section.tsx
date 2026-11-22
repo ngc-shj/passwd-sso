@@ -17,15 +17,10 @@ import { Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { readNonEmptyStringField } from "@/lib/http/read-body-field";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { COPY_OUTCOME, copySecretToClipboard } from "@/lib/clipboard/copy-secret";
-
-function readToken(data: unknown): string | null {
-  if (typeof data !== "object" || data === null || !("token" in data)) return null;
-  const { token } = data;
-  return typeof token === "string" && token !== "" ? token : null;
-}
 
 interface Props {
   teamId: string;
@@ -72,12 +67,7 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
       setInvEmail("");
       onSuccess();
 
-      let token: string | null;
-      try {
-        token = readToken(await res.json());
-      } catch {
-        token = null;
-      }
+      const token = readNonEmptyStringField(await parseJsonBodyOnce(res), "token");
       if (!token) {
         toast.warning(t("invitedLinkUnavailable"));
         return;

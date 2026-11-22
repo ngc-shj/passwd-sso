@@ -26,7 +26,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { toastApiError } from "@/lib/http/toast-api-error";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { useTeamVault } from "@/lib/team/team-vault-context";
 import { ItemKeyUpgradeRequiredError } from "@/lib/team/team-vault-core";
@@ -61,6 +61,18 @@ interface TeamAttachmentSectionProps {
   attachments: TeamAttachmentMeta[];
   onAttachmentsChange: (attachments: TeamAttachmentMeta[]) => void;
   readOnly?: boolean;
+}
+
+function isTeamAttachmentMeta(value: unknown): value is TeamAttachmentMeta {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.filename === "string" &&
+    typeof v.contentType === "string" &&
+    typeof v.sizeBytes === "number" &&
+    typeof v.createdAt === "string"
+  );
 }
 
 function formatFileSize(bytes: number): string {
@@ -164,9 +176,18 @@ export function TeamAttachmentSection({
         return;
       }
 
-      const newAttachment: TeamAttachmentMeta = await res.json();
-      onAttachmentsChange([newAttachment, ...attachments]);
+      // The attachment exists from here on: nothing below may be reported as a
+      // failed upload.
       toast.success(t("uploaded"));
+      const newAttachment = await parseJsonBodyOnce(res);
+      if (isTeamAttachmentMeta(newAttachment)) {
+        onAttachmentsChange([newAttachment, ...attachments]);
+        return;
+      }
+      // The created row could not be read: reload the list instead.
+      const listRes = await fetchApi(apiPath.teamPasswordAttachments(scopedId, entryId)).catch(() => null);
+      const list = listRes?.ok ? await parseJsonBodyOnce(listRes) : null;
+      if (Array.isArray(list)) onAttachmentsChange(list.filter(isTeamAttachmentMeta));
     } catch (e) {
       if (e instanceof TeamEntryUpgradeError && e.response) {
         await toastApiError(e.response, tApi);

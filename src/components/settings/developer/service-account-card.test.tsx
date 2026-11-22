@@ -688,6 +688,96 @@ describe("ServiceAccountCard", () => {
     ).not.toBeInTheDocument();
   });
 
+  describe("when the created token's response body cannot be read", () => {
+    const activeSa = {
+      id: "sa-active",
+      name: "active-sa",
+      description: null,
+      isActive: true,
+      createdAt: "2025-01-01T00:00:00Z",
+    };
+
+    function setupUnreadableTokenCreate() {
+      setupFetchAccounts([activeSa]);
+      const listOrOther = mockFetch.getMockImplementation();
+      mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+        if (init?.method === "POST" && url.includes("/tokens")) {
+          return Promise.resolve({
+            ok: true,
+            status: 201,
+            json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+          });
+        }
+        return listOrOther?.(url, init);
+      });
+    }
+
+    async function submitTokenCreate() {
+      await act(async () => {
+        render(<ServiceAccountCard />);
+      });
+      await screen.findByText("active-sa");
+      await expandSa("active-sa");
+      const tokenBtn = screen
+        .getAllByRole("button")
+        .find((b) => b.textContent?.includes("createToken"));
+      if (!tokenBtn) throw new Error("createToken button not rendered");
+      await act(async () => {
+        fireEvent.click(tokenBtn);
+      });
+      fireEvent.change(screen.getByPlaceholderText("tokenNamePlaceholder"), {
+        target: { value: "my-token" },
+      });
+      fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+      const dateInput = screen.getByDisplayValue("");
+      fireEvent.change(dateInput, { target: { value: dateInput.getAttribute("min") } });
+      const submit = screen
+        .getAllByRole("button")
+        .find((b) => b.textContent === "create" && !b.hasAttribute("disabled"));
+      if (!submit) throw new Error("create button not rendered");
+      await act(async () => {
+        fireEvent.click(submit);
+      });
+    }
+
+    const tokenListCalls = () =>
+      mockFetch.mock.calls.filter(
+        ([url, init]) => String(url).includes("/tokens") && (!init?.method || init.method === "GET"),
+      );
+
+    it("says the token was created but cannot be shown", async () => {
+      setupUnreadableTokenCreate();
+      await submitTokenCreate();
+      expect(await screen.findByText("tokenCreatedSecretUnavailable")).toBeInTheDocument();
+      expect(mockToast.error).not.toHaveBeenCalled();
+    });
+
+    it("still completes the creation (success toast and token list refresh)", async () => {
+      setupUnreadableTokenCreate();
+      await submitTokenCreate();
+      await screen.findByText("tokenCreatedSecretUnavailable");
+      expect(mockToast.success).toHaveBeenCalledWith("tokenCreated");
+      // Once when the detail panel opened, once after the creation.
+      expect(tokenListCalls()).toHaveLength(2);
+    });
+
+    it("shows no secret and offers nothing to copy", async () => {
+      setupUnreadableTokenCreate();
+      await submitTokenCreate();
+      await screen.findByText("tokenCreatedSecretUnavailable");
+      expect(screen.queryByText("tokenSecret")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("copy-button")).not.toBeInTheDocument();
+    });
+
+    it("shows the secret with its copy button when the body is readable", async () => {
+      setupFetchAccounts([activeSa]);
+      await submitTokenCreate();
+      expect(await screen.findByDisplayValue("sa_plaintext_token_value")).toBeInTheDocument();
+      expect(screen.getByTestId("copy-button")).toHaveAttribute("data-value", "sa_plaintext_token_value");
+      expect(screen.queryByText("tokenCreatedSecretUnavailable")).not.toBeInTheDocument();
+    });
+  });
+
   it("opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned on token create", async () => {
     mockFetch.mockImplementation((url: string, init?: RequestInit) => {
       if (!init?.method || init.method === "GET") {

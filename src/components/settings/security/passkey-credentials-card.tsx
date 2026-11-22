@@ -26,7 +26,8 @@ import { toast } from "sonner";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { readPasskeyOptions } from "@/lib/auth/webauthn/passkey-response";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
@@ -71,6 +72,25 @@ export function isNonDiscoverable(cred: Pick<Credential, "discoverable" | "devic
   return cred.discoverable !== null
     ? !cred.discoverable
     : (cred.deviceType === "singleDevice" && !cred.backedUp);
+}
+
+/** The discoverability fields of a registration response, or null when they are not there. */
+function readDiscoverability(
+  body: unknown,
+): Pick<Credential, "discoverable" | "deviceType" | "backedUp"> | null {
+  if (typeof body !== "object" || body === null) return null;
+  if (!("discoverable" in body) || !("deviceType" in body) || !("backedUp" in body)) return null;
+  const { discoverable, deviceType, backedUp } = body;
+  if (discoverable !== null && typeof discoverable !== "boolean") return null;
+  if (typeof deviceType !== "string" || typeof backedUp !== "boolean") return null;
+  return { discoverable, deviceType, backedUp };
+}
+
+/** Rebootstrap options that carry the server-built PRF extension (`extensions.prf`). */
+function hasPrfExtension(options: unknown): options is Record<string, unknown> {
+  if (typeof options !== "object" || options === null || !("extensions" in options)) return false;
+  const { extensions } = options;
+  return typeof extensions === "object" && extensions !== null && "prf" in extensions && !!extensions.prf;
 }
 
 function CredentialIcon({ transports }: { transports: string[] }) {
@@ -206,10 +226,15 @@ export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardP
         return;
       }
 
-      const { options, challengeId, prfSalt } = await optionsRes.json();
+      const registerOptions = readPasskeyOptions(await parseJsonBodyOnce(optionsRes));
+      if (!registerOptions) {
+        toast.error(t("registerError"));
+        return;
+      }
+      const { options, challengeId, prfSalt } = registerOptions;
 
       // 2. Start WebAuthn registration with PRF
-      const reg = await startPasskeyRegistration(options, prfSalt ?? undefined);
+      const reg = await startPasskeyRegistration(options, prfSalt);
       const responseJSON = reg.responseJSON;
       prfOutput = reg.prfOutput;
 
@@ -255,30 +280,32 @@ export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardP
       });
 
       if (verifyRes.ok) {
-        const result = await verifyRes.json();
+        // The credential exists from here on: nothing below may be reported
+        // as a failed registration.
         toast.success(t("registerSuccess"));
-
-        // Use reg.prfOutput (NOT the local prfOutput) — the local was nulled
-        // after eager zeroize on the success path; reg captures the original
-        // presence for warning UX.
-        if (isNonDiscoverable(result) && !reg.prfOutput) {
-          toast.warning(t("nonDiscoverableNonPrfWarning"));
-        } else if (!reg.prfOutput) {
-          toast.warning(t("prfNotSupportedWarning"));
-        }
-
         if (onRegistered) {
           await onRegistered();
         } else {
           fetchCredentials();
+        }
+
+        // Use reg.prfOutput (NOT the local prfOutput) — the local was nulled
+        // after eager zeroize on the success path; reg captures the original
+        // presence for warning UX. An unreadable body leaves discoverability
+        // unknown, so only the PRF warning can be given.
+        const result = readDiscoverability(await parseJsonBodyOnce(verifyRes));
+        if (result && isNonDiscoverable(result) && !reg.prfOutput) {
+          toast.warning(t("nonDiscoverableNonPrfWarning"));
+        } else if (!reg.prfOutput) {
+          toast.warning(t("prfNotSupportedWarning"));
         }
       } else {
         // A clone, so the body is still readable for the branches below.
         if (await handleStepUpError(verifyRes.clone(), inlineReauth.triggerOnStaleError, { kind: "register" })) {
           return;
         }
-        const err = await verifyRes.json().catch(() => ({}));
-        if (err.error === "PIN_LENGTH_POLICY_NOT_SATISFIED") {
+        const err = await readApiErrorBody(verifyRes);
+        if (err?.error === "PIN_LENGTH_POLICY_NOT_SATISFIED") {
           toast.error(t("pinPolicyError"));
         } else {
           toast.error(t("registerError"));
@@ -378,7 +405,12 @@ export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardP
         return;
       }
 
-      const { options, challengeId, prfSalt } = await optionsRes.json();
+      const testOptions = readPasskeyOptions(await parseJsonBodyOnce(optionsRes));
+      if (!testOptions) {
+        toast.error(t("testError"));
+        return;
+      }
+      const { options, challengeId, prfSalt } = testOptions;
 
       // 2. Authenticate (with PRF if available)
       const { responseJSON, prfOutput: authPrfOutput } = await startPasskeyAuthentication(
@@ -438,7 +470,9 @@ export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardP
         toast.error(t("rebootstrapError"));
         return;
       }
-      const { options } = await optsRes.json();
+      const optsBody = await parseJsonBodyOnce(optsRes);
+      const options =
+        typeof optsBody === "object" && optsBody !== null && "options" in optsBody ? optsBody.options : null;
 
       // A02-8 F2: the PRF rebootstrap options endpoint now embeds the
       // server-built PRF extension (`options.extensions.prf`) directly. The
@@ -447,7 +481,7 @@ export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardP
       // /authenticate/options returns prfSalt:null, even though
       // evalByCredential is populated on the rebootstrap options). Just
       // pass the options through; the browser client picks up extensions.prf.
-      if (!options?.extensions?.prf) {
+      if (!hasPrfExtension(options)) {
         // PRF unavailable on the server (WEBAUTHN_PRF_SECRET unset).
         toast.error(t("rebootstrapError"));
         return;
@@ -488,8 +522,8 @@ export function PasskeyCredentialsCard({ onRegistered }: PasskeyCredentialsCardP
         toast.success(t("rebootstrapSuccess"));
         fetchCredentials();
       } else {
-        const body = await writeRes.json().catch(() => ({}));
-        if (body.error === "CONFLICT") {
+        const body = await readApiErrorBody(writeRes);
+        if (body?.error === "CONFLICT") {
           // keyVersion drifted (concurrent rotation). Telling the user to
           // retry once vault is fresh is the cleanest recovery.
           toast.error(t("rebootstrapStaleKeyVersion"));

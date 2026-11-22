@@ -131,7 +131,7 @@ function setupCredentialsList(creds: unknown[]) {
       return Promise.resolve({
         ok: true,
         status: 200,
-        json: () => Promise.resolve({ options: { foo: "bar" }, prfSalt: "salt" }),
+        json: () => Promise.resolve({ options: { foo: "bar" }, challengeId: "ch-reg", prfSalt: "salt" }),
       });
     }
     // POST verify
@@ -347,7 +347,7 @@ describe("PasskeyCredentialsCard", () => {
           ok: true,
           status: 200,
           json: () =>
-            Promise.resolve({ options: {}, prfSalt: "salt" }),
+            Promise.resolve({ options: {}, challengeId: "ch-reg", prfSalt: "salt" }),
         });
       }
       if (u.includes("/register/verify")) {
@@ -1108,6 +1108,31 @@ describe("PasskeyCredentialsCard credential actions", () => {
       await clickRegister();
 
       await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("registerError"));
+    });
+
+    it("reports a registration whose verify body cannot be read as registered", async () => {
+      route([], {
+        "POST /api/webauthn/register/options": { ok: true, body: { options: {}, challengeId: "c" } },
+      });
+      const routed = mockFetch.getMockImplementation();
+      mockFetch.mockImplementation((url: string, init?: RequestInit) =>
+        init?.method === "POST" && String(url) === "/api/webauthn/register/verify"
+          ? Promise.resolve({
+              ok: true,
+              status: 201,
+              json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+            })
+          : routed?.(url, init),
+      );
+      mockStartReg.mockResolvedValue({ responseJSON: { id: "r" }, prfOutput: null });
+
+      await clickRegister();
+
+      await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("registerSuccess"));
+      expect(mockToast.error).not.toHaveBeenCalled();
+      // Discoverability is unknown without the body: only the PRF warning applies.
+      await waitFor(() => expect(mockToast.warning).toHaveBeenCalledWith("prfNotSupportedWarning"));
+      await waitFor(() => expect(callsTo("GET", "/api/webauthn/credentials").length).toBeGreaterThan(1));
     });
 
     it("warns that a non-discoverable passkey without PRF cannot sign in or unlock", async () => {

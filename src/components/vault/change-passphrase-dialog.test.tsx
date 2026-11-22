@@ -17,15 +17,18 @@ const SENTINEL = "SENTINEL_NOT_A_SECRET_ZJYK";
 
 const { mockChangePassphrase, mockToast } = vi.hoisted(() => ({
   mockChangePassphrase: vi.fn(),
-  mockToast: { success: vi.fn(), warning: vi.fn() },
+  mockToast: { success: vi.fn(), warning: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("@/lib/vault/vault-context", () => ({
+vi.mock("@/lib/vault/vault-context", async (importOriginal) => ({
   useVault: () => ({ changePassphrase: mockChangePassphrase }),
+  // The real class: the dialog branches on `instanceof`.
+  VaultChangeOutcomeUnknownError: (await importOriginal<typeof import("@/lib/vault/vault-context")>())
+    .VaultChangeOutcomeUnknownError,
 }));
 
 vi.mock("@/lib/http/api-error-codes", () => ({
@@ -76,6 +79,7 @@ vi.mock("@/components/ui/label", () => ({
 }));
 
 import { ChangePassphraseDialog } from "./change-passphrase-dialog";
+import { VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
 
 describe("ChangePassphraseDialog", () => {
   let onOpenChange: ReturnType<typeof vi.fn<(open: boolean) => void>>;
@@ -187,6 +191,21 @@ describe("ChangePassphraseDialog", () => {
     await waitFor(() => {
       expect(screen.getByText("apiErr:WEIRD_CODE")).toBeInTheDocument();
     });
+  });
+
+  it("closes with a persistent locked-vault notice when the change's outcome is unknown", async () => {
+    mockChangePassphrase.mockRejectedValue(new VaultChangeOutcomeUnknownError());
+
+    render(<ChangePassphraseDialog open={true} onOpenChange={onOpenChange} />);
+    fillForm("oldpass", "longenoughpass", "longenoughpass");
+    fireEvent.click(screen.getByRole("button", { name: "changePassphraseButton" }));
+
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+    expect(mockToast.error).toHaveBeenCalledWith("changePassphraseOutcomeUnknown", { duration: Infinity });
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(screen.queryByText("changePassphraseFailed")).toBeNull();
   });
 
   it("falls back to generic failure when error has no error code", async () => {

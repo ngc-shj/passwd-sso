@@ -1,14 +1,16 @@
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { startPasskeyAuthentication } from "@/lib/auth/webauthn/webauthn-client";
+import { readPasskeyOptions } from "@/lib/auth/webauthn/passkey-response";
 
-type ReauthOptionsResponse = {
-  challengeId: string;
-  options: Record<string, unknown>;
-};
-
+/**
+ * `verifiedAt` is null when the server accepted the assertion but its response
+ * body could not be read: the session's verification timestamp was refreshed
+ * all the same, so the reauth still succeeded.
+ */
 export type PasskeyReauthResult =
-  | { ok: true; verifiedAt: string }
+  | { ok: true; verifiedAt: string | null }
   | { ok: false; error: string };
 
 /**
@@ -23,8 +25,13 @@ export async function reauthenticateWithPasskey(): Promise<PasskeyReauthResult> 
     return { ok: false, error: await readErrorCode(optionsRes, "PASSKEY_REAUTH_FAILED") };
   }
 
-  const { challengeId, options } =
-    (await optionsRes.json()) as ReauthOptionsResponse;
+  // Without the challenge there is no ceremony to run: an unreadable body
+  // fails like any other options failure.
+  const optionsBody = readPasskeyOptions(await parseJsonBodyOnce(optionsRes));
+  if (!optionsBody) {
+    return { ok: false, error: "PASSKEY_REAUTH_FAILED" };
+  }
+  const { challengeId, options } = optionsBody;
 
   let responseJSON: Record<string, unknown>;
   try {
@@ -48,14 +55,14 @@ export async function reauthenticateWithPasskey(): Promise<PasskeyReauthResult> 
     return { ok: false, error: await readErrorCode(verifyRes, "PASSKEY_REAUTH_FAILED") };
   }
 
-  const body = (await verifyRes.json()) as { verifiedAt: string };
-  return { ok: true, verifiedAt: body.verifiedAt };
+  const body = (await parseJsonBodyOnce(verifyRes)) as { verifiedAt?: unknown } | null;
+  return { ok: true, verifiedAt: typeof body?.verifiedAt === "string" ? body.verifiedAt : null };
 }
 
 async function readErrorCode(
   response: Response,
   fallback: string,
 ): Promise<string> {
-  const body = (await response.json().catch(() => ({}))) as { error?: string };
-  return body.error ?? fallback;
+  const body = await readApiErrorBody(response);
+  return body?.error ?? fallback;
 }

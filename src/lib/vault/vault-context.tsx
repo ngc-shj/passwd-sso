@@ -45,9 +45,11 @@ import {
 import { API_PATH, apiPath, VAULT_STATUS, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { fetchApi } from "@/lib/url-helpers";
 import { hexDecode, hexEncode } from "../crypto/crypto-utils";
 import { takePrf } from "@/lib/auth/prf-handoff";
+import { readPrfData } from "@/lib/auth/webauthn/passkey-response";
 import {
   startPasskeyAuthentication,
   unwrapSecretKeyWithPrf,
@@ -55,6 +57,7 @@ import {
 import { AutoLockProvider } from "./auto-lock-context";
 import { EmergencyAccessProvider, confirmPendingEmergencyGrants } from "../emergency-access/emergency-access-context";
 import { MS_PER_SECOND } from "@/lib/constants/time";
+import { PRE_ROUTE_AND_PRE_TX_REFUSALS } from "./pre-commit-refusals";
 
 /** Error thrown by `unlock()` when the server rejects the request with a specific error code. */
 export class VaultUnlockError extends Error {
@@ -66,6 +69,48 @@ export class VaultUnlockError extends Error {
     this.name = "VaultUnlockError";
   }
 }
+
+/**
+ * Thrown by `changePassphrase` / `rotateKey` when the server may or may not
+ * have committed the key change and the client cannot tell which. The vault
+ * has already been locked: keeping the pre-change key material would leave
+ * the old passphrase unlocking a committed passphrase change, or keep writing
+ * under a key whose rows a committed rotation replaced. The next unlock reads
+ * the authoritative wrap from the server.
+ */
+export class VaultChangeOutcomeUnknownError extends Error {
+  constructor() {
+    super("VAULT_CHANGE_OUTCOME_UNKNOWN");
+    this.name = "VaultChangeOutcomeUnknownError";
+  }
+}
+
+// Codes that prove a key-changing POST was refused before anything committed:
+// the shared PRE_ROUTE_AND_PRE_TX_REFUSALS plus each route's own.
+//
+// change-passphrase: VERIFIER_NOT_SET (pre-tx); VAULT_WRAP_CONFLICT (the CAS
+// matched no row, so nothing was written). Its only post-commit refusal is
+// SESSION_INVALIDATE_FAILED, which the caller handles as committed.
+// rotate-key: ATTACHMENT_MIGRATION_INCOMPLETE, ATTACHMENT_KEY_MANIFEST_MISMATCH,
+// ATTACHMENT_INCONSISTENT_VERSION, KEY_VERSION_MISMATCH, ENTRY_COUNT_MISMATCH
+// are mapped from errors thrown inside the transaction, which roll it back.
+// Deliberately absent: INTERNAL_ERROR. rotate-key also returns it for two
+// in-transaction errors, but a 500 does not tell the client the write rolled
+// back, and treating it as unknown costs only one unlock.
+const CHANGE_PASSPHRASE_REFUSALS: ReadonlySet<string> = new Set([
+  ...PRE_ROUTE_AND_PRE_TX_REFUSALS,
+  API_ERROR.VERIFIER_NOT_SET,
+  API_ERROR.VAULT_WRAP_CONFLICT,
+]);
+
+const ROTATE_KEY_REFUSALS: ReadonlySet<string> = new Set([
+  ...PRE_ROUTE_AND_PRE_TX_REFUSALS,
+  API_ERROR.ATTACHMENT_MIGRATION_INCOMPLETE,
+  API_ERROR.ATTACHMENT_KEY_MANIFEST_MISMATCH,
+  API_ERROR.ATTACHMENT_INCONSISTENT_VERSION,
+  API_ERROR.KEY_VERSION_MISMATCH,
+  API_ERROR.ENTRY_COUNT_MISMATCH,
+]);
 
 /**
  * Parse a non-OK response from /api/vault/unlock/data and throw
@@ -94,8 +139,8 @@ export async function notifyUnlockFailure(): Promise<void> {
     body: JSON.stringify({ authHash: "0".repeat(64) }),
   });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    if (body.error) {
+    const body = await readApiErrorBody(res);
+    if (body) {
       throw new VaultUnlockError(body.error, body.lockedUntil);
     }
   }
@@ -123,6 +168,15 @@ export interface RotationEffects {
   cacheTombstoneFailures: number | null;
   invalidationFailed: boolean;
 }
+
+/**
+ * `rotateKey`'s result when the server committed the rotation but its response
+ * body could not be read. The client has already switched to the new key (it
+ * sent every value it holds), but the rotation's side-effects are unknown — in
+ * particular whether the account's other sessions and tokens were revoked — so
+ * the caller must say so rather than report a clean rotation.
+ */
+export const ROTATION_EFFECTS_UNAVAILABLE = "ROTATION_EFFECTS_UNAVAILABLE";
 
 /**
  * `invalidationFailed`: the server committed the new wrap but could not sign
@@ -156,7 +210,7 @@ interface VaultContextValue {
   rotateKey: (
     passphrase: string,
     onProgress?: (progress: { phase: "migrating" | "rewrapping" | "committing" | "entries" | "history", current: number, total: number }) => void,
-  ) => Promise<RotationEffects | null>;
+  ) => Promise<RotationEffects | typeof ROTATION_EFFECTS_UNAVAILABLE | null>;
   verifyPassphrase: (passphrase: string) => Promise<boolean>;
   getSecretKey: () => Uint8Array | null;
   getAccountSalt: () => Uint8Array | null;
@@ -369,76 +423,81 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const setup = useCallback(async (passphrase: string) => {
     // 1. Generate secret key and account salt
     const secretKey = generateSecretKey();
-    const accountSalt = generateAccountSalt();
+    let ecdhPrivBytes: Uint8Array | null = null;
+    try {
+      const accountSalt = generateAccountSalt();
 
-    // 2. Derive wrapping key from passphrase
-    const wrappingKey = await deriveWrappingKey(passphrase, accountSalt);
+      // 2. Derive wrapping key from passphrase
+      const wrappingKey = await deriveWrappingKey(passphrase, accountSalt);
 
-    // 3. Wrap (encrypt) the secret key
-    const wrappedKey = await wrapSecretKey(secretKey, wrappingKey);
+      // 3. Wrap (encrypt) the secret key
+      const wrappedKey = await wrapSecretKey(secretKey, wrappingKey);
 
-    // 4. Derive encryption key and auth key
-    const encKey = await deriveEncryptionKey(secretKey);
-    const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+      // 4. Derive encryption key and auth key
+      const encKey = await deriveEncryptionKey(secretKey);
+      const authKeyBytes = await deriveAuthKeyBytes(secretKey);
 
-    // 5. Compute auth hash for server verification
-    const authHash = await computeAuthHash(authKeyBytes);
+      // 5. Compute auth hash for server verification
+      const authHash = await computeAuthHash(authKeyBytes);
 
-    // 6. Create verification artifact
-    const artifact = await createVerificationArtifact(encKey);
+      // 6. Create verification artifact
+      const artifact = await createVerificationArtifact(encKey);
 
-    // 7. Compute passphrase verifier for server-side identity confirmation
-    const verifierHash = await computePassphraseVerifier(passphrase, accountSalt);
+      // 7. Compute passphrase verifier for server-side identity confirmation
+      const verifierHash = await computePassphraseVerifier(passphrase, accountSalt);
 
-    // 8. Generate ECDH key pair and encrypt private key with domain-separated ecdhWrappingKey
-    const ecdhKeyPair = await generateECDHKeyPair();
-    const ecdhPubJwk = await exportPublicKey(ecdhKeyPair.publicKey);
-    const ecdhPrivBytes = await exportPrivateKey(ecdhKeyPair.privateKey);
-    const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
-    const ecdhEncrypted = await encryptBinary(
-      ecdhPrivBytes.buffer.slice(
-        ecdhPrivBytes.byteOffset,
-        ecdhPrivBytes.byteOffset + ecdhPrivBytes.byteLength,
-      ) as ArrayBuffer,
-      ecdhWrapKey,
-    );
+      // 8. Generate ECDH key pair and encrypt private key with domain-separated ecdhWrappingKey
+      const ecdhKeyPair = await generateECDHKeyPair();
+      const ecdhPubJwk = await exportPublicKey(ecdhKeyPair.publicKey);
+      ecdhPrivBytes = await exportPrivateKey(ecdhKeyPair.privateKey);
+      const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
+      const ecdhEncrypted = await encryptBinary(
+        ecdhPrivBytes.buffer.slice(
+          ecdhPrivBytes.byteOffset,
+          ecdhPrivBytes.byteOffset + ecdhPrivBytes.byteLength,
+        ) as ArrayBuffer,
+        ecdhWrapKey,
+      );
 
-    // 9. Send to server
-    const res = await fetchApi(API_PATH.VAULT_SETUP, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        encryptedSecretKey: wrappedKey.ciphertext,
-        secretKeyIv: wrappedKey.iv,
-        secretKeyAuthTag: wrappedKey.authTag,
-        accountSalt: hexEncode(accountSalt),
-        authHash,
-        verifierHash,
-        verificationArtifact: artifact,
-        ecdhPublicKey: ecdhPubJwk,
-        encryptedEcdhPrivateKey: hexEncode(ecdhEncrypted.ciphertext),
-        ecdhPrivateKeyIv: ecdhEncrypted.iv,
-        ecdhPrivateKeyAuthTag: ecdhEncrypted.authTag,
-      }),
-    });
+      // 9. Send to server
+      const res = await fetchApi(API_PATH.VAULT_SETUP, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          encryptedSecretKey: wrappedKey.ciphertext,
+          secretKeyIv: wrappedKey.iv,
+          secretKeyAuthTag: wrappedKey.authTag,
+          accountSalt: hexEncode(accountSalt),
+          authHash,
+          verifierHash,
+          verificationArtifact: artifact,
+          ecdhPublicKey: ecdhPubJwk,
+          encryptedEcdhPrivateKey: hexEncode(ecdhEncrypted.ciphertext),
+          ecdhPrivateKeyIv: ecdhEncrypted.iv,
+          ecdhPrivateKeyAuthTag: ecdhEncrypted.authTag,
+        }),
+      });
 
-    if (!res.ok) {
-      ecdhPrivBytes.fill(0);
-      const err = await res.json();
-      throw new Error(err.error || "Setup failed");
+      if (!res.ok) {
+        const err = await readApiErrorBody(res);
+        throw new Error(err?.error || "Setup failed");
+      }
+
+      // 10. Store secretKey, keyVersion, accountSalt, wrappedKey, ECDH keys, and encryption key in memory
+      secretKeyRef.current = new Uint8Array(secretKey);
+      commitKeyVersion(1);
+      accountSaltRef.current = accountSalt;
+      wrappedKeyRef.current = { ciphertext: wrappedKey.ciphertext, iv: wrappedKey.iv, authTag: wrappedKey.authTag };
+      ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivBytes);
+      ecdhPublicKeyJwkRef.current = ecdhPubJwk;
+      setEncryptionKey(encKey);
+      setVaultStatus(VAULT_STATUS.UNLOCKED);
+    } finally {
+      // The success path copied both into refs; a rejected or refused POST, or
+      // a throw while deriving, must not leave them in memory.
+      secretKey.fill(0);
+      ecdhPrivBytes?.fill(0);
     }
-
-    // 10. Store secretKey, keyVersion, accountSalt, wrappedKey, ECDH keys, and encryption key in memory
-    secretKeyRef.current = new Uint8Array(secretKey);
-    commitKeyVersion(1);
-    accountSaltRef.current = accountSalt;
-    wrappedKeyRef.current = { ciphertext: wrappedKey.ciphertext, iv: wrappedKey.iv, authTag: wrappedKey.authTag };
-    ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivBytes);
-    ecdhPublicKeyJwkRef.current = ecdhPubJwk;
-    ecdhPrivBytes.fill(0);
-    secretKey.fill(0);
-    setEncryptionKey(encKey);
-    setVaultStatus(VAULT_STATUS.UNLOCKED);
   }, [commitKeyVersion]);
 
   // ─── Unlock ───────────────────────────────────────────────────
@@ -511,8 +570,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       });
 
       if (!unlockRes.ok) {
-        const body = await unlockRes.json().catch(() => ({}));
-        if (body.error) {
+        const body = await readApiErrorBody(unlockRes);
+        if (body) {
           throw new VaultUnlockError(body.error, body.lockedUntil);
         }
         return false;
@@ -622,8 +681,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       if (!verifyRes.ok) return false;
 
-      const verifyData = await verifyRes.json();
-      if (!verifyData.verified || !verifyData.prf) {
+      // An unreadable body carries no PRF wrapping: the unlock fails like a
+      // verify that returned none.
+      const verifyData = await parseJsonBodyOnce(verifyRes);
+      const verified =
+        typeof verifyData === "object" && verifyData !== null &&
+        "verified" in verifyData && verifyData.verified === true;
+      const prfData = readPrfData(verifyData);
+      if (!verified || !prfData) {
         prfOutput.fill(0);
         return false;
       }
@@ -633,9 +698,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       try {
         secretKey = await unwrapSecretKeyWithPrf(
           {
-            ciphertext: verifyData.prf.prfEncryptedSecretKey,
-            iv: verifyData.prf.prfSecretKeyIv,
-            authTag: verifyData.prf.prfSecretKeyAuthTag,
+            ciphertext: prfData.prfEncryptedSecretKey,
+            iv: prfData.prfSecretKeyIv,
+            authTag: prfData.prfSecretKeyAuthTag,
           },
           prfOutput,
         );
@@ -664,8 +729,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       });
 
       if (!unlockRes.ok) {
-        const body = await unlockRes.json().catch(() => ({}));
-        if (body.error) {
+        const body = await readApiErrorBody(unlockRes);
+        if (body) {
           throw new VaultUnlockError(body.error, body.lockedUntil);
         }
         secretKey.fill(0);
@@ -792,8 +857,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       });
 
       if (!unlockRes.ok) {
-        const body = await unlockRes.json().catch(() => ({}));
-        if (body.error) {
+        const body = await readApiErrorBody(unlockRes);
+        if (body) {
           throw new VaultUnlockError(body.error, body.lockedUntil);
         }
         return false;
@@ -880,25 +945,35 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       );
 
       // 5. Send to server
-      const res = await fetchApi(API_PATH.VAULT_CHANGE_PASSPHRASE, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          currentVerifierHash,
-          encryptedSecretKey: rewrapped.ciphertext,
-          secretKeyIv: rewrapped.iv,
-          secretKeyAuthTag: rewrapped.authTag,
-          accountSalt: hexEncode(newAccountSalt),
-          newVerifierHash,
-        }),
-      });
+      let res: Response;
+      try {
+        res = await fetchApi(API_PATH.VAULT_CHANGE_PASSPHRASE, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            currentVerifierHash,
+            encryptedSecretKey: rewrapped.ciphertext,
+            secretKeyIv: rewrapped.iv,
+            secretKeyAuthTag: rewrapped.authTag,
+            accountSalt: hexEncode(newAccountSalt),
+            newVerifierHash,
+          }),
+        });
+      } catch {
+        lock();
+        throw new VaultChangeOutcomeUnknownError();
+      }
 
       // SESSION_INVALIDATE_FAILED is returned after the new wrap committed,
       // so it must still update the local refs below or they go stale.
       let invalidationFailed = false;
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
+        const err = await readApiErrorBody(res);
         if (err?.error !== API_ERROR.SESSION_INVALIDATE_FAILED) {
+          if (!err || !CHANGE_PASSPHRASE_REFUSALS.has(err.error)) {
+            lock();
+            throw new VaultChangeOutcomeUnknownError();
+          }
           throw err;
         }
         invalidationFailed = true;
@@ -913,7 +988,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       };
       return { invalidationFailed };
     },
-    []
+    [lock]
   );
 
   // ─── Rotate Key ───────────────────────────────────────────────
@@ -1070,8 +1145,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             },
           );
           if (!migrateRes.ok) {
-            const err = (await migrateRes.json().catch(() => ({}))) as { error?: string };
-            throw new Error(err.error ?? `MIGRATE_FAILED:${attId}`);
+            const err = await readApiErrorBody(migrateRes);
+            throw new Error(err?.error ?? `MIGRATE_FAILED:${attId}`);
           }
           legacyAttachmentsMigrated += 1;
           onProgress?.({ phase: "migrating", current: i + 1, total });
@@ -1090,226 +1165,249 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       // 4. Generate new secret key and derive new encryption key
       const newSecretKey = generateSecretKey();
-      const newEncKey = await deriveEncryptionKey(newSecretKey);
-      const newKeyVersion = oldKeyVersion + 1;
+      try {
+        const newEncKey = await deriveEncryptionKey(newSecretKey);
+        const newKeyVersion = oldKeyVersion + 1;
 
-      // 5. Re-encrypt entries: decrypt with OLD encryptionKey, re-encrypt with newEncKey
-      const userId = sessionUserId;
-      const totalEntries = entries.length;
-      const reencryptedEntries = [];
-      for (let i = 0; i < totalEntries; i++) {
-        const entry = entries[i];
-        onProgress?.({ phase: "entries", current: i, total: totalEntries });
+        // 5. Re-encrypt entries: decrypt with OLD encryptionKey, re-encrypt with newEncKey
+        const userId = sessionUserId;
+        const totalEntries = entries.length;
+        const reencryptedEntries = [];
+        for (let i = 0; i < totalEntries; i++) {
+          const entry = entries[i];
+          onProgress?.({ phase: "entries", current: i, total: totalEntries });
 
-        const blobAad = entry.aadVersion >= 1 && userId
-          ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.BLOB)
-          : undefined;
-        const overviewAad = entry.aadVersion >= 1 && userId
-          ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.OVERVIEW)
-          : undefined;
+          const blobAad = entry.aadVersion >= 1 && userId
+            ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.BLOB)
+            : undefined;
+          const overviewAad = entry.aadVersion >= 1 && userId
+            ? buildPersonalEntryAAD(userId, entry.id, VAULT_TYPE.OVERVIEW)
+            : undefined;
 
-        const decryptedBlob = await decryptData(
-          {
-            ciphertext: entry.encryptedBlob,
-            iv: entry.blobIv,
-            authTag: entry.blobAuthTag,
-          },
-          oldEncryptionKey,
-          blobAad,
-        );
-        const newBlob = await encryptData(decryptedBlob, newEncKey, blobAad);
+          const decryptedBlob = await decryptData(
+            {
+              ciphertext: entry.encryptedBlob,
+              iv: entry.blobIv,
+              authTag: entry.blobAuthTag,
+            },
+            oldEncryptionKey,
+            blobAad,
+          );
+          const newBlob = await encryptData(decryptedBlob, newEncKey, blobAad);
 
-        const decryptedOverview = await decryptData(
-          {
-            ciphertext: entry.encryptedOverview,
-            iv: entry.overviewIv,
-            authTag: entry.overviewAuthTag,
-          },
-          oldEncryptionKey,
-          overviewAad,
-        );
-        const newOverview = await encryptData(decryptedOverview, newEncKey, overviewAad);
+          const decryptedOverview = await decryptData(
+            {
+              ciphertext: entry.encryptedOverview,
+              iv: entry.overviewIv,
+              authTag: entry.overviewAuthTag,
+            },
+            oldEncryptionKey,
+            overviewAad,
+          );
+          const newOverview = await encryptData(decryptedOverview, newEncKey, overviewAad);
 
-        reencryptedEntries.push({
-          id: entry.id,
-          encryptedBlob: newBlob,
-          encryptedOverview: newOverview,
-          aadVersion: entry.aadVersion,
-        });
-      }
-      onProgress?.({ phase: "entries", current: totalEntries, total: totalEntries });
-
-      // 6. Re-encrypt history entries
-      const totalHistory = historyEntries.length;
-      const reencryptedHistory = [];
-      for (let i = 0; i < totalHistory; i++) {
-        const histEntry = historyEntries[i];
-        onProgress?.({ phase: "history", current: i, total: totalHistory });
-
-        // History blobs are verbatim snapshots of the entry blob, sealed with
-        // the entry AAD (PV "blob"). Re-encrypt under the same AAD so the
-        // rotated row stays decryptable by the history view.
-        const histAad = histEntry.aadVersion >= 1 && userId
-          ? buildPersonalEntryAAD(userId, histEntry.entryId, VAULT_TYPE.BLOB)
-          : undefined;
-
-        const decryptedBlob = await decryptData(
-          {
-            ciphertext: histEntry.encryptedBlob,
-            iv: histEntry.blobIv,
-            authTag: histEntry.blobAuthTag,
-          },
-          oldEncryptionKey,
-          histAad,
-        );
-        const newBlob = await encryptData(decryptedBlob, newEncKey, histAad);
-
-        reencryptedHistory.push({
-          id: histEntry.id,
-          encryptedBlob: newBlob,
-          aadVersion: histEntry.aadVersion,
-        });
-      }
-      onProgress?.({ phase: "history", current: totalHistory, total: totalHistory });
-
-      // 7. Rewrap mode-2 attachment CEKs with new encryption key
-      onProgress?.({ phase: "rewrapping", current: 0, total: currentRotationData.mode2Attachments.length });
-      const attachmentCekRewraps = [];
-      for (let i = 0; i < currentRotationData.mode2Attachments.length; i++) {
-        const att = currentRotationData.mode2Attachments[i];
-        if (
-          att.cekEncrypted == null ||
-          att.cekIv == null ||
-          att.cekAuthTag == null ||
-          att.cekKeyVersion == null ||
-          att.cekWrapAadVersion == null
-        ) {
-          // Inconsistent CEK data — skip; server will reject at ATTACHMENT_KEY_MANIFEST_MISMATCH
-          continue;
+          reencryptedEntries.push({
+            id: entry.id,
+            encryptedBlob: newBlob,
+            encryptedOverview: newOverview,
+            aadVersion: entry.aadVersion,
+          });
         }
-        // S3 defense: a server-side attacker with DB write access could flip
-        // cekWrapAadVersion below the floor; reject before AES-GCM unwrap so
-        // the client never accepts a downgraded format. Plan I8a.3 / S3.
-        if (att.cekWrapAadVersion < MIN_ACCEPTED_CEK_WRAP_AAD_VERSION) {
-          continue;
+        onProgress?.({ phase: "entries", current: totalEntries, total: totalEntries });
+
+        // 6. Re-encrypt history entries
+        const totalHistory = historyEntries.length;
+        const reencryptedHistory = [];
+        for (let i = 0; i < totalHistory; i++) {
+          const histEntry = historyEntries[i];
+          onProgress?.({ phase: "history", current: i, total: totalHistory });
+
+          // History blobs are verbatim snapshots of the entry blob, sealed with
+          // the entry AAD (PV "blob"). Re-encrypt under the same AAD so the
+          // rotated row stays decryptable by the history view.
+          const histAad = histEntry.aadVersion >= 1 && userId
+            ? buildPersonalEntryAAD(userId, histEntry.entryId, VAULT_TYPE.BLOB)
+            : undefined;
+
+          const decryptedBlob = await decryptData(
+            {
+              ciphertext: histEntry.encryptedBlob,
+              iv: histEntry.blobIv,
+              authTag: histEntry.blobAuthTag,
+            },
+            oldEncryptionKey,
+            histAad,
+          );
+          const newBlob = await encryptData(decryptedBlob, newEncKey, histAad);
+
+          reencryptedHistory.push({
+            id: histEntry.id,
+            encryptedBlob: newBlob,
+            aadVersion: histEntry.aadVersion,
+          });
+        }
+        onProgress?.({ phase: "history", current: totalHistory, total: totalHistory });
+
+        // 7. Rewrap mode-2 attachment CEKs with new encryption key
+        onProgress?.({ phase: "rewrapping", current: 0, total: currentRotationData.mode2Attachments.length });
+        const attachmentCekRewraps = [];
+        for (let i = 0; i < currentRotationData.mode2Attachments.length; i++) {
+          const att = currentRotationData.mode2Attachments[i];
+          if (
+            att.cekEncrypted == null ||
+            att.cekIv == null ||
+            att.cekAuthTag == null ||
+            att.cekKeyVersion == null ||
+            att.cekWrapAadVersion == null
+          ) {
+            // Inconsistent CEK data — skip; server will reject at ATTACHMENT_KEY_MANIFEST_MISMATCH
+            continue;
+          }
+          // S3 defense: a server-side attacker with DB write access could flip
+          // cekWrapAadVersion below the floor; reject before AES-GCM unwrap so
+          // the client never accepts a downgraded format. Plan I8a.3 / S3.
+          if (att.cekWrapAadVersion < MIN_ACCEPTED_CEK_WRAP_AAD_VERSION) {
+            continue;
+          }
+
+          // Unwrap CEK with old encryptionKey
+          const oldWrapAad = buildAttachmentCekWrapAAD(att.entryId, att.id, att.cekKeyVersion, att.cekWrapAadVersion);
+          const binaryStr = atob(att.cekEncrypted);
+          const cekEncBytes = new Uint8Array(binaryStr.length);
+          for (let j = 0; j < binaryStr.length; j++) {
+            cekEncBytes[j] = binaryStr.charCodeAt(j);
+          }
+          const cekRaw = await decryptBinary(
+            { ciphertext: cekEncBytes, iv: att.cekIv, authTag: att.cekAuthTag },
+            oldEncryptionKey,
+            oldWrapAad,
+          );
+
+          // Rewrap CEK with new encryptionKey (I8.1: manual AES-GCM, not wrapKey)
+          const newWrapAad = buildAttachmentCekWrapAAD(att.entryId, att.id, newKeyVersion, 1);
+          const newWrappedCek = await encryptBinary(cekRaw, newEncKey, newWrapAad);
+
+          // Zeroize raw CEK after use (I8.2)
+          new Uint8Array(cekRaw).fill(0);
+
+          // Encode new wrapped CEK as base64
+          let newCekB64 = "";
+          for (const byte of newWrappedCek.ciphertext) {
+            newCekB64 += String.fromCharCode(byte);
+          }
+          newCekB64 = btoa(newCekB64);
+
+          attachmentCekRewraps.push({
+            id: att.id,
+            cekEncrypted: newCekB64,
+            cekIv: newWrappedCek.iv,
+            cekAuthTag: newWrappedCek.authTag,
+            cekKeyVersion: newKeyVersion,
+            cekWrapAadVersion: CURRENT_CEK_WRAP_AAD_VERSION,
+          });
+
+          onProgress?.({ phase: "rewrapping", current: i + 1, total: currentRotationData.mode2Attachments.length });
         }
 
-        // Unwrap CEK with old encryptionKey
-        const oldWrapAad = buildAttachmentCekWrapAAD(att.entryId, att.id, att.cekKeyVersion, att.cekWrapAadVersion);
-        const binaryStr = atob(att.cekEncrypted);
-        const cekEncBytes = new Uint8Array(binaryStr.length);
-        for (let j = 0; j < binaryStr.length; j++) {
-          cekEncBytes[j] = binaryStr.charCodeAt(j);
+        // 8. Re-wrap ECDH private key with new secret key
+        const ecdhWrapKey = await deriveEcdhWrappingKey(newSecretKey);
+        if (!ecdhPrivateKeyBytesRef.current) {
+          throw new Error("ECDH_KEY_UNAVAILABLE");
         }
-        const cekRaw = await decryptBinary(
-          { ciphertext: cekEncBytes, iv: att.cekIv, authTag: att.cekAuthTag },
-          oldEncryptionKey,
-          oldWrapAad,
+        const ecdhSourceBytes = ecdhPrivateKeyBytesRef.current;
+        const ecdhEncrypted = await encryptBinary(
+          ecdhSourceBytes.buffer.slice(
+            ecdhSourceBytes.byteOffset,
+            ecdhSourceBytes.byteOffset + ecdhSourceBytes.byteLength,
+          ) as ArrayBuffer,
+          ecdhWrapKey,
         );
 
-        // Rewrap CEK with new encryptionKey (I8.1: manual AES-GCM, not wrapKey)
-        const newWrapAad = buildAttachmentCekWrapAAD(att.entryId, att.id, newKeyVersion, 1);
-        const newWrappedCek = await encryptBinary(cekRaw, newEncKey, newWrapAad);
+        // 9. Generate new accountSalt, derive wrapping key, wrap new secretKey
+        const newAccountSalt = generateAccountSalt();
+        const newWrappingKey = await deriveWrappingKey(passphrase, newAccountSalt);
+        const newWrappedKey = await wrapSecretKey(newSecretKey, newWrappingKey);
 
-        // Zeroize raw CEK after use (I8.2)
-        new Uint8Array(cekRaw).fill(0);
+        // 10. Compute new auth credentials, verifier, and verification artifact
+        const newAuthKeyBytes = await deriveAuthKeyBytes(newSecretKey);
+        const newAuthHash = await computeAuthHash(newAuthKeyBytes);
+        const newVerifierHash = await computePassphraseVerifier(passphrase, newAccountSalt);
+        const verificationArtifact = await createVerificationArtifact(newEncKey);
 
-        // Encode new wrapped CEK as base64
-        let newCekB64 = "";
-        for (const byte of newWrappedCek.ciphertext) {
-          newCekB64 += String.fromCharCode(byte);
+        // 11. POST to /api/vault/rotate-key
+        onProgress?.({ phase: "committing", current: 0, total: 1 });
+        let res: Response;
+        try {
+          res = await fetchApi(API_PATH.VAULT_ROTATE_KEY, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              currentAuthHash,
+              encryptedSecretKey: newWrappedKey.ciphertext,
+              secretKeyIv: newWrappedKey.iv,
+              secretKeyAuthTag: newWrappedKey.authTag,
+              accountSalt: hexEncode(newAccountSalt),
+              newAuthHash,
+              newVerifierHash,
+              verificationArtifact,
+              entries: reencryptedEntries,
+              historyEntries: reencryptedHistory,
+              encryptedEcdhPrivateKey: hexEncode(ecdhEncrypted.ciphertext),
+              ecdhPrivateKeyIv: ecdhEncrypted.iv,
+              ecdhPrivateKeyAuthTag: ecdhEncrypted.authTag,
+              attachmentCekRewraps,
+              legacyAttachmentsMigratedThisCycle: legacyAttachmentsMigrated,
+            }),
+          });
+        } catch {
+          lock();
+          throw new VaultChangeOutcomeUnknownError();
         }
-        newCekB64 = btoa(newCekB64);
 
-        attachmentCekRewraps.push({
-          id: att.id,
-          cekEncrypted: newCekB64,
-          cekIv: newWrappedCek.iv,
-          cekAuthTag: newWrappedCek.authTag,
-          cekKeyVersion: newKeyVersion,
-          cekWrapAadVersion: CURRENT_CEK_WRAP_AAD_VERSION,
-        });
+        if (!res.ok) {
+          const err = await readApiErrorBody(res);
+          if (!err || !ROTATE_KEY_REFUSALS.has(err.error)) {
+            lock();
+            throw new VaultChangeOutcomeUnknownError();
+          }
+          throw err;
+        }
 
-        onProgress?.({ phase: "rewrapping", current: i + 1, total: currentRotationData.mode2Attachments.length });
-      }
+        // The rotation has committed: the server now holds only the new wrapping
+        // and every row is under the new key. An unreadable body must not keep
+        // the old key in memory — the client already holds everything it sent,
+        // so it switches regardless, and only the server's report is lost.
+        const parsed = await parseJsonBodyOnce(res);
+        const result =
+          typeof parsed === "object" && parsed !== null
+            ? (parsed as { keyVersion?: unknown; rotationEffects?: RotationEffects })
+            : null;
 
-      // 8. Re-wrap ECDH private key with new secret key
-      const ecdhWrapKey = await deriveEcdhWrappingKey(newSecretKey);
-      if (!ecdhPrivateKeyBytesRef.current) {
-        throw new Error("ECDH_KEY_UNAVAILABLE");
-      }
-      const ecdhSourceBytes = ecdhPrivateKeyBytesRef.current;
-      const ecdhEncrypted = await encryptBinary(
-        ecdhSourceBytes.buffer.slice(
-          ecdhSourceBytes.byteOffset,
-          ecdhSourceBytes.byteOffset + ecdhSourceBytes.byteLength,
-        ) as ArrayBuffer,
-        ecdhWrapKey,
-      );
-
-      // 9. Generate new accountSalt, derive wrapping key, wrap new secretKey
-      const newAccountSalt = generateAccountSalt();
-      const newWrappingKey = await deriveWrappingKey(passphrase, newAccountSalt);
-      const newWrappedKey = await wrapSecretKey(newSecretKey, newWrappingKey);
-
-      // 10. Compute new auth credentials, verifier, and verification artifact
-      const newAuthKeyBytes = await deriveAuthKeyBytes(newSecretKey);
-      const newAuthHash = await computeAuthHash(newAuthKeyBytes);
-      const newVerifierHash = await computePassphraseVerifier(passphrase, newAccountSalt);
-      const verificationArtifact = await createVerificationArtifact(newEncKey);
-
-      // 11. POST to /api/vault/rotate-key
-      onProgress?.({ phase: "committing", current: 0, total: 1 });
-      const res = await fetchApi(API_PATH.VAULT_ROTATE_KEY, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          currentAuthHash,
-          encryptedSecretKey: newWrappedKey.ciphertext,
-          secretKeyIv: newWrappedKey.iv,
-          secretKeyAuthTag: newWrappedKey.authTag,
-          accountSalt: hexEncode(newAccountSalt),
-          newAuthHash,
-          newVerifierHash,
-          verificationArtifact,
-          entries: reencryptedEntries,
-          historyEntries: reencryptedHistory,
-          encryptedEcdhPrivateKey: hexEncode(ecdhEncrypted.ciphertext),
-          ecdhPrivateKeyIv: ecdhEncrypted.iv,
-          ecdhPrivateKeyAuthTag: ecdhEncrypted.authTag,
-          attachmentCekRewraps,
-          legacyAttachmentsMigratedThisCycle: legacyAttachmentsMigrated,
-        }),
-      });
-
-      if (!res.ok) {
+        // 12. Update in-memory state
+        secretKeyRef.current = new Uint8Array(newSecretKey);
+        commitKeyVersion(typeof result?.keyVersion === "number" ? result.keyVersion : newKeyVersion);
+        accountSaltRef.current = newAccountSalt;
+        wrappedKeyRef.current = {
+          ciphertext: newWrappedKey.ciphertext,
+          iv: newWrappedKey.iv,
+          authTag: newWrappedKey.authTag,
+        };
+        // ecdhPrivateKeyBytesRef remains valid — private key bytes did not change.
+        setEncryptionKey(newEncKey);
+        if (!result) return ROTATION_EFFECTS_UNAVAILABLE;
+        // The dialog uses these counts to surface operator banners.
+        const effects = result.rotationEffects;
+        if (effects) {
+          return { ...effects, legacyAttachmentsMigrated };
+        }
+        return null;
+      } finally {
+        // The success path copied it into secretKeyRef; every other path
+        // (a refusal, an unknown outcome, a throw while re-encrypting) drops it.
         newSecretKey.fill(0);
-        const err = await res.json().catch(() => ({}));
-        throw err;
       }
-
-      const result = await res.json();
-
-      // 12. Update in-memory state
-      secretKeyRef.current = new Uint8Array(newSecretKey);
-      commitKeyVersion(result.keyVersion ?? keyVersionRef.current + 1);
-      accountSaltRef.current = newAccountSalt;
-      wrappedKeyRef.current = {
-        ciphertext: newWrappedKey.ciphertext,
-        iv: newWrappedKey.iv,
-        authTag: newWrappedKey.authTag,
-      };
-      // ecdhPrivateKeyBytesRef remains valid — private key bytes did not change.
-      newSecretKey.fill(0);
-      setEncryptionKey(newEncKey);
-      // The dialog uses these counts to surface operator banners.
-      const effects = (result as { rotationEffects?: RotationEffects }).rotationEffects;
-      if (effects) {
-        return { ...effects, legacyAttachmentsMigrated };
-      }
-      return null;
     },
-    [encryptionKey, sessionUserId, commitKeyVersion],
+    [encryptionKey, sessionUserId, commitKeyVersion, lock],
   );
 
   const verifyPassphrase = useCallback(async (passphrase: string): Promise<boolean> => {

@@ -293,3 +293,67 @@ describe("check-e2e-selectors — data-testid and data-slot are judged on source
     expect(r.status).toBe(0);
   });
 });
+
+// With an unrelated source change in the branch, changed_src is non-empty and
+// the guard no longer skips sections 3/7 — this pins the pathspec on the
+// removed-side diff, which M12 (guard-only) cannot reach.
+describe("check-e2e-selectors — a test-only removal beside an unrelated source change", () => {
+  it.each([
+    ["data-testid", `[data-testid="entry-row"]`, `data-testid="entry-row"`],
+    ["data-slot", `[data-slot='card']`, `data-slot="card"`],
+  ])("M12b %s: is not reported", (_kind, selector, attr) => {
+    writeSpec(`page.locator('${selector}');\n`);
+    writeComponent(`export const A = () => <div ${attr}>x</div>;\n`);
+    writeFile("src/components/other.tsx", `export const B = () => <p>b</p>;\n`);
+    writeFile("src/components/dialog.test.tsx", `render(<div ${attr}>mock</div>);\n`);
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    git("checkout", "-q", "-b", "feature");
+    writeFile("src/components/other.tsx", `export const B = () => <p>bb</p>;\n`);
+    writeFile("src/components/dialog.test.tsx", `render(<div>mock</div>);\n`);
+    git("add", "-A");
+    git("commit", "-q", "-m", "change");
+    const r = runGate();
+    expect(r.stdout).not.toContain("removed from source");
+    expect(r.status).toBe(0);
+  });
+});
+
+// A renamed file is listed only under its new path unless rename detection is
+// off, so the scoped diffs saw it as wholly added and missed a selector dropped
+// during the move.
+describe("check-e2e-selectors — selectors dropped while a file is renamed", () => {
+  it.each([
+    ["data-testid", `[data-testid="save-btn"]`, `data-testid="save-btn"`, "data-testid='save-btn' removed from source"],
+    ["data-slot", `[data-slot='card']`, `data-slot="card"`, "data-slot='card' removed from source"],
+    ["id", `#grantee-email`, `id="grantee-email"`, "id='grantee-email' removed from source"],
+  ])("M13 %s: a removal in a renamed file is flagged", (_kind, selector, attr, message) => {
+    writeSpec(`page.locator('${selector}');\n`);
+    const body = (a) => `export const A = () => (\n  <div>\n    <p>one</p>\n    <p>two</p>\n    <div ${a}>x</div>\n    <p>three</p>\n  </div>\n);\n`;
+    writeFile("src/components/old-name.tsx", body(attr));
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    git("checkout", "-q", "-b", "feature");
+    git("mv", "src/components/old-name.tsx", "src/components/new-name.tsx");
+    writeFile("src/components/new-name.tsx", body(`data-x="y"`));
+    git("add", "-A");
+    git("commit", "-q", "-m", "rename");
+    const r = runGate();
+    expect(r.stdout).toContain(message);
+    expect(r.status).toBe(1);
+  });
+
+  it("M14: a pure rename that keeps its selectors is not flagged", () => {
+    writeSpec(`page.locator('[data-testid="save-btn"]');\n`);
+    writeFile("src/components/old-name.tsx", `export const A = () => <div data-testid="save-btn">x</div>;\n`);
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    git("checkout", "-q", "-b", "feature");
+    git("mv", "src/components/old-name.tsx", "src/components/new-name.tsx");
+    git("add", "-A");
+    git("commit", "-q", "-m", "rename");
+    const r = runGate();
+    expect(r.stdout).not.toContain("removed from source");
+    expect(r.status).toBe(0);
+  });
+});

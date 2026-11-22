@@ -38,8 +38,9 @@ export default function RecoveryPage() {
       <div className="w-full max-w-md space-y-6">
         {/* After a committed reset the dashboard must be reached by a full
             reload (continueToDashboard); a client-side link would keep the
-            VaultProvider's pre-reset state. */}
-        {step !== "reset-invalidation-failed" && (
+            VaultProvider's pre-reset state. While a reset is in flight it may
+            commit at any moment, so the link is withheld then too. */}
+        {step !== "reset-invalidation-failed" && !(step === "new-passphrase" && loading) && (
           <Link
             href="/dashboard"
             className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"

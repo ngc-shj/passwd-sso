@@ -17,7 +17,7 @@ import {
   hexEncode,
 } from "@/lib/crypto/crypto-client";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_PATH } from "@/lib/constants";
 import { PASSPHRASE_MIN_LENGTH } from "@/lib/validations";
 import { getStrength } from "@/components/vault/passphrase-strength";
@@ -35,6 +35,24 @@ interface VerifiedData {
   hkdfSalt: string;
   accountSalt: string;
   keyVersion: number;
+}
+
+/** The wrapped-key data a verify step answers with, or null when it is not all there. */
+function readVerifiedData(body: unknown): VerifiedData | null {
+  if (typeof body !== "object" || body === null) return null;
+  const v = body as Record<string, unknown>;
+  const { encryptedSecretKey, iv, authTag, hkdfSalt, accountSalt, keyVersion } = v;
+  if (
+    typeof encryptedSecretKey !== "string" ||
+    typeof iv !== "string" ||
+    typeof authTag !== "string" ||
+    typeof hkdfSalt !== "string" ||
+    typeof accountSalt !== "string" ||
+    typeof keyVersion !== "number"
+  ) {
+    return null;
+  }
+  return { encryptedSecretKey, iv, authTag, hkdfSalt, accountSalt, keyVersion };
 }
 
 /**
@@ -117,15 +135,13 @@ export function useRecoveryFlow() {
         return;
       }
 
-      const data = await res.json();
-      setVerifiedData({
-        encryptedSecretKey: data.encryptedSecretKey,
-        iv: data.iv,
-        authTag: data.authTag,
-        hkdfSalt: data.hkdfSalt,
-        accountSalt: data.accountSalt,
-        keyVersion: data.keyVersion,
-      });
+      // The verify step writes nothing; without its data there is nothing to go on.
+      const data = readVerifiedData(await parseJsonBodyOnce(res));
+      if (!data) {
+        setError(tApi("unknownError"));
+        return;
+      }
+      setVerifiedData(data);
       recoveryKeyRef.current?.fill(0);
       recoveryKeyRef.current = key;
       key = null;

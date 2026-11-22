@@ -42,7 +42,8 @@ import { ChevronDown, Loader2, Plus, Trash2, Webhook } from "lucide-react";
 import { toast } from "sonner";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { fetchApi } from "@/lib/url-helpers";
-import { readApiErrorBody, getApiErrorFieldErrors } from "@/lib/http/read-api-error-body";
+import { readApiErrorBody, getApiErrorFieldErrors, parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
+import { readNonEmptyStringField } from "@/lib/http/read-body-field";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
@@ -101,6 +102,8 @@ export function BaseWebhookCard({ config }: Props) {
   const [url, setUrl] = useState("");
   const [selectedEvents, setSelectedEvents] = useState<Set<string>>(new Set());
   const [newSecret, setNewSecret] = useState<string | null>(null);
+  // The webhook was created but its one-time signing secret could not be read.
+  const [secretUnavailable, setSecretUnavailable] = useState(false);
 
   // Inline step-up reauth — create and delete are both server-side step-up-gated.
   // The retry arg records which mutation was attempted so the post-reauth retry
@@ -141,6 +144,7 @@ export function BaseWebhookCard({ config }: Props) {
     setUrl("");
     setSelectedEvents(new Set());
     setNewSecret(null);
+    setSecretUnavailable(false);
     setUrlError("");
   };
 
@@ -190,12 +194,15 @@ export function BaseWebhookCard({ config }: Props) {
         toast.error(t("createFailed"));
         return;
       }
-      const data = await res.json();
-      setNewSecret(data.secret);
+      // The webhook exists from here on: nothing below may be reported as a
+      // failed creation.
       setUrl("");
       setSelectedEvents(new Set());
       toast.success(t("created"));
       fetchWebhooks();
+      const secret = readNonEmptyStringField(await parseJsonBodyOnce(res), "secret");
+      if (secret) setNewSecret(secret);
+      else setSecretUnavailable(true);
     } catch {
       toast.error(t("createFailed"));
     } finally {
@@ -422,6 +429,13 @@ export function BaseWebhookCard({ config }: Props) {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">{t("secretCopied")}</p>
+              <Button variant="outline" size="sm" onClick={closeCreateDialog}>
+                OK
+              </Button>
+            </div>
+          ) : secretUnavailable ? (
+            <div className="space-y-4 py-2">
+              <p role="alert" className="text-sm">{t("createdSecretUnavailable")}</p>
               <Button variant="outline" size="sm" onClick={closeCreateDialog}>
                 OK
               </Button>

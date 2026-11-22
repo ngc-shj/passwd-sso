@@ -177,6 +177,19 @@ describe("PasswordGenerator", () => {
     expect(screen.queryByText("strength")).not.toBeInTheDocument();
   });
 
+  it("shows no password and disables Use when the generated body cannot be read", async () => {
+    vi.mocked(fetchApi).mockResolvedValue({
+      ok: true,
+      json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+    } as unknown as Response);
+    await renderGenerator();
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "use" })).toBeDisabled(),
+    );
+    expect(screen.queryByText("strength")).not.toBeInTheDocument();
+  });
+
   it("regenerates when the refresh button is clicked", async () => {
     const user = userEvent.setup();
     await renderGenerator();

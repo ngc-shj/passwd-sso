@@ -23,7 +23,7 @@ import {
 } from "@/components/passwords/import/password-import-folders";
 import { apiPath } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { fetchApi } from "@/lib/url-helpers";
 import { MS_PER_SECOND, MS_PER_MINUTE } from "@/lib/constants/time";
 
@@ -252,8 +252,16 @@ export async function runImportEntries({
         }
 
         if (res.ok) {
-          const data = await res.json();
-          chunkSuccess = typeof data.importedCount === "number" ? data.importedCount : 0;
+          // The chunk was accepted. An unreadable body counts every entry sent:
+          // reporting a committed import as failed is the worse error.
+          const data = await parseJsonBodyOnce(res);
+          if (data === null) {
+            chunkSuccess = encryptedEntries.length;
+          } else {
+            const importedCount =
+              typeof data === "object" && "importedCount" in data ? data.importedCount : null;
+            chunkSuccess = typeof importedCount === "number" ? importedCount : 0;
+          }
         }
         sent = true;
       } catch {

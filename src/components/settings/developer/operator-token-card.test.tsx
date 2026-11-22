@@ -238,6 +238,64 @@ describe("OperatorTokenCard", () => {
     expect(mockToastSuccess).toHaveBeenCalledWith("tokenCreated");
   });
 
+  describe("when the created token's response body cannot be read", () => {
+    const unreadable = {
+      ok: true,
+      status: 201,
+      json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+    };
+
+    async function submitCreate() {
+      render(<OperatorTokenCard />);
+      fireEvent.click(await screen.findByRole("button", { name: "createToken" }));
+      fireEvent.change(await screen.findByPlaceholderText("tokenNamePlaceholder"), {
+        target: { value: "test-token" },
+      });
+      const createButtons = await screen.findAllByRole("button", { name: "createToken" });
+      fireEvent.click(createButtons[createButtons.length - 1]);
+    }
+
+    const listCalls = () => mockFetchApi.mock.calls.filter(([, init]) => init === undefined);
+
+    it("says the token was created but cannot be shown", async () => {
+      mockFetchApi
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+        .mockResolvedValueOnce(unreadable);
+      await submitCreate();
+      expect(await screen.findByText("tokenCreatedUnavailable")).toBeInTheDocument();
+      expect(mockToastError).not.toHaveBeenCalled();
+    });
+
+    it("still refreshes the token list", async () => {
+      mockFetchApi
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+        .mockResolvedValueOnce(unreadable);
+      await submitCreate();
+      await screen.findByText("tokenCreatedUnavailable");
+      expect(listCalls()).toHaveLength(2);
+    });
+
+    it("shows no token and offers nothing to copy", async () => {
+      mockFetchApi
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+        .mockResolvedValueOnce(unreadable);
+      await submitCreate();
+      await screen.findByText("tokenCreatedUnavailable");
+      expect(screen.queryByRole("button", { name: "copy" })).not.toBeInTheDocument();
+      expect(mockToastSuccess).not.toHaveBeenCalled();
+    });
+
+    it("shows the token with a copy button when the body is readable", async () => {
+      mockFetchApi
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })
+        .mockResolvedValueOnce({ ok: true, json: async () => ({ plaintext: "op_READABLE" }) });
+      await submitCreate();
+      expect(await screen.findByDisplayValue("op_READABLE")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "copy" })).toBeInTheDocument();
+      expect(screen.queryByText("tokenCreatedUnavailable")).not.toBeInTheDocument();
+    });
+  });
+
   it("opens reauth and retries create when stale-session is returned", async () => {
     mockFetchApi
       .mockResolvedValueOnce({ ok: true, json: async () => ({ tokens: [] }) })

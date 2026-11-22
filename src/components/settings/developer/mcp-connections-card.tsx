@@ -22,6 +22,7 @@ import { Input } from "@/components/ui/input";
 import { SectionCardHeader } from "@/components/settings/account/section-card-header";
 import { API_PATH, apiPath } from "@/lib/constants/auth/api-path";
 import { fetchApi } from "@/lib/url-helpers";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 
@@ -99,11 +100,17 @@ export function McpConnectionsCard() {
         method: "DELETE",
       });
       if (res.ok) {
-        const data = await res.json();
         setClients((prev) =>
           prev.map((c) => ({ ...c, connection: null })),
         );
-        toast.success(t("revokeAllSuccess", { count: data.revokedCount }));
+        const data = await parseJsonBodyOnce(res);
+        const revokedCount =
+          typeof data === "object" && data !== null && "revokedCount" in data ? data.revokedCount : null;
+        toast.success(
+          typeof revokedCount === "number"
+            ? t("revokeAllSuccess", { count: revokedCount })
+            : t("revokeAllDone"),
+        );
       } else {
         toast.error(t("revokeAllError"));
       }

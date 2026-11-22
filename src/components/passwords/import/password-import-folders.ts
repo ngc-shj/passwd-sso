@@ -1,5 +1,6 @@
 import type { ParsedEntry } from "@/components/passwords/import/password-import-types";
 import { fetchApi } from "@/lib/url-helpers";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
 import { MAX_IMPORT_FOLDERS } from "@/lib/validations/common";
 
 interface ExistingFolder {
@@ -101,16 +102,19 @@ export async function resolveFolderPathsForImport(
         });
 
         if (createRes.ok) {
-          const created = await createRes.json();
-          if (created?.id) {
-            folders.push({ id: created.id, name: segmentName, parentId });
-            parentId = created.id;
+          const created = await parseJsonBodyOnce(createRes);
+          const createdId =
+            typeof created === "object" && created !== null && "id" in created ? created.id : null;
+          if (typeof createdId === "string" && createdId !== "") {
+            folders.push({ id: createdId, name: segmentName, parentId });
+            parentId = createdId;
             continue;
           }
         }
 
-        // 409 Conflict — folder already exists (race condition)
-        if (createRes.status === 409) {
+        // 409 Conflict — folder already exists (race condition). A 2xx whose
+        // body could not be read created the folder: find it the same way.
+        if (createRes.status === 409 || createRes.ok) {
           // Re-fetch and find the existing folder
           try {
             const refetchRes = await fetcher(foldersApiPath);

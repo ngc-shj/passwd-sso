@@ -44,6 +44,8 @@ import { bindRangeInput } from "@/lib/ui/input-range";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
+import { readCreatedLink } from "@/components/share/read-created-link";
 import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 
 interface SendDialogProps {
@@ -68,6 +70,8 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
   const [creating, setCreating] = useState(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [createdAccessPassword, setCreatedAccessPassword] = useState<string | null>(null);
+  // The Send was created but its URL (or access password) could not be read.
+  const [createdUnavailable, setCreatedUnavailable] = useState(false);
   const [copied, setCopied] = useState(false);
   const [passwordCopied, setPasswordCopied] = useState(false);
 
@@ -87,6 +91,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
     setRequirePassword(false);
     setCreatedUrl(null);
     setCreatedAccessPassword(null);
+    setCreatedUnavailable(false);
     setCopied(false);
     setPasswordCopied(false);
   };
@@ -101,6 +106,20 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
       resetForm();
     }
     onOpenChange(nextOpen);
+  };
+
+  // The Send exists once the create response is ok: nothing here may be
+  // reported as a failed creation.
+  const completeCreate = async (res: Response) => {
+    onCreated?.();
+    toast.success(t("sendCreateSuccess"));
+    const created = readCreatedLink(await parseJsonBodyOnce(res), requirePassword);
+    if (!created) {
+      setCreatedUnavailable(true);
+      return;
+    }
+    setCreatedUrl(appUrl(created.url));
+    if (created.accessPassword) setCreatedAccessPassword(created.accessPassword);
   };
 
   const handleCreateText = async () => {
@@ -128,12 +147,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
         return;
       }
 
-      const data = await res.json();
-      const fullUrl = appUrl(data.url);
-      setCreatedUrl(fullUrl);
-      if (data.accessPassword) setCreatedAccessPassword(data.accessPassword);
-      onCreated?.();
-      toast.success(t("sendCreateSuccess"));
+      await completeCreate(res);
     } catch {
       toast.error(tApi("unknownError"));
     } finally {
@@ -165,12 +179,7 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
         return;
       }
 
-      const data = await res.json();
-      const fullUrl = appUrl(data.url);
-      setCreatedUrl(fullUrl);
-      if (data.accessPassword) setCreatedAccessPassword(data.accessPassword);
-      onCreated?.();
-      toast.success(t("sendCreateSuccess"));
+      await completeCreate(res);
     } catch {
       toast.error(tApi("unknownError"));
     } finally {
@@ -288,6 +297,13 @@ export function SendDialog({ open, onOpenChange, onCreated }: SendDialogProps) {
                 resetForm();
               }}
             >
+              {t("createAnother")}
+            </Button>
+          </div>
+        ) : createdUnavailable ? (
+          <div className="space-y-3">
+            <p role="alert" className="text-sm">{t("sendCreatedLinkUnavailable")}</p>
+            <Button variant="outline" className="w-full" onClick={resetForm}>
               {t("createAnother")}
             </Button>
           </div>

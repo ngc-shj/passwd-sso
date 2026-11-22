@@ -44,6 +44,8 @@ import { fetchApi, appUrl } from "@/lib/url-helpers";
 import { SCIM_TOKEN_DESC_MAX_LENGTH } from "@/lib/validations";
 import { DISPLAY_ID_SHORT } from "@/lib/validations/common";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { readNonEmptyStringField } from "@/lib/http/read-body-field";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
@@ -81,6 +83,8 @@ export function ScimTokenManager({ locale }: Props) {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
+  // The token was created but its one-time value could not be read.
+  const [tokenUnavailable, setTokenUnavailable] = useState(false);
   const [description, setDescription] = useState("");
   const [expiresInDays, setExpiresInDays] = useState<string>("365");
   // Inline step-up reauth — creating a token and revoking one are both
@@ -120,6 +124,7 @@ export function ScimTokenManager({ locale }: Props) {
     setCreateOpen(false);
     setCreating(false);
     setNewToken(null);
+    setTokenUnavailable(false);
     setDescription("");
     setExpiresInDays("365");
   };
@@ -137,18 +142,25 @@ export function ScimTokenManager({ locale }: Props) {
         }),
       });
       if (res.ok) {
-        const data = await res.json();
-        setNewToken(data.token);
+        // The token exists from here on: nothing below may be reported as a
+        // failed creation.
         setDescription("");
         setExpiresInDays("365");
-        toast.success(t("scimTokenCreated"));
         fetchTokens();
+        const token = readNonEmptyStringField(await parseJsonBodyOnce(res), "token");
+        if (token) {
+          setNewToken(token);
+          toast.success(t("scimTokenCreated"));
+        } else {
+          // The success toast tells the user to copy the token; there is none.
+          setTokenUnavailable(true);
+        }
       } else {
-        const err = await res.json().catch(() => ({}));
-        if (err.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+        const err = await readApiErrorBody(res);
+        if (err?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
           await inlineReauth.triggerOnStaleError({ type: "create" });
         } else {
-          const apiKey = tokenMintApiErrorKey(err.error);
+          const apiKey = tokenMintApiErrorKey(err?.error);
           toast.error(apiKey ? tApi(apiKey) : t("networkError"));
         }
       }
@@ -370,6 +382,13 @@ export function ScimTokenManager({ locale }: Props) {
                   <CopyButton getValue={() => newToken} />
                 </div>
               </div>
+              <Button variant="outline" size="sm" onClick={closeCreateDialog}>
+                OK
+              </Button>
+            </div>
+          ) : tokenUnavailable ? (
+            <div className="space-y-4 py-2">
+              <p role="alert" className="text-sm">{t("scimTokenCreatedUnavailable")}</p>
               <Button variant="outline" size="sm" onClick={closeCreateDialog}>
                 OK
               </Button>

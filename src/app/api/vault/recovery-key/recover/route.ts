@@ -159,6 +159,7 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
         recoveryVerifierHmac: true,
         recoveryVerifierVersion: true,
         keyVersion: true,
+        accountSalt: true,
         tenantId: true,
       },
     }),
@@ -183,12 +184,19 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
 
   // M1: update the passphrase/recovery-key material AND write the audit record
   // in ONE transaction, so a recovery reset — an account-takeover-recovery event
-  // — can never commit without its audit trail. Uses withTenantRls(tx) (not the
-  // ambient withUserTenantRls, which does not expose a tx client) so logAuditInTx
-  // shares the same transaction as the user.update.
-  await withTenantRls(prisma, user.tenantId, async (tx) => {
-    await tx.user.update({
-      where: { id: userId },
+  // — can never commit without its audit trail. withTenantRls(tx) with the
+  // snapshot's tenantId, which is already in hand, rather than
+  // withUserTenantRls, which would resolve the tenant a second time.
+  //
+  // The recovery key was checked against the snapshot read above, in another
+  // transaction, so the write is a compare-and-swap on accountSalt — the one
+  // column every vault-wrapping writer (setup, change-passphrase, recover,
+  // rotate-key, vault reset) moves. Of two resets proving the same recovery
+  // key, only the first to commit rewraps; the other gets 409 with no audit
+  // row and no session invalidation.
+  const committed = await withTenantRls(prisma, user.tenantId, async (tx) => {
+    const { count } = await tx.user.updateMany({
+      where: { id: userId, accountSalt: user.accountSalt },
       data: {
         // New passphrase-wrapped secret key
         encryptedSecretKey: data.encryptedSecretKey,
@@ -211,6 +219,7 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
         accountLockedUntil: null,
       },
     });
+    if (count === 0) return false;
 
     await logAuditInTx(tx, user.tenantId, {
       ...personalAuditBase(request, userId),
@@ -221,7 +230,12 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
         lockoutReset: true,
       },
     });
+    return true;
   });
+
+  if (!committed) {
+    return errorResponse(API_ERROR.VAULT_WRAP_CONFLICT);
+  }
 
   // C6 (OWASP A07-1): invalidate all sessions and bearer tokens across all
   // tenants. Recovery is the user's "I forgot / I suspect compromise" path,

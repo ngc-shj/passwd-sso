@@ -173,6 +173,30 @@ describe("TagInput", () => {
     expect(mockFetchApi).toHaveBeenCalledTimes(2);
   });
 
+  it("adds a created tag whose response body cannot be read, found in a reloaded list", async () => {
+    const created = { id: "t3", name: "new", color: null, parentId: null };
+    mockFetchApi
+      .mockResolvedValueOnce({ ok: true, json: async () => allTags })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 201,
+        json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+      })
+      .mockResolvedValueOnce({ ok: true, json: async () => [...allTags, created] });
+    const onChange = vi.fn();
+
+    render(<TagInput selectedTags={[]} onChange={onChange} />);
+    await waitFor(() => expect(mockFetchApi).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByText("addTag"));
+    fireEvent.change(screen.getByLabelText("tag-search"), { target: { value: "new" } });
+    fireEvent.click(screen.getByText(/createTag/));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledWith([created]));
+    expect(mockToastError).not.toHaveBeenCalled();
+    expect(mockFetchApi.mock.calls[2][0]).toBe("/api/tags?tree=true");
+  });
+
   it("shows toast.error when input exceeds TAG_NAME_MAX_LENGTH", async () => {
     mockFetchApi.mockResolvedValue({ ok: true, json: async () => allTags });
 

@@ -96,6 +96,46 @@ describe("useTravelMode", () => {
     expect(result.current.activatedAt).not.toBeNull();
   });
 
+  const unreadable = {
+    ok: true,
+    status: 200,
+    json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+  } as unknown as Response;
+
+  it("enable() reports success and turns travel mode on when the response body cannot be read", async () => {
+    fetchApiMock
+      .mockResolvedValueOnce(mockResponse({ active: false, activatedAt: null }))
+      .mockResolvedValueOnce(unreadable);
+
+    const { result } = renderHook(() => useTravelMode(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let outcome: TravelModeEnableResult = { success: false };
+    await act(async () => {
+      outcome = await result.current.enable();
+    });
+
+    expect(outcome).toEqual({ success: true });
+    expect(result.current.active).toBe(true);
+  });
+
+  it("disable() reports success and turns travel mode off when the response body cannot be read", async () => {
+    fetchApiMock
+      .mockResolvedValueOnce(mockResponse({ active: true, activatedAt: "now" }))
+      .mockResolvedValueOnce(unreadable);
+
+    const { result } = renderHook(() => useTravelMode(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let outcome: TravelModeDisableResult = { success: false };
+    await act(async () => {
+      outcome = await result.current.disable("verifier-hash");
+    });
+
+    expect(outcome).toEqual({ success: true });
+    expect(result.current.active).toBe(false);
+  });
+
   it("enable() returns the route's error code on a refusal without throwing", async () => {
     fetchApiMock
       .mockResolvedValueOnce(mockResponse({ active: false, activatedAt: null }))

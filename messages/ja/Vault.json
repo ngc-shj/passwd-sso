@@ -38,6 +38,7 @@
   "changePassphraseButton": "パスフレーズを変更",
   "passphraseChanged": "パスフレーズを変更しました。",
   "changePassphraseFailed": "パスフレーズの変更に失敗しました。",
+  "changePassphraseOutcomeUnknown": "パスフレーズが変更されたかどうかを確認できなかったため、保管庫をロックしました。新しいパスフレーズでアンロックしてください。アンロックできない場合は、以前のパスフレーズをお試しください。",
   "verifierNotSetHint": "パスフレーズを変更するには、一度保管庫をロックしてアンロックしてください。",
   "recoverPassphrase": "パスフレーズを忘れた場合",
   "resetVault": "保管庫をリセット",
@@ -59,6 +60,7 @@
   "recoveryKeyClose": "閉じる",
   "recoveryKeyGenerating": "回復キーを生成中...",
   "recoveryKeyRegenerateWarning": "既に回復キーが設定されています。新しい鍵を生成すると、以前の鍵は無効になります。",
+  "recoveryKeyOutcomeUnknown": "新しい回復キーが保存されたかどうかを確認できませんでした。以前の回復キーは使えなくなっている可能性があります。今すぐ新しい回復キーを生成し、安全な場所に保管してください。",
   "recoveryKeyRegenerateInvalidatedWarning": "以前の回復キーは保管庫キーローテーションにより既に無効化されています。新しい回復キーを生成してください。",
   "vaultMustBeUnlocked": "保管庫のロックを解除してください。",
   "or": "または",
@@ -68,6 +70,7 @@
   "rotateKeyButton": "キーをローテーション",
   "rotateKeySuccess": "暗号化キーをローテーションしました。",
   "rotateKeyFailed": "暗号化キーのローテーションに失敗しました。",
+  "rotateKeyOutcomeUnknown": "暗号化キーがローテーションされたかどうかを確認できなかったため、保管庫をロックしました。パスフレーズでアンロックし、必要であればもう一度ローテーションしてください。",
   "rotateKeyWarningEa": "すべての緊急アクセス付与が無効になり、再確認が必要になります。",
   "rotateKeyWarningTime": "保管庫エントリの数によっては、この操作に時間がかかる場合があります。",
   "rotateKeyPassphrase": "現在のパスフレーズ",
@@ -81,5 +84,6 @@
   "outdatedAttachmentFormat": "この添付ファイルを復号できません。バックアップから復元するか、元のファイルを再アップロードしてください。",
   "rotateKeyCacheTombstoneFailureBanner": "ローテーション中に一部のセッションキャッシュを無効化できませんでした (Redis 障害)。設定 → セッション から他デバイスのセッションを手動で取り消してください。",
   "rotateKeyInvalidationFailedBanner": "ローテーション後のトークン取り消しが確認できませんでした。ローテーション前の API キー / MCP トークンが有効なまま残っている可能性があります。設定から手動で取り消してください。",
+  "rotateKeyEffectsUnavailableBanner": "暗号化キーはローテーションされましたが、サーバーからの結果を読み取れませんでした。他のセッション、API キー、MCP トークンが有効なまま残っている可能性があります。設定で確認し、心当たりのないものは取り消してください。",
   "rotateKeyMcpRevokedBanner": "ローテーション前の MCP トークンを {count} 件取り消しました。/tenant/service-accounts で再発行が必要な場合があります。"
 }

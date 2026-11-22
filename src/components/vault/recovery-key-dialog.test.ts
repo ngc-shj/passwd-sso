@@ -29,7 +29,9 @@ vi.mock("@/lib/crypto/crypto-recovery", () => ({
   formatRecoveryKey: mockFormatRecoveryKey,
   wrapSecretKeyWithRecovery: mockWrapSecretKeyWithRecovery,
 }));
-vi.mock("@/lib/http/api-error-codes", () => ({
+// The real API_ERROR: the flow classifies refusals by those codes.
+vi.mock("@/lib/http/api-error-codes", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/http/api-error-codes")>()),
   apiErrorToI18nKey: (code: string) => code,
 }));
 vi.mock("@/lib/constants", () => ({
@@ -163,15 +165,61 @@ describe("generateRecoveryKeyFlow", () => {
     expect(allZero(recoveryKey)).toBe(true);
   });
 
-  it("returns null errorCode when API error body is unparseable", async () => {
+  it("reports the outcome as unknown when a 502 carries no app error envelope (a proxy's HTML page)", async () => {
     mockFetch.mockResolvedValue({
       ok: false,
-      json: () => Promise.reject(new Error("invalid json")),
+      status: 502,
+      json: () => Promise.reject(new SyntaxError("Unexpected token '<'")),
     });
 
     const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
 
-    expect(result).toEqual({ ok: false, errorCode: null });
+    expect(result).toEqual({ ok: false, outcomeUnknown: true });
+  });
+
+  it("reports the outcome as unknown when the POST rejects in transit", async () => {
+    mockFetch.mockRejectedValue(new TypeError("Failed to fetch"));
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+
+    expect(result).toEqual({ ok: false, outcomeUnknown: true });
+    expect(allZero(secretKey)).toBe(true);
+    expect(allZero(recoveryKey)).toBe(true);
+  });
+
+  it("reports the outcome as unknown on INTERNAL_ERROR, which does not prove nothing was stored", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: () => Promise.resolve({ error: "INTERNAL_ERROR" }),
+    });
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+
+    expect(result).toEqual({ ok: false, outcomeUnknown: true });
+  });
+
+  it("returns the code of a refusal the route sends before its write (VERIFIER_NOT_SET)", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 400,
+      json: () => Promise.resolve({ error: "VERIFIER_NOT_SET" }),
+    });
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+
+    expect(result).toEqual({ ok: false, errorCode: "VERIFIER_NOT_SET" });
+  });
+
+  it("treats a 2xx whose body is unreadable as stored and returns the key", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+    });
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+
+    expect(result).toEqual({ ok: true, formattedKey: "ABCD-EFGH-IJKL" });
   });
 
   // ── Exception path ────────────────────────────────────────

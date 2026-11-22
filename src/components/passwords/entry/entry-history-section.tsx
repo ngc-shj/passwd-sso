@@ -18,6 +18,7 @@ import {
 } from "@/lib/team/team-history-restore";
 import { toastApiError } from "@/lib/http/toast-api-error";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { openTeamEntryFieldAt } from "@/lib/crypto/crypto-team";
@@ -243,7 +244,7 @@ export function EntryHistorySection({
           break;
         }
         if (!scopedTeamId) return;
-        const code = ((await res.json().catch(() => ({}))) as { error?: unknown }).error;
+        const code = (await readApiErrorBody(res))?.error;
         if (code === API_ERROR.HISTORY_ROW_CHANGED && attempt === 0) continue;
         // A team refusal names its exits (HISTORY_KEY_UNAVAILABLE: restore a
         // more recent version, or delete the entry).

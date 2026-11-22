@@ -16,9 +16,15 @@ export function useLocalStorage<T>(
   defaultValue: T
 ): [T, (value: T | ((prev: T) => T)) => void] {
   const [storedValue, setStoredValue] = useState<T>(defaultValue);
+  // Declared above the hydration effect, which clears it; see the write effect.
+  const pendingWriteRef = useRef<string | null>(null);
 
   // Hydrate from localStorage on mount (client-only)
   useEffect(() => {
+    // A write still pending for another key would otherwise survive the
+    // switch (the value need not change, so the write effect never consumes
+    // it) and persist that key's hydrated value on an A→B→A return.
+    if (pendingWriteRef.current !== key) pendingWriteRef.current = null;
     try {
       const item = localStorage.getItem(key);
       if (item !== null) {
@@ -49,7 +55,6 @@ export function useLocalStorage<T>(
   // an identity update (`prev => prev`, which changes nothing and so never runs
   // the write effect) from leaving a flag that would persist the next key's
   // hydrated value.
-  const pendingWriteRef = useRef<string | null>(null);
   // The value the write effect last saw. StrictMode re-runs mount effects with
   // the value unchanged; without this the re-run would persist the default
   // while a setValue from that same commit is still queued.
