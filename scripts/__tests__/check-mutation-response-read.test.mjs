@@ -11,7 +11,10 @@
  * elements, and the unresolvable combinator shapes that fail closed), in
  * src/components, src/hooks, src/app pages and src/lib client modules, and in a
  * component or page that imports a server marker; any alias of fetchApi; a
- * helper reached through an import, resolved through its specifier (S4-4).
+ * helper reached through an import, resolved through its specifier (S4-4);
+ * fetchApi imported under another name or re-exported renamed (an export
+ * clause, or an exported variable holding it), and a helper
+ * default-exported by name, anonymously, or as an unresolvable expression (S5-2).
  * Allow: a GET,
  * `parseJsonBodyOnce`, a src/lib server module (each marker form, including a
  * mixed type/value import and a namespace import), a route handler.
@@ -490,6 +493,125 @@ describe("check-mutation-response-read", () => {
     });
     expect(r.code).toBe(1);
     expect(r.stderr).toContain(`body read on the response of ${callee}(…)`);
+  });
+
+  // S5-2: fetchApi itself reached through an import binding under another
+  // local name, and a helper reached through `export default <identifier>`.
+  const URL_HELPERS = "export function fetchApi(path: string, init?: RequestInit): Promise<Response> {\n  return fetch(path, init);\n}\n";
+  const callImported = (importLine, callee, init) =>
+    `${importLine}\nexport async function handler() {\n  const res = await ${callee}("/x"${init ? `, ${init}` : ""});\n  return res.json();\n}\n`;
+  const SEND_CONST = (method) =>
+    `${PRELUDE}const send = (path: string) => fetchApi(path, { method: "${method}" });\n`;
+
+  it.each([
+    ["a renamed import of fetchApi", { "src/components/a.tsx": callImported('import { fetchApi as f } from "@/lib/url-helpers";', "f", '{ method: "POST" }') }, "f"],
+    [
+      "a renamed import of a module that re-exports fetchApi under another name",
+      {
+        "src/lib/http/index.ts": 'export { fetchApi as request } from "../url-helpers";\n',
+        "src/components/a.tsx": callImported('import { request } from "@/lib/http";', "request", '{ method: "POST" }'),
+      },
+      "request",
+    ],
+    [
+      "fetchApi re-exported through an exported const",
+      {
+        "src/lib/http/request.ts": 'import { fetchApi } from "@/lib/url-helpers";\nexport const request = fetchApi;\n',
+        "src/components/a.tsx": callImported('import { request } from "@/lib/http/request";', "request", '{ method: "POST" }'),
+      },
+      "request",
+    ],
+    [
+      "fetchApi re-exported through a local alias chain",
+      {
+        "src/lib/http/request.ts": 'import { fetchApi } from "@/lib/url-helpers";\nconst a = fetchApi;\nexport const request = a;\n',
+        "src/components/a.tsx": callImported('import { request } from "@/lib/http/request";', "request", '{ method: "POST" }'),
+      },
+      "request",
+    ],
+    [
+      "fetchApi re-exported through an export clause over a local alias",
+      {
+        "src/lib/http/request.ts": 'import { fetchApi } from "@/lib/url-helpers";\nconst a = fetchApi;\nexport { a as request };\n',
+        "src/components/a.tsx": callImported('import { request } from "@/lib/http/request";', "request", '{ method: "POST" }'),
+      },
+      "request",
+    ],
+    [
+      "a renamed import of a package outside the scan",
+      { "src/components/a.tsx": callImported('import { fetchApi as f } from "some-package";', "f", '{ method: "POST" }') },
+      "f",
+    ],
+    [
+      "a default-imported helper exported as `export default send`",
+      {
+        "src/lib/send.ts": SEND_CONST("POST") + "export default send;\n",
+        "src/components/a.tsx": callImported('import send from "@/lib/send";', "send"),
+      },
+      "send",
+    ],
+    [
+      "a default-imported helper whose default export is not a declared helper",
+      {
+        "src/lib/send.ts":
+          SEND_CONST("POST") + "export function post(path: string) {\n  return send(path);\n}\n" +
+          "declare function wrap<T>(fn: T): T;\nexport default wrap(post);\n",
+        "src/components/a.tsx": callImported('import send from "@/lib/send";', "send"),
+      },
+      "send",
+    ],
+    [
+      "a default-imported anonymous arrow helper",
+      {
+        "src/lib/send.ts": PRELUDE + 'export default (path: string) => fetchApi(path, { method: "POST" });\n',
+        "src/components/a.tsx": callImported('import send from "@/lib/send";', "send"),
+      },
+      "send",
+    ],
+  ])("denies %s", (_label, files, callee) => {
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS, ...files });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`src/components/a.tsx:4  body read on the response of ${callee}(…)`);
+  });
+
+  it.each([
+    ["a renamed import of fetchApi used for a GET", { "src/components/a.tsx": callImported('import { fetchApi as f } from "@/lib/url-helpers";', "f") }],
+    [
+      "fetchApi re-exported through an exported const, used for a GET",
+      {
+        "src/lib/http/request.ts": 'import { fetchApi } from "@/lib/url-helpers";\nconst a = fetchApi;\nexport const request = a;\n',
+        "src/components/a.tsx": callImported('import { request } from "@/lib/http/request";', "request"),
+      },
+    ],
+    [
+      "a default-exported GET helper",
+      {
+        "src/lib/send.ts": SEND_CONST("GET") + "export default send;\n",
+        "src/components/a.tsx": callImported('import send from "@/lib/send";', "send"),
+      },
+    ],
+    [
+      "a default-exported GET helper beside a mutating helper in its module",
+      {
+        "src/lib/send.ts":
+          SEND_CONST("GET") + 'export function post(path: string) {\n  return fetchApi(path, { method: "POST" });\n}\nexport default send;\n',
+        "src/components/a.tsx": callImported('import send from "@/lib/send";', "send"),
+      },
+    ],
+  ])("allows %s", (_label, files) => {
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS, ...files });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("check-mutation-response-read: OK");
+  });
+
+  it("terminates on an export-clause import cycle", () => {
+    const r = run({
+      "src/lib/c.ts": 'import { request } from "./d";\nexport { request };\n',
+      "src/lib/d.ts": 'import { request } from "./c";\nexport { request };\n',
+      "src/components/a.tsx": callImported('import { request } from "@/lib/c";', "request", '{ method: "POST" }'),
+    });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("check-mutation-response-read: OK");
   });
 
   it("denies an unresolvable import when same-named helpers forward different arguments", () => {

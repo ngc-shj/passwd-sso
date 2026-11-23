@@ -219,6 +219,20 @@ describe("RotateKeyDialog", () => {
     });
   });
 
+  it("keeps the dialog open with the retry-later error when the server is unavailable (SERVICE_UNAVAILABLE)", async () => {
+    mockRotateKey.mockRejectedValue({ error: "SERVICE_UNAVAILABLE" });
+    render(<RotateKeyDialog open={true} onOpenChange={onOpenChange} />);
+    fireEvent.change(screen.getByLabelText("rotateKeyPassphrase"), {
+      target: { value: "mypass" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "rotateKeyButton" }));
+
+    expect(await screen.findByText("apiErr:SERVICE_UNAVAILABLE")).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(mockToast.error).not.toHaveBeenCalled();
+    expect(mockToast.warning).not.toHaveBeenCalled();
+  });
+
   it("closes with a persistent locked-vault notice when the rotation's outcome is unknown", async () => {
     mockRotateKey.mockRejectedValue(new VaultChangeOutcomeUnknownError());
     render(<RotateKeyDialog open={true} onOpenChange={onOpenChange} />);

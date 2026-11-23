@@ -25,6 +25,9 @@
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { SyntaxKind } from "ts-morph";
+import { createAstProject } from "./lib/ast-project.mjs";
+import { bindingIndex, unwrapExpression, visibleBinding } from "./lib/scope-bindings.mjs";
 
 // PR 2: moved from scripts/ to scripts/checks/ — bump one extra level up.
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -262,6 +265,10 @@ export function checkAeadAadAllowlist(files) {
  *
  * Comment/block-comment lines are stripped before matching (mirror existing checks).
  *
+ * INITIAL_VAULT_KEY_VERSION, the named first version, is held to the same rule
+ * by an AST count (see initialVersionFindings): one use in each setup site,
+ * none anywhere else.
+ *
  * @param {Array<{rel: string, content: string}>} files - {rel, content} pairs
  * @returns {string[]} error messages
  */
@@ -279,16 +286,6 @@ export function checkKeyVersionHardcode(files) {
   const keyVersionLiteralRe = /(?:^|[,{])\s*keyVersion\s*:\s*\d/m;
   const errors = [];
 
-  // The named first version replaces the literal at the two setup sites, so it
-  // is held to the same rule: one use in each setup site, none anywhere else
-  // (a use in vault-context beyond setup's would be a rotation/unlock path
-  // installing a literal version). Import/export lines do not count.
-  const INITIAL_VERSION_USES = new Map([
-    ["src/app/api/vault/setup/route.ts", 1],
-    ["src/lib/vault/vault-context.tsx", 1],
-  ]);
-  const initialVersionRe = /\bINITIAL_VAULT_KEY_VERSION\b/g;
-
   for (const { rel, content } of files) {
     const activeLines = content
       .split("\n")
@@ -296,16 +293,7 @@ export function checkKeyVersionHardcode(files) {
         const trimmed = line.trimStart();
         return !trimmed.startsWith("//") && !trimmed.startsWith("*");
       });
-    const uses = activeLines
-      .filter((line) => !/^\s*(?:import|export)\b/.test(line))
-      .join("\n")
-      .match(initialVersionRe)?.length ?? 0;
-    const allowedUses = INITIAL_VERSION_USES.get(rel) ?? 0;
-    if (uses > allowedUses) {
-      errors.push(
-        `Check E: INITIAL_VAULT_KEY_VERSION used ${uses} time(s) in ${rel} (allowed ${allowedUses}) — only vault setup may install the first version; thread the live key version instead`
-      );
-    }
+    if (content.includes(INITIAL_VERSION)) errors.push(...initialVersionFindings(rel, content));
     if (KEY_VERSION_HARDCODE_ALLOWLIST.has(rel)) continue;
     if (keyVersionLiteralRe.test(activeLines.join("\n"))) {
       errors.push(
@@ -314,6 +302,224 @@ export function checkKeyVersionHardcode(files) {
     }
   }
   return errors;
+}
+
+// The named first version replaces the literal at the two setup sites, so it is
+// held to the same rule: one use in each setup site, none anywhere else (a use
+// in vault-context beyond setup's would be a rotation/unlock path installing a
+// literal version).
+const INITIAL_VERSION = "INITIAL_VAULT_KEY_VERSION";
+const INITIAL_VERSION_USES = new Map([
+  ["src/app/api/vault/setup/route.ts", 1],
+  ["src/lib/vault/vault-context.tsx", 1],
+]);
+// The module that declares it; its declaration is the one binding of the name
+// that is not a use.
+const INITIAL_VERSION_DEFINITION = "src/lib/constants/vault/vault.ts";
+
+let initialVersionProject = null;
+
+/**
+ * Check E's INITIAL_VAULT_KEY_VERSION findings for one file, from its AST.
+ *
+ * A USE is a reference to the constant — the name itself, a namespace member
+ * `C.INITIAL_VAULT_KEY_VERSION` / `C["INITIAL_VAULT_KEY_VERSION"]` — or to an
+ * ALIAS bound to it: an import/export specifier renaming it, a variable or
+ * destructured binding initialised or assigned from a use, transitively. The
+ * specifier nodes and the definition's own declaration are not uses; comments
+ * are not nodes. Every use counts toward the file's cap (an alias's initialiser
+ * is one use, each read of the alias another).
+ *
+ * An exported alias is reported in every file. An unexported one is reported
+ * outside the two setup sites when it is unused; a used one there already puts
+ * the file over its cap of 0. An alias that leaves its module carries the
+ * constant into files that never spell it, which is where a pre-filter on the
+ * name (and a reviewer) would stop looking. With every escape reported at its
+ * source, scanning only the files that spell the name is complete.
+ *
+ * Not followed (a use there consumes the file's cap, but what it is copied
+ * into is not tracked): the constant placed in a container (`{ v: X }`,
+ * `[X]`) or passed to a function and read back out.
+ */
+function initialVersionFindings(rel, content) {
+  initialVersionProject ??= createAstProject();
+  const sf = initialVersionProject.createSourceFile(`/${rel}`, content, { overwrite: true });
+  let index = null;
+  const bindings = () => (index ??= bindingIndex(sf));
+  const allowedUses = INITIAL_VERSION_USES.get(rel) ?? 0;
+  const findings = [];
+  const aliasesSeen = new Set();
+  let uses = 0;
+
+  // An alias kept inside a setup site is fine (its uses count); outside them
+  // one is reported only when no use reports the file already (an unused
+  // renamed import binds the constant without reading it).
+  const localAliases = [];
+  const reportAlias = (name, exported) => {
+    if (!exported) {
+      localAliases.push(name);
+      return;
+    }
+    findings.push(
+      `Check E: alias ${name} of ${INITIAL_VERSION} in ${rel} (exported) — only vault setup may install the first version, by its own name; thread the live key version instead`
+    );
+  };
+
+  // A reference to an alias: `export { FIRST }` / `export { FIRST as V }`
+  // exports it under the specifier's name; anything else is a use.
+  const followReference = (id) => {
+    const parent = id.getParent();
+    if (parent?.getKind() === SyntaxKind.ExportSpecifier) {
+      reportAlias(parent.getAliasNode()?.getText() ?? id.getText(), true);
+      return;
+    }
+    followUse(id);
+  };
+
+  // `use` (an expression node) now holds the constant: count it and follow
+  // whatever binding it initialises or is assigned to.
+  const counted = new Set();
+  const followUse = (use) => {
+    if (counted.has(use)) return;
+    counted.add(use);
+    uses += 1;
+    let outer = use;
+    while (outer.getParent() && unwrapExpression(outer.getParent()) === use) outer = outer.getParent();
+    const parent = outer.getParent();
+    if (parent?.getKind() === SyntaxKind.VariableDeclaration && parent.getInitializer() === outer) {
+      bindAlias(parent, parent.getNameNode());
+    } else if (
+      parent?.getKind() === SyntaxKind.BinaryExpression &&
+      parent.getOperatorToken().getKind() === SyntaxKind.EqualsToken &&
+      parent.getRight() === outer
+    ) {
+      const left = unwrapExpression(parent.getLeft());
+      const decl = left.getKind() === SyntaxKind.Identifier ? visibleBinding(left.getText(), left, bindings) : null;
+      if (decl) bindAlias(decl, decl.getNameNode(), left.getText());
+      else reportAlias(left.getText(), false);
+    } else if (parent?.getKind() === SyntaxKind.ExportAssignment) {
+      reportAlias("default", true);
+    }
+  };
+
+  // `nameNode` of `decl` binds the constant (or, for a pattern, members of it).
+  const bindAlias = (decl, nameNode, only = null) => {
+    const names =
+      nameNode.getKind() === SyntaxKind.Identifier
+        ? [nameNode.getText()]
+        : nameNode.getDescendantsOfKind(SyntaxKind.BindingElement).map((el) => el.getName());
+    const exported = decl.getVariableStatement?.()?.isExported() ?? false;
+    for (const name of names) {
+      if (only && name !== only) continue;
+      const key = `${decl.getStart()}:${name}`;
+      if (aliasesSeen.has(key)) continue;
+      aliasesSeen.add(key);
+      reportAlias(name, exported);
+      for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+        if (id.getText() !== name || !isValueReference(id)) continue;
+        if (visibleBinding(name, id, bindings) === decl) followReference(id);
+      }
+    }
+  };
+
+  // An import binding renamed from the constant (`import { X as FIRST }`): its
+  // references are the module-level identifiers no local declaration claims.
+  const bindImportAlias = (name) => {
+    if (aliasesSeen.has(`import:${name}`)) return;
+    aliasesSeen.add(`import:${name}`);
+    reportAlias(name, false);
+    for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+      if (id.getText() !== name || !isValueReference(id)) continue;
+      if (!visibleBinding(name, id, bindings)) followReference(id);
+    }
+  };
+
+  for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    if (id.getText() !== INITIAL_VERSION) continue;
+    const parent = id.getParent();
+    const kind = parent?.getKind();
+    if (kind === SyntaxKind.ImportSpecifier) {
+      const alias = parent.getAliasNode();
+      if (alias && alias !== id) bindImportAlias(alias.getText());
+      continue;
+    }
+    if (kind === SyntaxKind.ExportSpecifier) {
+      const alias = parent.getAliasNode();
+      if (alias && alias !== id) reportAlias(alias.getText(), true);
+      continue;
+    }
+    if (kind === SyntaxKind.VariableDeclaration && parent.getNameNode() === id) {
+      // The definition binds the name; a second declaration of it anywhere is
+      // a constant of the same name, held to the same cap.
+      if (rel !== INITIAL_VERSION_DEFINITION) uses += 1;
+      continue;
+    }
+    if (kind === SyntaxKind.BindingElement && parent.getPropertyNameNode() === id) {
+      // `const { INITIAL_VAULT_KEY_VERSION: v } = C`
+      uses += 1;
+      bindAlias(parent.getFirstAncestorByKind(SyntaxKind.VariableDeclaration) ?? parent, parent.getNameNode());
+      continue;
+    }
+    if (kind === SyntaxKind.BindingElement && parent.getNameNode() === id) {
+      // `const { INITIAL_VAULT_KEY_VERSION } = C`: a local of the same name.
+      uses += 1;
+      bindAlias(parent.getFirstAncestorByKind(SyntaxKind.VariableDeclaration) ?? parent, id);
+      continue;
+    }
+    if (kind === SyntaxKind.PropertyAssignment && parent.getNameNode() === id) continue; // `{ INITIAL_VAULT_KEY_VERSION: v }` key
+    if (kind === SyntaxKind.ShorthandPropertyAssignment) {
+      uses += 1; // `{ INITIAL_VAULT_KEY_VERSION }` reads the binding
+      continue;
+    }
+    if (kind === SyntaxKind.PropertyAccessExpression && parent.getNameNode() === id) {
+      followUse(parent); // a namespace member, `C.INITIAL_VAULT_KEY_VERSION`
+      continue;
+    }
+    followUse(id);
+  }
+  // `C["INITIAL_VAULT_KEY_VERSION"]`
+  for (const access of sf.getDescendantsOfKind(SyntaxKind.ElementAccessExpression)) {
+    const key = unwrapExpression(access.getArgumentExpression());
+    const isLiteral = key?.getKind() === SyntaxKind.StringLiteral || key?.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral;
+    if (isLiteral && key.getLiteralText() === INITIAL_VERSION) followUse(access);
+  }
+
+  if (uses > allowedUses) {
+    findings.unshift(
+      `Check E: ${INITIAL_VERSION} used ${uses} time(s) in ${rel} (allowed ${allowedUses}) — only vault setup may install the first version; thread the live key version instead`
+    );
+  } else if (allowedUses === 0) {
+    for (const name of localAliases) {
+      findings.push(
+        `Check E: alias ${name} of ${INITIAL_VERSION} in ${rel} — only vault setup may install the first version, by its own name; thread the live key version instead`
+      );
+    }
+  }
+  return findings;
+}
+
+const BINDING_NAME_KINDS = new Set([
+  SyntaxKind.VariableDeclaration,
+  SyntaxKind.Parameter,
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.ClassDeclaration,
+  SyntaxKind.BindingElement,
+]);
+
+/**
+ * False for spellings of a name that read no binding: a declared name, an
+ * import clause, `x.name`, a `{ name: v }` key, a binding element's property
+ * name. An export specifier is handled by the caller.
+ */
+function isValueReference(id) {
+  const parent = id.getParent();
+  const kind = parent?.getKind();
+  if (BINDING_NAME_KINDS.has(kind) && parent.getNameNode() === id) return false;
+  if (kind === SyntaxKind.BindingElement && parent.getPropertyNameNode() === id) return false;
+  if (kind === SyntaxKind.ImportSpecifier || kind === SyntaxKind.ImportClause || kind === SyntaxKind.NamespaceImport) return false;
+  if (kind === SyntaxKind.PropertyAccessExpression && parent.getNameNode() === id) return false;
+  if (kind === SyntaxKind.PropertyAssignment && parent.getNameNode() === id) return false;
+  return true;
 }
 
 /**

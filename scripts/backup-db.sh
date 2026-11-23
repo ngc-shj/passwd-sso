@@ -97,6 +97,19 @@ ORIGINAL_CWD="$(pwd -P)"
 cleanup() {
   local rc=$?
   trap - EXIT
+  # Nothing may cut this function short. A signal handled here used to run
+  # on_signal, whose `exit` — with the EXIT trap already cleared — left the
+  # passfile and the lock behind and surfaced a raw 128+n status. The common
+  # trigger is SIGPIPE from this function's OWN warnings: a caller that sends
+  # SIGTERM and stops reading (node's spawnSync timeout does exactly that), or
+  # a log pipe whose reader died, leaves the "kept …" and INTERRUPTED lines
+  # below writing to a reader-less stderr. With a no-op handler the write fails
+  # with EPIPE instead, and `set +e` keeps that failure (or any other step's)
+  # from aborting the remaining steps; the status decision at the end reads
+  # only rc. A no-op, not `trap ''`: an IGNORED disposition is inherited by the
+  # rm/mv/cat this function runs, deafening them to a supervisor's TERM.
+  trap : INT TERM HUP QUIT PIPE ALRM USR1 USR2
+  set +e
 
   if [ -n "$RUN_PARTIAL" ] && [ -d "$RUN_PARTIAL" ]; then
     if [ -n "$KEEP_PARTIAL_AS_FAILED" ]; then
@@ -121,14 +134,10 @@ cleanup() {
     fi
   fi
 
-  # rm -rf, not rmdir: the lock directory holds a pid file. `|| true` because
-  # this is the last command in the trap before the status decision, and under
-  # `set -e` its failure would otherwise become the script's exit status —
-  # reporting a successful run as a failure.
   [ -n "$PGPASS_FILE" ] && rm -f -- "$PGPASS_FILE" 2>/dev/null
 
   # Only if it is still OURS: a run that lost a race and exits must not remove
-  # the winner's lock.
+  # the winner's lock. rm -rf, not rmdir: the lock directory holds a pid file.
   if [ -n "$LOCK_DIR" ] && [ -d "$LOCK_DIR" ] \
      && [ "$(cat -- "$LOCK_DIR/pid" 2>/dev/null || true)" = "$$" ]; then
     rm -rf -- "$LOCK_DIR" 2>/dev/null || true

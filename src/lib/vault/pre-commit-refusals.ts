@@ -20,7 +20,8 @@ export const PROXY_PRE_ROUTE_REFUSALS = [
 //
 // Emitted before the route runs: PROXY_PRE_ROUTE_REFUSALS.
 // Emitted by each of those routes before its write: UNAUTHORIZED,
-// RATE_LIMIT_EXCEEDED, SERVICE_UNAVAILABLE (limiter fail-closed),
+// RATE_LIMIT_EXCEEDED, SERVICE_UNAVAILABLE (limiter fail-closed, or a
+// missing verifier pepper version — an operator fault, never a wrong passphrase),
 // PAYLOAD_TOO_LARGE, INVALID_JSON, VALIDATION_ERROR, VAULT_NOT_SETUP,
 // VERIFIER_NOT_SET (no stored passphrase verifier, checked before the
 // transaction), INVALID_PASSPHRASE. Each caller first checks the passphrase

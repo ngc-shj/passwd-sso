@@ -66,7 +66,7 @@
   "policyExportDisabled": "Export is disabled by team policy.",
   "alreadyRevoked": "Already revoked.",
   "upstreamError": "An external service error occurred.",
-  "verifierNotSet": "Please lock and unlock your vault first.",
+  "verifierNotSet": "Lock your vault, then unlock it once with your passphrase (not a passkey), and try again.",
   "accountLocked": "Account temporarily locked due to too many failed attempts. Please try again later.",
   "serviceUnavailable": "Temporary server error. Please try again.",
   "unknownError": "An error occurred. Please try again.",

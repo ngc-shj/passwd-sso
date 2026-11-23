@@ -288,6 +288,29 @@ describe("generateRecoveryKeyFlow", () => {
     expect(result).toEqual({ ok: false, notStartedVaultLocked: true });
   });
 
+  it("reports the outcome as unknown when a committed key cannot be formatted", async () => {
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ success: true }) });
+    mockFormatRecoveryKey.mockRejectedValue(new Error("format failed"));
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
+
+    expect(result).toEqual({ ok: false, outcomeUnknown: true });
+    expect(allZero(recoveryKey)).toBe(true);
+  });
+
+  it("reports a throw before the POST, once the vault was locked, as not-started", async () => {
+    const lock = { locked: false };
+    mockWrapSecretKeyWithRecovery.mockImplementation(async () => {
+      lock.locked = true;
+      throw new Error("crypto failure");
+    });
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, () => lock.locked);
+
+    expect(result).toEqual({ ok: false, notStartedVaultLocked: true });
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   // ── Exception path ────────────────────────────────────────
 
   it("returns null errorCode on crypto exception", async () => {

@@ -70,6 +70,11 @@ async function handlePOST(request: NextRequest) {
     if (verifier === "not-set") {
       return errorResponse(API_ERROR.VAULT_NOT_SETUP);
     }
+    // An operator's missing pepper is not the user's failed attempt: no
+    // lockout count and no TRAVEL_MODE_DISABLE_FAILED row.
+    if (verifier === "unavailable") {
+      return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
+    }
 
     await recordFailure(session.user.id, request);
 

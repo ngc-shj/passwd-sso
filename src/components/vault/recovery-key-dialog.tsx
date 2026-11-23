@@ -86,6 +86,7 @@ export async function generateRecoveryKeyFlow(
   vaultLockedSinceStart: () => boolean,
 ): Promise<GenerateFlowResult> {
   let recoveryKey: Uint8Array | null = null;
+  let sent = false;
   try {
     const currentVerifierHash = await computePassphraseVerifier(
       passphrase,
@@ -97,6 +98,7 @@ export async function generateRecoveryKeyFlow(
 
     if (vaultLockedSinceStart()) return { ok: false, notStartedVaultLocked: true };
     let res: Response;
+    sent = true;
     try {
       res = await fetchApi(API_PATH.VAULT_RECOVERY_KEY_GENERATE, {
         method: "POST",
@@ -131,6 +133,10 @@ export async function generateRecoveryKeyFlow(
     if (vaultLockedSinceStart()) return { ok: false, committedVaultLocked: true };
     return { ok: true, formattedKey };
   } catch {
+    // A throw once the POST was sent (formatting a committed key) leaves the
+    // user without the key the server may hold. Before it, nothing was stored.
+    if (sent) return { ok: false, outcomeUnknown: true };
+    if (vaultLockedSinceStart()) return { ok: false, notStartedVaultLocked: true };
     return { ok: false, errorCode: null };
   } finally {
     recoveryKey?.fill(0);
@@ -194,6 +200,9 @@ export function RecoveryKeyDialog({
     // to a persistent toast instead, and nothing is sent once it happened.
     const lockEpoch = getLockEpoch();
     const vaultLockedSinceStart = () => lockedSince(lockEpoch);
+    // Whether a recovery key existed before this one, for the notices that say
+    // the previous one no longer works.
+    const hadRecoveryKey = hasRecoveryKey || recoveryKeyInvalidated;
 
     setLoading(true);
     setError("");
@@ -230,10 +239,20 @@ export function RecoveryKeyDialog({
       toast.warning(t("recoveryKeyNotStartedVaultLocked"), { duration: Infinity });
       handleOpenChange(false);
     } else if ("committedVaultLocked" in result) {
-      toast.error(t("recoveryKeyCommittedVaultLocked"), { duration: Infinity });
+      toast.error(
+        t(hadRecoveryKey ? "recoveryKeyCommittedVaultLocked" : "recoveryKeyCommittedVaultLockedFirstKey"),
+        { duration: Infinity },
+      );
       handleOpenChange(false);
     } else if ("outcomeUnknown" in result) {
-      setError(t("recoveryKeyOutcomeUnknown"));
+      const notice = t(hadRecoveryKey ? "recoveryKeyOutcomeUnknown" : "recoveryKeyOutcomeUnknownFirstKey");
+      if (vaultLockedSinceStart()) {
+        // The lock unmounted this dialog: the notice must outlive it.
+        toast.error(notice, { duration: Infinity });
+        handleOpenChange(false);
+      } else {
+        setError(notice);
+      }
     } else if (
       result.errorCode === API_ERROR.VAULT_WRAP_CONFLICT ||
       result.errorCode === API_ERROR.INVALID_PASSPHRASE

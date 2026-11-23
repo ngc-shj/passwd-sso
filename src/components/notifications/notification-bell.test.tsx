@@ -110,6 +110,14 @@ function route(routes: Routes) {
   });
 }
 
+function deferred() {
+  let resolve: (res: Response) => void = () => {};
+  const promise = new Promise<Response>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 function bell() {
   return screen.getByLabelText("label");
 }
@@ -320,6 +328,29 @@ describe("NotificationBell", () => {
     expect(mockFetch.mock.calls.filter((c) => String(c[0]).startsWith("/api/notifications/a"))).toHaveLength(0);
   });
 
+  it("keeps the other rows read when one is deleted after mark-all", async () => {
+    await openWith([item({ id: "a", title: "A" }), item({ id: "b", title: "B" })], 2);
+    await screen.findByText("A");
+    fireEvent.click(screen.getByText("markAllAsRead"));
+    await waitFor(() => expect(screen.queryByText("markAllAsRead")).not.toBeInTheDocument());
+    fireEvent.click(screen.getAllByText("delete")[0]);
+    await waitFor(() => expect(screen.queryByText("A")).not.toBeInTheDocument());
+    // Still read, so selecting it sends no per-item PATCH.
+    fireEvent.click(screen.getByRole("menuitem"));
+    expect(callsWith("/api/notifications/b", "PATCH")).toHaveLength(0);
+  });
+
+  it("does not bring a deleted row back when mark-all runs afterwards", async () => {
+    await openWith([item({ id: "a", title: "A" }), item({ id: "b", title: "B" })], 2);
+    await screen.findByText("A");
+    fireEvent.click(screen.getAllByText("delete")[0]);
+    await waitFor(() => expect(screen.queryByText("A")).not.toBeInTheDocument());
+    fireEvent.click(screen.getByText("markAllAsRead"));
+    await waitFor(() => expect(screen.queryByText("markAllAsRead")).not.toBeInTheDocument());
+    expect(screen.queryByText("A")).not.toBeInTheDocument();
+    expect(screen.getByText("B")).toBeInTheDocument();
+  });
+
   it("keeps the badge when mark-all fails", async () => {
     route({
       count: () => Promise.resolve(json({ unreadCount: 2 })),
@@ -376,14 +407,6 @@ describe("NotificationBell", () => {
   });
 
   describe("when mark-read is in flight and the notification is then deleted", () => {
-    function deferred() {
-      let resolve: (res: Response) => void = () => {};
-      const promise = new Promise<Response>((r) => {
-        resolve = r;
-      });
-      return { promise, resolve };
-    }
-
     async function clickRowThenDelete() {
       const patch = deferred();
       const del = deferred();
@@ -439,6 +462,112 @@ describe("NotificationBell", () => {
       });
       expect(screen.queryByText("First")).not.toBeInTheDocument();
       expect(within(bell()).getByText("2")).toBeInTheDocument();
+    });
+  });
+
+  describe("when another request or a refetch lands while a request is in flight", () => {
+    let current: Routes = {};
+
+    // Close and reopen the menu: the list is refetched with `items`.
+    async function refetchList(items: Item[]) {
+      route({
+        ...current,
+        list: () => Promise.resolve(json({ items })),
+      });
+      const listCalls = mockFetch.mock.calls.filter((c) => c[0] === LIST_PATH).length;
+      fireEvent.click(screen.getByTestId("toggle-menu"));
+      fireEvent.click(screen.getByTestId("toggle-menu"));
+      await waitFor(() =>
+        expect(mockFetch.mock.calls.filter((c) => c[0] === LIST_PATH)).toHaveLength(listCalls + 1),
+      );
+      await act(async () => {});
+    }
+
+    async function setUp(routes: Routes, unreadCount: number) {
+      current = {
+        count: () => Promise.resolve(json({ unreadCount })),
+        list: () => Promise.resolve(json({ items: [item({ id: "n-1", title: "First" })] })),
+        ...routes,
+      };
+      route(current);
+      render(<NotificationBell />);
+      await within(bell()).findByText(String(unreadCount));
+      fireEvent.click(screen.getByTestId("toggle-menu"));
+      await screen.findByText("First");
+    }
+
+    it("decrements on mark-read success even when a refetch already shows the item read", async () => {
+      const patch = deferred();
+      await setUp({ patchOne: () => patch.promise }, 3);
+      fireEvent.click(screen.getByRole("menuitem"));
+      // The server committed the PATCH before the refetch read the list.
+      await refetchList([item({ id: "n-1", title: "Refetched", isRead: true })]);
+      expect(screen.getByText("Refetched")).toBeInTheDocument();
+      await act(async () => {
+        patch.resolve(json({}));
+      });
+      expect(within(bell()).getByText("2")).toBeInTheDocument();
+    });
+
+    it("decrements on delete success even when a refetch already dropped the item", async () => {
+      const del = deferred();
+      await setUp({ del: () => del.promise }, 3);
+      fireEvent.click(screen.getByText("delete"));
+      await refetchList([]);
+      expect(screen.queryByText("First")).not.toBeInTheDocument();
+      await act(async () => {
+        del.resolve(json({}));
+      });
+      expect(within(bell()).getByText("2")).toBeInTheDocument();
+    });
+
+    it("decrements once when the same unread row is selected twice and both PATCHes succeed", async () => {
+      const first = deferred();
+      const second = deferred();
+      const patches = [first, second];
+      await setUp({ patchOne: () => (patches.shift() ?? deferred()).promise }, 3);
+      fireEvent.click(screen.getByRole("menuitem"));
+      fireEvent.click(screen.getByRole("menuitem"));
+      expect(callsWith("/api/notifications/n-1", "PATCH")).toHaveLength(2);
+      await act(async () => {
+        first.resolve(json({}));
+        second.resolve(json({}));
+      });
+      expect(within(bell()).getByText("2")).toBeInTheDocument();
+    });
+
+    it("decrements once when the same row is deleted twice and both DELETEs succeed", async () => {
+      const first = deferred();
+      const second = deferred();
+      const dels = [first, second];
+      await setUp({ del: () => (dels.shift() ?? deferred()).promise }, 3);
+      fireEvent.click(screen.getByText("delete"));
+      fireEvent.click(screen.getByText("delete"));
+      expect(callsWith("/api/notifications/n-1", "DELETE")).toHaveLength(2);
+      await act(async () => {
+        first.resolve(json({}));
+        second.resolve(json({}));
+      });
+      expect(screen.queryByText("First")).not.toBeInTheDocument();
+      expect(within(bell()).getByText("2")).toBeInTheDocument();
+    });
+
+    it("does not let a delete in flight across mark-all decrement a badge a poll has since raised", async () => {
+      const del = deferred();
+      await setUp({ del: () => del.promise }, 1);
+      fireEvent.click(screen.getByText("delete"));
+      fireEvent.click(screen.getByText("markAllAsRead"));
+      await waitFor(() => expect(bell().textContent).toBe(""));
+      // A new notification arrives; the next poll (count still 1) raises the badge for it.
+      await act(async () => {
+        document.dispatchEvent(new Event("visibilitychange"));
+      });
+      await within(bell()).findByText("1");
+      await act(async () => {
+        del.resolve(json({}));
+      });
+      expect(screen.queryByText("First")).not.toBeInTheDocument();
+      expect(within(bell()).getByText("1")).toBeInTheDocument();
     });
   });
 

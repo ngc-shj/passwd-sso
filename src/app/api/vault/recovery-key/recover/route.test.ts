@@ -224,14 +224,18 @@ describe("POST /api/vault/recovery-key/recover", () => {
       expect(json.error).toBe("INVALID_RECOVERY_KEY");
     });
 
-    it("emits VERIFIER_PEPPER_MISSING audit and returns 401 when pepper version is missing", async () => {
+    it("answers 503 SERVICE_UNAVAILABLE, audits once and returns no key material when the pepper version is missing", async () => {
       const { verifyPassphraseVerifier } = await import("@/lib/crypto/crypto-server");
       vi.mocked(verifyPassphraseVerifier).mockReturnValueOnce({ ok: false, reason: "MISSING_PEPPER_VERSION" });
 
       const res = await POST(createRequest("POST", URL, {
         body: { step: "verify", verifierHash: "a".repeat(64) },
       }));
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(503);
+      const json = await res.json();
+      expect(json.error).toBe("SERVICE_UNAVAILABLE");
+      expect(json).not.toHaveProperty("encryptedSecretKey");
+      expect(mockLogAudit).toHaveBeenCalledTimes(1);
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({
           action: "VERIFIER_PEPPER_MISSING",
@@ -420,14 +424,17 @@ describe("POST /api/vault/recovery-key/recover", () => {
         body: { ...resetBody, verifierHash: "f".repeat(64) },
       }));
       expect(res.status).toBe(401);
+      expect((await res.json()).error).toBe("INVALID_RECOVERY_KEY");
     });
 
-    it("emits VERIFIER_PEPPER_MISSING audit and returns 401 when pepper version is missing", async () => {
+    it("answers 503 SERVICE_UNAVAILABLE, audits once and replaces nothing when the pepper version is missing", async () => {
       const { verifyPassphraseVerifier } = await import("@/lib/crypto/crypto-server");
       vi.mocked(verifyPassphraseVerifier).mockReturnValueOnce({ ok: false, reason: "MISSING_PEPPER_VERSION" });
 
       const res = await POST(createRequest("POST", URL, { body: resetBody }));
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe("SERVICE_UNAVAILABLE");
+      expect(mockLogAudit).toHaveBeenCalledTimes(1);
       expect(mockLogAudit).toHaveBeenCalledWith(
         expect.objectContaining({
           action: "VERIFIER_PEPPER_MISSING",
@@ -435,6 +442,12 @@ describe("POST /api/vault/recovery-key/recover", () => {
           tenantId: "test-tenant-id",
         }),
       );
+      expect(mockTxUpdateMany).not.toHaveBeenCalled();
+      expect(mockPrismaUser.updateMany).not.toHaveBeenCalled();
+      expect(mockPrismaUser.update).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+      expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+      expect(mockResetClear).not.toHaveBeenCalled();
     });
 
     it("returns 400 on missing fields", async () => {

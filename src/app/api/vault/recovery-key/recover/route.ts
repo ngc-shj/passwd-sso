@@ -135,6 +135,7 @@ async function handleVerify(data: z.infer<typeof verifySchema>, userId: string, 
     storedVersion: user.recoveryVerifierVersion,
   });
   if (verifier !== "ok") {
+    if (verifier === "unavailable") return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
     return errorResponse(
       verifier === "not-set" ? API_ERROR.RECOVERY_KEY_NOT_SET : API_ERROR.INVALID_RECOVERY_KEY,
     );
@@ -180,6 +181,7 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
     storedVersion: user.recoveryVerifierVersion,
   });
   if (verifier !== "ok") {
+    if (verifier === "unavailable") return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
     return errorResponse(
       verifier === "not-set" ? API_ERROR.RECOVERY_KEY_NOT_SET : API_ERROR.INVALID_RECOVERY_KEY,
     );

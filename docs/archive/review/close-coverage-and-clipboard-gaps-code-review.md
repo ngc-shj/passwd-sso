@@ -438,3 +438,94 @@ The decrypted ECDH private key buffer is zeroed in each unlock function's `final
   - The false header claim was rewritten.
 - **T4-4 alias:** any alias of `fetchApi` (const, let or var, a later assignment, a destructured binding or a parameter default) is now a source.
 - **Self-test:** it grew from 75 to 130 rows. All 60 mutants are red: the reviewer's list plus the agent's own sweep of the clauses it touched.
+
+---
+
+# Review round 5
+
+Scope: the round-4 fixes, `git diff e98ff648c..f82f44b3f`.
+
+All round-4 findings are resolved:
+- **install/drop:** the only writer of key material is confirmed by grep. No await sits between a `lockedSince` check and the use it guards.
+- **`VAULT_UNLOCK_INTERRUPTED`:** unreachable for a wrong credential, so lockout accounting is intact.
+- **Stored-verifier sites:** all six fail closed.
+- **R43:** no widening.
+- **Ledgers:** the round-4 ledgers were re-derived and hold. The C11 ledger copies two stale mutant trees; those were rebuilt and are red.
+
+No Critical findings. Two Major findings, both missing tests.
+
+## Findings
+
+- **T5-1 [Major]** — page hide during passkey or stored-PRF unlock is untested. Two kinds of mutant stay green: one that returns false instead of throwing `VAULT_UNLOCK_INTERRUPTED`, and one that reads the epoch at install time instead of at the start. Only the `unlock` path is pinned (R3).
+- **T5-2 [Major]** — zeroing of key buffers is untested. The fills of `dropKeyMaterial`, and the setup and rotate ECDH working copies, have green mutants.
+- **F-R5-2 [Minor, R39/R42]** — two status transitions bypass `dropKeyMaterial`. The render-time LOCKED on session end and the switch from UNLOCKED to SETUP_REQUIRED both leave keys resident without bumping the epoch. This contradicts the round-4 claim that there is a single drop path.
+- **S5-1 / F-R5-1 [Minor, R48]** — a missing pepper (an operator misconfiguration) maps to INVALID_PASSPHRASE.
+  - After a passing local check, the client reads that as "changed elsewhere" and locks on every retry.
+  - travel-mode/disable counts it toward the user's lockout.
+- **S5-4 [Minor, R39]** — the entry, history and CEK-rewrap loops in `rotateKey` keep decrypting after a lock.
+- **S5-2 [Minor, R49]** — the C11 gate misses a renamed `fetchApi` import and a default-exported const helper. Both are pre-existing, but the round-4 resolution claims coverage of them.
+- **S5-3 / T5-6 [Minor, R47]** — Check E's use count can be evaded through an import alias, export lines or a local alias. The setup-route cap is unpinned.
+- **F-R5-3 [Minor]** — the recovery-key unknown outcome under a lock goes to `setError` on a dialog that has already unmounted.
+- **F-R5-4 [Minor]** — the recovery-key `VERIFIER_NOT_SET` message still omits "with your passphrase, not a passkey".
+- **F-R5-5 / T5-5 [Minor]**
+  - A list refetch between a request and its response suppresses a valid badge decrement.
+  - The `isRead` guard, the missing-item delete guard and the mark-all ref write are unpinned.
+- **F-R5-6 [Minor]** — `recoveryKeyCommittedVaultLocked` claims a previous key existed, even for a first-time user.
+- **T5-3 / T5-4 / T5-7 [Minor]** — three coverage gaps:
+  - a refusal after a lock returning not-started is unpinned;
+  - the lock check before the rotate-key/data GET is unpinned;
+  - the bfcache pageshow test never reaches its `lock()` branch, and its title says otherwise.
+
+The severity trend across rounds is Critical in round 3, six Majors in round 4, and two test-only Majors in round 5. No production defect above Minor remains.
+
+## Resolution Status (round 5)
+
+Red-proof ledgers are in the scratchpad: `r5-fix-a/`, `r5-fix-b/` and `r5-fix-c/`, each with a `ledger.md`. Every new test is red on the pre-fix copy or on a named mutant, and deny and allow pins are paired.
+
+### F-R5-2 — resolved
+- **Lint constraint.** Calling `dropKeyMaterial` from an effect is refused by `react-hooks/set-state-in-effect`. So the ref half is split out as `dropKeyRefs` (bump the epoch, then zero and null the refs), and the two transitions are wired as follows:
+  - **Session end.** A render-time `unauthenticated && UNLOCKED` sets LOCKED. A layout effect syncs `sessionStatusRef` and calls `dropKeyRefs()` while a key is held. `installKeyMaterial` also refuses once the session is unauthenticated.
+  - **SETUP_REQUIRED.** `checkVaultStatus` drops first when a key is held.
+- **Every remaining `setVaultStatus` / `setEncryptionKey` call was enumerated.** No transition away from UNLOCKED now skips the drop.
+- **Error code on a refused install.** An unlock refused because the session ended throws `UNAUTHORIZED`, which leads to sign-in; it no longer throws INTERRUPTED, which would loop.
+- **Stale status responses.** These are now ignored: only the latest request applies, and a setup-required verdict is discarded once a key has been installed since its request started.
+
+### T5-1 / T5-2 / T5-3 / T5-4 — resolved
+- **T5-1.** The interrupted unlock (pagehide) and the session-expired unlock are each an `it.each` over all three unlock paths.
+- **T5-2.** Zeroing is pinned for the secret-key ref, the ECDH ref, and the setup and rotate ECDH working copies, each with a non-zero allow pin.
+- **T5-3.** A refusal received after a lock reports not-started, for both change and rotate.
+- **T5-4.** A lock before the data GET means no GET is sent.
+
+### T5-7 — resolved by removal
+- The bfcache pageshow guard was dead code.
+- **Why it could never act:** pagehide queues the LOCKED update at the same priority the guard would use, a page frozen before it renders applies it on restore, and a freeze with no pagehide leaves the key in place, so the guard's condition is false there anyway.
+- The guard and its vacuous tests were removed. The remaining test pins that pagehide drops the keys and the vault stays locked across a persisted pageshow.
+
+### S5-4 — resolved
+Each of the entry, history and CEK loops checks `lockedSince` on every iteration. Each loop has its own pin based on decrypt counts.
+
+### S5-1 / F-R5-1 — resolved
+- **Server.** `checkStoredVerifier` returns `"unavailable"` when the pepper version is missing; the audit is still written. All six sites map it to 503 SERVICE_UNAVAILABLE, keeping the fail-closed shape. travel-mode/disable no longer counts it toward the user's lockout.
+- **Client.** 503 is a pre-commit refusal, so the vault stays unlocked and an inline "retry later" message is shown.
+- **Allow side.** A genuinely wrong verifier still locks after a passing local check.
+
+### F-R5-3 / F-R5-4 / F-R5-6 — resolved
+- **F-R5-3.** A recovery-key unknown outcome while locked becomes a persistent toast.
+- **F-R5-4.** `ApiErrors.verifierNotSet` and the recovery dialog's own hint now say to unlock with the passphrase, not a passkey.
+- **F-R5-6.** The committed-locked and outcome-unknown wording depends on whether a previous key existed.
+
+### F-R5-5 / T5-5 — resolved
+- **Mechanism.** The badge decrement is decided by a per-id set of ids already accounted for, shared by mark-read, delete and mark-all, rather than by the list's contents.
+- **Pins:**
+  - a refetch arriving in between;
+  - a double click;
+  - a double delete;
+  - mark-all followed by a poll.
+
+### S5-2 / S5-3 / T5-6 — resolved
+- **C11 gate.**
+  - **New sources:** any import binding of `fetchApi`, under any local name or through any re-export, including `export const x = fetchApi` and export clauses over local aliases.
+  - **Default exports:** `export default <ident>` is followed. An unresolvable default takes the most cautious verdict.
+  - **Crash fixed:** a recursion crash on mutual re-exports was found and fixed, with a termination row.
+  - **Remaining declared bypasses:** call results (`wrap(post)`), the function or container boundary, and raw `fetch`.
+- **Check E.** Re-implemented on the AST: renames, aliases, re-exports, namespace access and export lines are counted, and the setup-route cap is pinned. 12 deny rows and 3 allow rows were added.

@@ -56,10 +56,10 @@ describe("checkStoredVerifier", () => {
     expect(mockLogAuditAsync).not.toHaveBeenCalled();
   });
 
-  it("returns wrong and writes one VERIFIER_PEPPER_MISSING tenant audit when the pepper is missing", async () => {
+  it("returns unavailable and writes one VERIFIER_PEPPER_MISSING tenant audit when the pepper is missing", async () => {
     mockVerifyPassphraseVerifier.mockReturnValue({ ok: false, reason: "MISSING_PEPPER_VERSION" });
 
-    expect(await check()).toBe("wrong");
+    expect(await check()).toBe("unavailable");
     expect(mockLogAuditAsync).toHaveBeenCalledTimes(1);
     expect(mockLogAuditAsync).toHaveBeenCalledWith(
       expect.objectContaining({

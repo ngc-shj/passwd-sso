@@ -51,12 +51,16 @@ export function NotificationBell() {
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   // Write-through copy of the list: every write sets it and the state
-  // together, so a response handler reads the list as of the last write —
-  // including one another handler made a moment ago that React has not
-  // rendered yet. A ref synced after commit lags that write, and deciding
-  // from the rendered item misses a mark-read that landed meanwhile; either
-  // lets mark-read and delete both decrement the badge for one item.
+  // together, so a handler reads the list as of the last write, including
+  // one React has not rendered yet.
   const notificationsRef = useRef<NotificationItem[]>([]);
+  // Ids whose unread state this client has already taken off the badge (by
+  // mark-read, delete or mark-all). Whether a mark-read or delete response
+  // decrements is decided here, per id, not from the list: a list refetch
+  // that commits while the request is in flight already shows the item read
+  // or gone, though nothing has counted it yet; and two requests for one
+  // item (two clicks, mark-read then delete) must decrement once.
+  const accountedRef = useRef(new Set<string>());
   const writeNotifications = useCallback((next: NotificationItem[]) => {
     notificationsRef.current = next;
     setNotifications(next);
@@ -127,6 +131,9 @@ export function NotificationBell() {
       const res = await fetchApi(API_PATH.NOTIFICATIONS, { method: "PATCH" });
       if (res.ok) {
         setUnreadCount(0);
+        // A request still in flight for one of these must not decrement the
+        // zeroed badge, which a poll may have raised again by then.
+        for (const n of notificationsRef.current) accountedRef.current.add(n.id);
         writeNotifications(
           notificationsRef.current.map((n) => ({ ...n, isRead: true })),
         );
@@ -142,14 +149,11 @@ export function NotificationBell() {
         method: "PATCH",
       });
       if (res.ok) {
-        // Already read, or deleted while this request was in flight: the
-        // other path has accounted for this item in the badge.
-        const current = notificationsRef.current;
-        const target = current.find((n) => n.id === id);
-        if (!target || target.isRead) return;
         writeNotifications(
-          current.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
+          notificationsRef.current.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
         );
+        if (accountedRef.current.has(id)) return;
+        accountedRef.current.add(id);
         setUnreadCount((c) => Math.max(0, c - 1));
       }
     } catch {
@@ -158,21 +162,18 @@ export function NotificationBell() {
   }, [writeNotifications]);
 
   const deleteNotification = useCallback(async (id: string) => {
+    // Read before the request: a refetch landing meanwhile may drop the item.
+    const wasUnread = notificationsRef.current.some((n) => n.id === id && !n.isRead);
     try {
       const res = await fetchApi(apiPath.notificationById(id), {
         method: "DELETE",
       });
       if (res.ok) {
-        // Decided from the list as of now, not as rendered at click time: a
-        // mark-read that succeeded meanwhile has already decremented. Kept
-        // out of a state updater, which StrictMode runs twice.
-        const current = notificationsRef.current;
-        const removed = current.find((n) => n.id === id);
-        if (!removed) return;
-        writeNotifications(current.filter((n) => n.id !== id));
-        if (!removed.isRead) {
-          setUnreadCount((c) => Math.max(0, c - 1));
-        }
+        // Kept out of a state updater, which StrictMode runs twice.
+        writeNotifications(notificationsRef.current.filter((n) => n.id !== id));
+        if (!wasUnread || accountedRef.current.has(id)) return;
+        accountedRef.current.add(id);
+        setUnreadCount((c) => Math.max(0, c - 1));
       }
     } catch {
       // Silently ignore

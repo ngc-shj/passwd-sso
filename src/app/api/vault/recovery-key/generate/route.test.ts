@@ -312,15 +312,16 @@ describe("POST /api/vault/recovery-key/generate", () => {
     );
   });
 
-  it("emits VERIFIER_PEPPER_MISSING audit and returns 401 when pepper version is missing", async () => {
+  it("answers 503 SERVICE_UNAVAILABLE, audits once and writes nothing when the pepper version is missing", async () => {
     const { verifyPassphraseVerifier } = await import("@/lib/crypto/crypto-server");
     vi.mocked(verifyPassphraseVerifier).mockReturnValueOnce({ ok: false, reason: "MISSING_PEPPER_VERSION" });
 
     const res = await POST(createRequest("POST", URL, { body: validBody }));
     const json = await res.json();
 
-    expect(res.status).toBe(401);
-    expect(json.error).toBe("INVALID_PASSPHRASE");
+    expect(res.status).toBe(503);
+    expect(json.error).toBe("SERVICE_UNAVAILABLE");
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "VERIFIER_PEPPER_MISSING",
@@ -329,5 +330,9 @@ describe("POST /api/vault/recovery-key/generate", () => {
         tenantId: "test-tenant-id",
       }),
     );
+    expect(mockWithTenantRls).not.toHaveBeenCalled();
+    expect(mockPrismaUser.update).not.toHaveBeenCalled();
+    expect(mockPrismaUser.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
   });
 });

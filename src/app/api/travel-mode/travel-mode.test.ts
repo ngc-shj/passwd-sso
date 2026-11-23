@@ -312,14 +312,18 @@ describe("POST /api/travel-mode/disable", () => {
     );
   });
 
-  it("emits VERIFIER_PEPPER_MISSING audit and returns 401 when pepper version is missing", async () => {
+  it("answers 503 SERVICE_UNAVAILABLE without counting a lockout failure when the pepper version is missing", async () => {
     mockVerifyPassphraseVerifier.mockReturnValue({ ok: false, reason: "MISSING_PEPPER_VERSION" });
 
     const res = await DisablePOST(makeDisableRequest());
     const json = await res.json();
 
-    expect(res.status).toBe(401);
-    expect(json.error).toBe("INVALID_PASSPHRASE");
+    expect(res.status).toBe(503);
+    expect(json.error).toBe("SERVICE_UNAVAILABLE");
+    expect(mockRecordFailure).not.toHaveBeenCalled();
+    expect(mockPrismaUser.update).not.toHaveBeenCalled();
+    // The operator audit only — no TRAVEL_MODE_DISABLE_FAILED charged to the user.
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "VERIFIER_PEPPER_MISSING",

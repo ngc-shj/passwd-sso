@@ -89,6 +89,7 @@ async function handlePOST(request: NextRequest) {
     storedVersion: user.passphraseVerifierVersion,
   });
   if (verifier !== "ok") {
+    if (verifier === "unavailable") return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
     return errorResponse(
       verifier === "not-set" ? API_ERROR.VERIFIER_NOT_SET : API_ERROR.INVALID_PASSPHRASE,
     );

@@ -197,6 +197,19 @@ describe("ChangePassphraseDialog", () => {
     });
   });
 
+  it("keeps the dialog open with the retry-later error when the server is unavailable (SERVICE_UNAVAILABLE)", async () => {
+    mockChangePassphrase.mockRejectedValue({ error: "SERVICE_UNAVAILABLE" });
+
+    render(<ChangePassphraseDialog open={true} onOpenChange={onOpenChange} />);
+    fillForm("oldpass", "longenoughpass", "longenoughpass");
+    fireEvent.click(screen.getByRole("button", { name: "changePassphraseButton" }));
+
+    expect(await screen.findByText("apiErr:SERVICE_UNAVAILABLE")).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(mockToast.error).not.toHaveBeenCalled();
+    expect(mockToast.warning).not.toHaveBeenCalled();
+  });
+
   it("closes with a persistent locked-vault notice when the change's outcome is unknown", async () => {
     mockChangePassphrase.mockRejectedValue(new VaultChangeOutcomeUnknownError());
 

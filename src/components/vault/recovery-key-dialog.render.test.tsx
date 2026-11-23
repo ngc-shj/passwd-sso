@@ -161,6 +161,10 @@ vi.mock("@/components/ui/checkbox", () => ({
 
 import { RecoveryKeyDialog } from "./recovery-key-dialog";
 import { COPY_OUTCOME } from "@/lib/clipboard/copy-secret";
+import enApiErrors from "../../../messages/en/ApiErrors.json";
+import jaApiErrors from "../../../messages/ja/ApiErrors.json";
+import enVault from "../../../messages/en/Vault.json";
+import jaVault from "../../../messages/ja/Vault.json";
 
 describe("RecoveryKeyDialog passphrase-step warning", () => {
   beforeEach(() => {
@@ -211,7 +215,8 @@ async function reachDisplayStep(onOpenChange = vi.fn()) {
 
 describe("RecoveryKeyDialog generate flow", () => {
   beforeEach(() => {
-    vault.hasRecoveryKey = false;
+    // A vault with a recovery key: the notices name the previous one.
+    vault.hasRecoveryKey = true;
     vault.recoveryKeyInvalidated = false;
     vi.clearAllMocks();
     localStorage.clear();
@@ -365,10 +370,91 @@ describe("RecoveryKeyDialog generate flow", () => {
     expect(screen.queryByText("invalidPassphrase")).toBeNull();
   });
 
-  it("does not show a key created after the vault locked, and says the previous one no longer works", async () => {
+  // Only a vault that had a recovery key (or had one invalidated) is told the
+  // previous one no longer works.
+  it.each([
+    ["had a recovery key", { hasRecoveryKey: true, recoveryKeyInvalidated: false }, "recoveryKeyCommittedVaultLocked"],
+    ["had one invalidated", { hasRecoveryKey: false, recoveryKeyInvalidated: true }, "recoveryKeyCommittedVaultLocked"],
+    ["had none", { hasRecoveryKey: false, recoveryKeyInvalidated: false }, "recoveryKeyCommittedVaultLockedFirstKey"],
+  ] as const)(
+    "does not show a key created after the vault locked, and words the notice for a vault that %s",
+    async (_had, state, notice) => {
+      vault.hasRecoveryKey = state.hasRecoveryKey;
+      vault.recoveryKeyInvalidated = state.recoveryKeyInvalidated;
+      mockFetchApi.mockImplementation(async () => {
+        lockVault();
+        return { ok: true };
+      });
+      const onOpenChange = vi.fn();
+      render(<RecoveryKeyDialog open={true} onOpenChange={onOpenChange} />);
+
+      submitPassphrase();
+
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+      expect(mockToast.error).toHaveBeenCalledTimes(1);
+      expect(mockToast.error).toHaveBeenCalledWith(notice, { duration: Infinity });
+      expect(mockFormatRecoveryKey).not.toHaveBeenCalled();
+      expect(screen.queryByText(FORMATTED_KEY)).toBeNull();
+      expect(vault.setHasRecoveryKey).not.toHaveBeenCalled();
+    },
+  );
+
+  // The lock unmounts the dialog: an inline error would never be seen.
+  it.each([
+    ["the POST rejects in transit", () => mockFetchApi.mockImplementation(async () => {
+      lockVault();
+      throw new TypeError("Failed to fetch");
+    })],
+    ["the server answers with an unlisted code", () => {
+      mockFetchApi.mockImplementation(async () => {
+        lockVault();
+        return { ok: false, status: 500 };
+      });
+      mockReadApiErrorBody.mockResolvedValue({ error: "INTERNAL_ERROR" });
+    }],
+    ["a committed key cannot be formatted", () => {
+      mockFetchApi.mockImplementation(async () => ({ ok: true }));
+      mockFormatRecoveryKey.mockImplementation(async () => {
+        lockVault();
+        throw new Error("format failed");
+      });
+    }],
+  ] as const)(
+    "leaves a persistent outcome-unknown notice when the vault locked and %s",
+    async (_when, arrange) => {
+      arrange();
+      const onOpenChange = vi.fn();
+      render(<RecoveryKeyDialog open={true} onOpenChange={onOpenChange} />);
+
+      submitPassphrase();
+
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+      expect(mockToast.error).toHaveBeenCalledWith("recoveryKeyOutcomeUnknown", { duration: Infinity });
+      expect(screen.queryByText("unknownError")).toBeNull();
+      expect(vault.setHasRecoveryKey).not.toHaveBeenCalled();
+    },
+  );
+
+  // Only a vault that had a recovery key (or had one invalidated) is told the
+  // previous one may no longer work — inline, or in the toast once locked.
+  it.each([
+    ["had a recovery key", { hasRecoveryKey: true, recoveryKeyInvalidated: false }, "recoveryKeyOutcomeUnknown"],
+    ["had one invalidated", { hasRecoveryKey: false, recoveryKeyInvalidated: true }, "recoveryKeyOutcomeUnknown"],
+    ["had none", { hasRecoveryKey: false, recoveryKeyInvalidated: false }, "recoveryKeyOutcomeUnknownFirstKey"],
+  ] as const)("words the outcome-unknown notice for a vault that %s", async (_had, state, notice) => {
+    vault.hasRecoveryKey = state.hasRecoveryKey;
+    vault.recoveryKeyInvalidated = state.recoveryKeyInvalidated;
+    mockFetchApi.mockRejectedValue(new TypeError("Failed to fetch"));
+    const { unmount } = render(<RecoveryKeyDialog open={true} onOpenChange={vi.fn()} />);
+
+    submitPassphrase();
+
+    expect(await screen.findByText(notice)).toBeInTheDocument();
+    unmount();
+
     mockFetchApi.mockImplementation(async () => {
       lockVault();
-      return { ok: true };
+      throw new TypeError("Failed to fetch");
     });
     const onOpenChange = vi.fn();
     render(<RecoveryKeyDialog open={true} onOpenChange={onOpenChange} />);
@@ -376,10 +462,49 @@ describe("RecoveryKeyDialog generate flow", () => {
     submitPassphrase();
 
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
-    expect(mockToast.error).toHaveBeenCalledWith("recoveryKeyCommittedVaultLocked", { duration: Infinity });
-    expect(mockFormatRecoveryKey).not.toHaveBeenCalled();
-    expect(screen.queryByText(FORMATTED_KEY)).toBeNull();
-    expect(vault.setHasRecoveryKey).not.toHaveBeenCalled();
+    expect(mockToast.error).toHaveBeenCalledTimes(1);
+    expect(mockToast.error).toHaveBeenCalledWith(notice, { duration: Infinity });
+  });
+
+  it("shows the outcome-unknown notice inline, with no toast, when the vault stays unlocked", async () => {
+    mockFetchApi.mockResolvedValue({ ok: false, status: 500 });
+    mockReadApiErrorBody.mockResolvedValue({ error: "INTERNAL_ERROR" });
+    const onOpenChange = vi.fn();
+    render(<RecoveryKeyDialog open={true} onOpenChange={onOpenChange} />);
+
+    submitPassphrase();
+
+    expect(await screen.findByText("recoveryKeyOutcomeUnknown")).toBeInTheDocument();
+    expect(mockToast.error).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("asks to unlock once with the passphrase when the server has no passphrase verifier (VERIFIER_NOT_SET)", async () => {
+    mockFetchApi.mockResolvedValue({ ok: false, status: 409 });
+    mockReadApiErrorBody.mockResolvedValue({ error: "VERIFIER_NOT_SET" });
+    const onOpenChange = vi.fn();
+    render(<RecoveryKeyDialog open={true} onOpenChange={onOpenChange} />);
+
+    submitPassphrase();
+
+    expect(await screen.findByText("apiErr:VERIFIER_NOT_SET")).toBeInTheDocument();
+    expect(vault.lock).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps the vault unlocked and asks to retry later when the server is unavailable (SERVICE_UNAVAILABLE)", async () => {
+    mockFetchApi.mockResolvedValue({ ok: false, status: 503 });
+    mockReadApiErrorBody.mockResolvedValue({ error: "SERVICE_UNAVAILABLE" });
+    const onOpenChange = vi.fn();
+    render(<RecoveryKeyDialog open={true} onOpenChange={onOpenChange} />);
+
+    submitPassphrase();
+
+    expect(await screen.findByText("apiErr:SERVICE_UNAVAILABLE")).toBeInTheDocument();
+    expect(screen.queryByText("recoveryKeyOutcomeUnknown")).toBeNull();
+    expect(vault.lock).not.toHaveBeenCalled();
+    expect(mockToast.error).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
   });
 
   it("copies the displayed recovery key and confirms with a success toast", async () => {
@@ -437,5 +562,42 @@ describe("RecoveryKeyDialog generate flow", () => {
     const input = screen.getByLabelText("currentPassphrase");
     expect(input).toHaveValue("");
     expect(vault.setHasRecoveryKey).not.toHaveBeenCalled();
+  });
+});
+
+describe("refusal wording shared through ApiErrors", () => {
+  it("maps SERVICE_UNAVAILABLE to the retry-later message", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/http/api-error-codes")>("@/lib/http/api-error-codes");
+
+    const key = actual.apiErrorToI18nKey(actual.API_ERROR.SERVICE_UNAVAILABLE);
+
+    expect(key).toBe("serviceUnavailable");
+    expect(enApiErrors.serviceUnavailable).toMatch(/try again/i);
+    expect(jaApiErrors.serviceUnavailable).toContain("再度お試しください");
+  });
+
+  it("maps VERIFIER_NOT_SET to the unlock-with-passphrase message", async () => {
+    const actual = await vi.importActual<typeof import("@/lib/http/api-error-codes")>("@/lib/http/api-error-codes");
+
+    expect(actual.apiErrorToI18nKey(actual.API_ERROR.VERIFIER_NOT_SET)).toBe("verifierNotSet");
+  });
+
+  // VERIFIER_NOT_SET is cured only by an unlock with the passphrase: a passkey
+  // unlock does not backfill the verifier.
+  it("tells the user to unlock with the passphrase, not a passkey, wherever VERIFIER_NOT_SET is worded", () => {
+    for (const text of [
+      enApiErrors.verifierNotSet,
+      enVault.verifierNotSetHint,
+      enVault.rotateKeyVerifierNotSetHint,
+    ]) {
+      expect(text).toContain("with your passphrase (not a passkey)");
+    }
+    for (const text of [
+      jaApiErrors.verifierNotSet,
+      jaVault.verifierNotSetHint,
+      jaVault.rotateKeyVerifierNotSetHint,
+    ]) {
+      expect(text).toContain("パスキーではなくパスフレーズで");
+    }
   });
 });

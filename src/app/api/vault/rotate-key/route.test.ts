@@ -371,14 +371,16 @@ describe("POST /api/vault/rotate-key", () => {
       expect(mockApplyVaultRotation).not.toHaveBeenCalled();
     });
 
-    it("audits a missing pepper version and refuses with 401", async () => {
+    it("audits a missing pepper version once and refuses with 503 SERVICE_UNAVAILABLE", async () => {
       vi.mocked(verifyPassphraseVerifier).mockReturnValueOnce({ ok: false, reason: "MISSING_PEPPER_VERSION" });
 
       const res = await POST(
         createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
       );
 
-      expect(res.status).toBe(401);
+      expect(res.status).toBe(503);
+      expect((await res.json()).error).toBe("SERVICE_UNAVAILABLE");
+      expect(vi.mocked(logAuditAsync)).toHaveBeenCalledTimes(1);
       expect(vi.mocked(logAuditAsync)).toHaveBeenCalledWith(
         expect.objectContaining({ action: "VERIFIER_PEPPER_MISSING", metadata: { storedVersion: 1 } }),
       );

@@ -623,6 +623,107 @@ const body = {
     expect(errors).toHaveLength(0);
   });
 
+  // S5-3/T5-6: the count is over references resolved in the AST, so neither an
+  // import/export line nor a name other than the constant's hides a use.
+  const IMPORT = `import { INITIAL_VAULT_KEY_VERSION } from "@/lib/constants";\n`;
+  it.each([
+    [
+      "a renamed import",
+      "src/lib/vault/rotate.ts",
+      `import { INITIAL_VAULT_KEY_VERSION as FIRST } from "@/lib/constants";\ncommit(FIRST);\n`,
+      /used 1 time\(s\) in src\/lib\/vault\/rotate\.ts \(allowed 0\)/,
+    ],
+    [
+      "an unused renamed import",
+      "src/lib/vault/rotate.ts",
+      `import {\n  INITIAL_VAULT_KEY_VERSION as FIRST,\n} from "@/lib/constants";\n`,
+      /alias FIRST of INITIAL_VAULT_KEY_VERSION in src\/lib\/vault\/rotate\.ts/,
+    ],
+    [
+      "an exported const alias",
+      "src/lib/vault/rotate.ts",
+      `${IMPORT}export const V = INITIAL_VAULT_KEY_VERSION;\n`,
+      /alias V of INITIAL_VAULT_KEY_VERSION in src\/lib\/vault\/rotate\.ts/,
+    ],
+    [
+      "a use inside a single-line exported function",
+      "src/lib/vault/rotate.ts",
+      `${IMPORT}export function f() { return commit(INITIAL_VAULT_KEY_VERSION); }\n`,
+      /used 1 time\(s\) in src\/lib\/vault\/rotate\.ts \(allowed 0\)/,
+    ],
+    [
+      "a renamed re-export from the re-export module",
+      "src/lib/constants/index.ts",
+      `export { INITIAL_VAULT_KEY_VERSION as V1 } from "./vault/vault";\n`,
+      /alias V1 of INITIAL_VAULT_KEY_VERSION in src\/lib\/constants\/index\.ts/,
+    ],
+    [
+      "a renamed export clause in the definition module",
+      "src/lib/constants/vault/vault.ts",
+      `export const INITIAL_VAULT_KEY_VERSION = 1;\nexport { INITIAL_VAULT_KEY_VERSION as V1 };\n`,
+      /alias V1 of INITIAL_VAULT_KEY_VERSION in src\/lib\/constants\/vault\/vault\.ts/,
+    ],
+    [
+      "a local const alias used once more in vault-context",
+      "src/lib/vault/vault-context.tsx",
+      `${IMPORT}const FIRST = INITIAL_VAULT_KEY_VERSION;\ninstall({ keyVersion: FIRST });\n`,
+      /used 2 time\(s\) in src\/lib\/vault\/vault-context\.tsx \(allowed 1\)/,
+    ],
+    [
+      "an alias of an alias",
+      "src/lib/vault/rotate.ts",
+      `${IMPORT}const A = INITIAL_VAULT_KEY_VERSION;\nlet B = A;\ncommit(B);\n`,
+      /used 3 time\(s\) in src\/lib\/vault\/rotate\.ts \(allowed 0\)/,
+    ],
+    [
+      "a second use in the setup route",
+      "src/app/api/vault/setup/route.ts",
+      `${IMPORT}data: { keyVersion: INITIAL_VAULT_KEY_VERSION }\nconst again = { keyVersion: INITIAL_VAULT_KEY_VERSION };\n`,
+      /used 2 time\(s\) in src\/app\/api\/vault\/setup\/route\.ts \(allowed 1\)/,
+    ],
+    [
+      "an exported alias in the setup route",
+      "src/app/api/vault/setup/route.ts",
+      `${IMPORT}export const V = INITIAL_VAULT_KEY_VERSION;\n`,
+      /alias V of INITIAL_VAULT_KEY_VERSION in src\/app\/api\/vault\/setup\/route\.ts/,
+    ],
+    [
+      "a namespace member read",
+      "src/lib/vault/rotate.ts",
+      `import * as C from "@/lib/constants";\ncommit(C.INITIAL_VAULT_KEY_VERSION);\n`,
+      /used 1 time\(s\) in src\/lib\/vault\/rotate\.ts \(allowed 0\)/,
+    ],
+    [
+      "a namespace element read by string key",
+      "src/lib/vault/rotate.ts",
+      `import * as C from "@/lib/constants";\ncommit(C["INITIAL_VAULT_KEY_VERSION"]);\n`,
+      /used 1 time\(s\) in src\/lib\/vault\/rotate\.ts \(allowed 0\)/,
+    ],
+  ])("flags %s", (_label, rel, content, message) => {
+    const errors = checkKeyVersionHardcode([{ rel, content }]);
+    expect(errors.some((e) => message.test(e))).toBe(true);
+  });
+
+  it.each([
+    [
+      "a multi-line import with one use in vault-context",
+      "src/lib/vault/vault-context.tsx",
+      `import {\n  VAULT_STATUS,\n  INITIAL_VAULT_KEY_VERSION,\n} from "@/lib/constants";\ninstall({ keyVersion: INITIAL_VAULT_KEY_VERSION });\n`,
+    ],
+    [
+      "a renamed import with one use in the setup route",
+      "src/app/api/vault/setup/route.ts",
+      `import { INITIAL_VAULT_KEY_VERSION as FIRST } from "@/lib/constants/vault/vault";\ndata: { keyVersion: FIRST }\n`,
+    ],
+    [
+      "a block comment naming the constant",
+      "src/lib/vault/rotate.ts",
+      `/* INITIAL_VAULT_KEY_VERSION is set only by vault setup */\nexport const x = 1;\n`,
+    ],
+  ])("allows %s", (_label, rel, content) => {
+    expect(checkKeyVersionHardcode([{ rel, content }])).toEqual([]);
+  });
+
   it("does not flag a ternary expression like data.keyVersion : 1", () => {
     const files = [
       {
