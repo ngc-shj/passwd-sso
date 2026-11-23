@@ -8,11 +8,13 @@
 // the tests for the same rows, and rows a crashed run (or a seed script) left
 // behind broke later runs. Now:
 //
-//   1. drop the scratch databases a dead run on this host left behind;
+//   1. drop the scratch databases a dead run on this host left behind (owned
+//      by the role MIGRATION_DATABASE_URL names; see staleScratchDatabases);
 //   2. CREATE DATABASE <passwd_it_…> TEMPLATE template0 on the cluster
 //      MIGRATION_DATABASE_URL names (a superuser), empty: never a copy of the
 //      dev database, whose data is the problem. COMMENT ON DATABASE sets the
-//      marker setup.ts requires (scripts/lib/integration-scratch-db.mjs);
+//      marker setup.ts requires, with a nonce only this run holds
+//      (scripts/lib/integration-scratch-db.mjs);
 //   3. the per-database half of scripts/bootstrap-rds-roles.mjs
 //      (applyPrivilegeSequence: passwd_app's CONNECT/schema/table grants and
 //      default privileges, the worker roles' schema privileges), BEFORE the
@@ -34,7 +36,9 @@
 //      DATABASE_URL, MIGRATION_DATABASE_URL and every *_DATABASE_URL in the
 //      environment pointed at the scratch database;
 //   8. drop it (WITH (FORCE), which terminates its connections) and confirm
-//      it is gone.
+//      it is gone — only if step 2's CREATE succeeded, and only while the
+//      database is still owned by this role and carries this run's exact
+//      marker (dropScratchDatabase). Anything else is reported, not dropped.
 //
 // Step 8 runs however the run ends. Once it starts, INT/TERM/HUP are ignored
 // (the handlers stay installed, so they cannot kill the process mid-drop); a
@@ -55,7 +59,7 @@ import { config } from "dotenv";
 import pg from "pg";
 import { applyPrivilegeSequence, loadDeniedPolicy } from "./bootstrap-rds-roles.mjs";
 import {
-  isScratchDatabaseName,
+  dropScratchDatabase,
   scratchDatabaseEnv,
   scratchDatabaseName,
   scratchMarker,
@@ -79,11 +83,12 @@ class Interrupted extends Error {}
  * @param {{
  *   main: (ctx: { run: (cmd: string, args: string[], env: NodeJS.ProcessEnv) => Promise<number>, checkInterrupted: () => void }) => Promise<number>,
  *   drop: () => Promise<boolean>,
+ *   name?: string,
  *   signals?: NodeJS.EventEmitter,
  *   log?: (msg: string) => void,
  * }} steps
  */
-export async function runWithScratchDatabase({ main, drop, signals = process, log: say = log }) {
+export async function runWithScratchDatabase({ main, drop, name = "the scratch database", signals = process, log: say = log }) {
   const state = { child: null, signal: null, status: 0, cleaning: false };
   const handlers = SIGNALS.map(([sig, num]) => {
     const handler = () => {
@@ -137,7 +142,9 @@ export async function runWithScratchDatabase({ main, drop, signals = process, lo
     for (const [sig, handler] of handlers) signals.off(sig, handler);
   }
   if (!dropped) {
-    say("INTEGRATION_CLEANUP_INCOMPLETE the scratch database is still on the cluster; drop it by hand (DROP DATABASE … WITH (FORCE), as the superuser)");
+    say(
+      `INTEGRATION_CLEANUP_INCOMPLETE ${name} was not dropped; check its owner and comment, and drop it by hand (DROP DATABASE … WITH (FORCE), as the superuser) only if this run created it`,
+    );
     return status !== 0 ? status : 1;
   }
   return state.signal !== null ? state.status : status;
@@ -177,6 +184,41 @@ const ROLE_STATE_SQL = `
    WHERE a.rolname LIKE 'passwd\\_%'
    ORDER BY a.rolname`;
 
+/**
+ * The scratch database's create and drop. drop() removes only what create()
+ * made: nothing when CREATE did not succeed (a database of that name that
+ * already existed is someone else's), and otherwise only through
+ * dropScratchDatabase, expecting the marker once COMMENT succeeded and no
+ * comment before that.
+ *
+ * @param {{
+ *   name: string,
+ *   marker: string,
+ *   connect: <T>(fn: (c: { query: Function, escapeLiteral: (s: string) => string }) => Promise<T>) => Promise<T>,
+ *   log?: (msg: string) => void,
+ * }} opts
+ */
+export function scratchDatabaseLifecycle({ name, marker, connect, log: say = log }) {
+  let created = false;
+  let comment = null;
+  return {
+    create: () =>
+      connect(async (c) => {
+        await c.query(`CREATE DATABASE "${name}" TEMPLATE template0`);
+        created = true;
+        await c.query(`COMMENT ON DATABASE "${name}" IS ${c.escapeLiteral(marker)}`);
+        comment = marker;
+      }),
+    drop: async () => {
+      if (!created) {
+        say(`${name} was not created by this run; nothing to drop`);
+        return true;
+      }
+      return connect((c) => dropScratchDatabase(c, name, comment));
+    },
+  };
+}
+
 function urlFor(base, database) {
   const u = new URL(base);
   u.pathname = `/${database}`;
@@ -202,28 +244,30 @@ function isAlive(pid) {
   }
 }
 
-async function dropDatabase(maintenanceUrl, name) {
-  // The one statement here that destroys a database: never one this runner
-  // did not name.
-  if (!isScratchDatabaseName(name)) throw new Error(`refusing to drop "${name}": not a scratch database name`);
-  return withClient(maintenanceUrl, async (c) => {
-    await c.query(`DROP DATABASE IF EXISTS "${name}" WITH (FORCE)`);
-    const { rowCount } = await c.query("SELECT 1 FROM pg_database WHERE datname = $1", [name]);
-    return rowCount === 0;
-  });
-}
-
-async function sweepStale(maintenanceUrl) {
-  const { rows } = await withClient(maintenanceUrl, (c) =>
+/**
+ * Drop the scratch databases a dead run on this host left behind. A dead run's
+ * nonce died with it, so what proves the database is a runner's is its owner:
+ * only this role (or a superuser, who can drop anything anyway) can create a
+ * database it owns or set that database's comment. Each drop re-verifies the
+ * owner and the comment the database was chosen by.
+ */
+export async function sweepStale(connect, { host = hostname(), isAlive: alive = isAlive, log: say = log } = {}) {
+  const { rows } = await connect((c) =>
     c.query(
-      `SELECT d.datname AS name, shobj_description(d.oid, 'pg_database') AS comment,
+      `SELECT d.datname AS name, pg_get_userbyid(d.datdba) AS owner, current_user AS role,
+              shobj_description(d.oid, 'pg_database') AS comment,
               (SELECT count(*)::int FROM pg_stat_activity a WHERE a.datname = d.datname) AS connections
          FROM pg_database d WHERE d.datname LIKE 'passwd\\_it\\_%'`,
     ),
   );
-  for (const name of staleScratchDatabases(rows, { host: hostname(), isAlive })) {
-    log(`dropping ${name}, left by a run on this host that no longer exists`);
-    if (!(await dropDatabase(maintenanceUrl, name))) log(`WARNING: ${name} is still present`);
+  const role = rows[0]?.role;
+  for (const { name, comment } of staleScratchDatabases(rows, { role, host, isAlive: alive })) {
+    say(`dropping ${name}, left by a run on this host that no longer exists`);
+    try {
+      if (!(await connect((c) => dropScratchDatabase(c, name, comment)))) say(`WARNING: ${name} is still present`);
+    } catch (e) {
+      say(`WARNING: ${e instanceof Error ? e.message : String(e)}`);
+    }
   }
 }
 
@@ -243,20 +287,23 @@ async function cli(argv) {
   const maintenanceUrl = urlFor(superuserUrl, "postgres");
   const name = scratchDatabaseName();
   const scratchUrl = urlFor(superuserUrl, name);
+  const connect = (fn) => withClient(maintenanceUrl, fn);
+  const scratch = scratchDatabaseLifecycle({
+    name,
+    marker: scratchMarker({ host: hostname(), pid: process.pid, createdAt: new Date() }),
+    connect,
+  });
   const env = { ...process.env, ...scratchDatabaseEnv(process.env, name) };
   const allowRoleChanges = process.env.INTEGRATION_ALLOW_CLUSTER_ROLE_CHANGES === "1";
 
   return runWithScratchDatabase({
-    drop: () => dropDatabase(maintenanceUrl, name),
+    name,
+    drop: scratch.drop,
     main: async ({ run, checkInterrupted }) => {
-      await sweepStale(maintenanceUrl);
+      await sweepStale(connect);
       checkInterrupted();
       log(`creating scratch database ${name}`);
-      await withClient(maintenanceUrl, async (c) => {
-        await c.query(`CREATE DATABASE "${name}" TEMPLATE template0`);
-        const marker = scratchMarker({ host: hostname(), pid: process.pid, createdAt: new Date() });
-        await c.query(`COMMENT ON DATABASE "${name}" IS ${c.escapeLiteral(marker)}`);
-      });
+      await scratch.create();
       checkInterrupted();
       const rolesBefore = await withClient(scratchUrl, async (c) => (await c.query(ROLE_STATE_SQL)).rows);
       await withClient(scratchUrl, async (c) => {

@@ -671,3 +671,49 @@ The travel-mode card maps RATE_LIMIT_EXCEEDED to `rateLimited` and SERVICE_UNAVA
   - Collapsing the wizard's `resolveUnlockError` call: the helper stays the one place that decides which codes mean "session expired".
   - A shared `pg` client helper for the scripts: none exists to reuse, and adding one widens the diff past this round.
 - **Declared, not closed.** A `..` in a template's dynamic tail falls outside the bundler premise. Refusing it would also refuse legitimate templates such as the i18n message loader.
+
+---
+
+# External security review (after round 6)
+
+The user relayed two Medium findings from an external security review of the round-6 tree. Both were verified in the code before any fix.
+
+## Findings
+
+- **X7-1 [Medium] The integration runner could force-drop a database it did not create.**
+  - **Drop registered before CREATE.** `run-integration-tests.mjs` registered its drop before `CREATE DATABASE`, and checked only the name pattern before `DROP … WITH (FORCE)`. A CREATE that failed on a name collision would therefore drop the existing database.
+  - **Forgeable stale marker.** The stale-run sweep trusted a predictable marker that any principal able to create and comment on its own database could forge.
+- **X7-2 [Medium] A late setup response could overwrite the vault state of a newer session.**
+  - **Write before the epoch check.** `setup` wrote `setupRequiredRef` and the LOCKED status before checking its lock epoch. User A's late 201 or 409 could therefore flip user B's SETUP_REQUIRED, and erase a newer reset verdict for the same user.
+
+## Resolution
+
+### X7-1 — resolved
+- **A drop needs proof of creation.** A run drops only a database it can prove it made:
+  - `created` is set after CREATE succeeds.
+  - The marker carries a per-run 128-bit nonce.
+  - `dropScratchDatabase` re-reads the database's owner and comment on the dropping session. It refuses, with `INTEGRATION_CLEANUP_INCOMPLETE` naming the database, unless the owner is the runner's role and the comment is this run's exact marker.
+- **The stale sweep** additionally requires the owner to be the runner's role, and re-verifies the database at drop time. Forging a sweepable database therefore needs privileges that could already drop it. A state file holding the nonce was rejected: it adds no boundary, and a lost file would leak databases.
+- **Same fix elsewhere.** `departed-member-guard-redproof.sh` had the same shape and gets the same fix.
+- **Proof.** Mutants D1–D9 and A1–A3 are in the scratchpad `r7-runner/`. Live runs covered a normal run, a SIGKILL followed by a sweep, and a forged marker on another role's database, which was left alone.
+
+### X7-2 — resolved, with the class swept
+- **Setup is bound to the state it started under.**
+  - **Epoch checks.** `refuseIfInterrupted()` checks the lock epoch before the setup POST is sent, and again after the response before any write.
+  - **When the epoch moved.** Nothing is written, the status is re-asked under the current session's own guards, and setup throws INTERRUPTED, or UNAUTHORIZED if the session ended.
+  - **Newer SETUP_REQUIRED verdicts.** A verdict that lands during the POST, counted by `setupVerdictCountRef`, cannot be ordered against the commit. So setup asks the status itself after the commit, and writes only if the vault exists.
+- **Before the fix**, a user switch during PBKDF2 sent A's setup POST under B's cookie, which could create B's vault with A's passphrase.
+- **The same class in other paths.** "Await, then a write or request without a session check" was swept across vault-context. Fixed:
+  - **Unlock requests:** the unlock POST (on all three paths), the passkey verify POST, and the two failure-report POSTs are no longer sent after a switch. Before, A's failure could count against B's lockout.
+  - **Unknown-outcome locks:** the three `lock()` calls each in change-passphrase and rotate-key now go through `lockUnlessSessionMoved`, so they no longer lock B's vault or revoke B's delegations.
+- **Already correct:** the installs, `checkVaultStatus`, and the pre-POST derivation in change/rotate.
+- **Not covered:** recovery and the team-key paths, which live outside vault-context. They are listed for round 7.
+- **Proof.** HEAD fails 21 tests and the fix passes 175 of 175. Every deny pin fails on HEAD or on a named mutant, and every allow pin is paired with one (scratchpad `r7-setup/`).
+- **Residual.** A fetch can carry a new cookie before React commits the new session. Client code cannot close that window.
+
+### Simplify pass (X7 fixes)
+- **Divergence fixed.** `lockUnlessSessionMoved` treated a user id arriving during the change (undefined → defined) as a user switch, so it skipped the lock. The session-change drop treats the same transition as the same session. The helper now needs both ids defined before it counts a switch, so the unknown-outcome lock still happens. A new pin is red on the old predicate, and the six user-switch pins stay green on both versions.
+- **Accepted.**
+  - The six `if (lockedSince(epoch)) throw installRefusedError()` guards in the unlock paths are now one `refuseIfLockedSince`.
+  - The `getSessionUserId` wrapper over a ref was removed.
+- **Not taken.** `installKeyMaterial` keeps its inline epoch comparison, so its dependency list stays minimal.

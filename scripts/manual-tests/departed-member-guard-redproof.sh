@@ -27,7 +27,10 @@
 #        source.patch    a patch to a scratch copy of the tree (source mode);
 #   7. runs the same test files with the JSON reporter and records the exit
 #      code and the failing cells, compared by full name against `expected`;
-#   8. drops the scratch database and the tree copy in a trap.
+#   8. drops the scratch database and the tree copy in a trap — the database
+#      only if step 2's CREATE succeeded, and only while it is still owned by
+#      the superuser role and carries this run's exact marker
+#      (dropScratchDatabase in scripts/lib/integration-scratch-db.mjs).
 #
 # Never mutates the template database or the working tree: SQL mutations run
 # on the scratch database only, and source mutations on a copy made with rsync
@@ -131,12 +134,30 @@ extract_function() {
     "$ROOT/prisma/migrations/$1/migration.sql"
 }
 
+# drop_scratch <name> <expected comment>: the verified drop (owner and exact
+# comment), with an empty comment meaning none — set only once COMMENT succeeded.
+drop_scratch() {
+  node --input-type=module -e '
+    import pg from "pg";
+    import { dropScratchDatabase } from "./scripts/lib/integration-scratch-db.mjs";
+    const [url, name, comment] = process.argv.slice(1);
+    const u = new URL(url); u.pathname = "/postgres";
+    const c = new pg.Client({ connectionString: u.toString(), application_name: "dmg-redproof" });
+    await c.connect();
+    try {
+      if (!(await dropScratchDatabase(c, name, comment === "" ? null : comment))) throw new Error(`${name} is still present`);
+    } finally { await c.end(); }
+  ' "$SUPER_URL" "$1" "$2"
+}
+
 SCRATCH_DB=""
+SCRATCH_COMMENT=""
 TREE=""
 cleanup() {
   if [[ -n "$SCRATCH_DB" ]]; then
-    pg_exec postgres -c "DROP DATABASE IF EXISTS \"$SCRATCH_DB\" WITH (FORCE)" >/dev/null || echo "WARN: could not drop $SCRATCH_DB" >&2
+    drop_scratch "$SCRATCH_DB" "$SCRATCH_COMMENT" || echo "WARN: did not drop $SCRATCH_DB" >&2
     SCRATCH_DB=""
+    SCRATCH_COMMENT=""
   fi
   if [[ -n "$TREE" && -d "$TREE" ]]; then
     rm -rf -- "$TREE"
@@ -156,13 +177,16 @@ create_scratch() {
     echo "template $TEMPLATE has $others other connection(s); stop them first" >&2
     return 1
   fi
-  SCRATCH_DB="$name"
-  pg_exec postgres -c "CREATE DATABASE \"$name\" TEMPLATE \"$TEMPLATE\"" >/dev/null
   local marker
-  marker="$(node --input-type=module -e 'import { scratchMarker } from "./scripts/lib/integration-scratch-db.mjs"; console.log(scratchMarker({ host: (await import("node:os")).hostname(), pid: Number(process.argv[1]), createdAt: new Date() }))' "$$")"
+  marker="$(node --input-type=module -e 'import { scratchMarker } from "./scripts/lib/integration-scratch-db.mjs"; console.log(scratchMarker({ host: (await import("node:os")).hostname(), pid: Number(process.argv[1]), createdAt: new Date() }))' "$$")" || return 1
+  # Only a database this CREATE made is ever dropped: one of that name that
+  # already existed is someone else's.
+  pg_exec postgres -c "CREATE DATABASE \"$name\" TEMPLATE \"$TEMPLATE\"" >/dev/null || return 1
+  SCRATCH_DB="$name"
   local comment_sql
-  comment_sql="$(pg_exec postgres -c "SELECT format('COMMENT ON DATABASE %I IS %L', \$1::text, \$2::text)" "$name" "$marker")"
-  pg_exec postgres -c "$comment_sql" >/dev/null
+  comment_sql="$(pg_exec postgres -c "SELECT format('COMMENT ON DATABASE %I IS %L', \$1::text, \$2::text)" "$name" "$marker")" || return 1
+  pg_exec postgres -c "$comment_sql" >/dev/null || return 1
+  SCRATCH_COMMENT="$marker"
   # CREATE DATABASE does not copy the database ACL: replicate it, PUBLIC included.
   pg_exec postgres -c "
     DO \$do\$
