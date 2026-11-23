@@ -15,7 +15,7 @@
     "otpauth": "^9.6.0",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
-    "tldts": "7.5.2"
+    "tldts": "7.5.5"
   },
   "overrides": {
     "rollup": "$rollup",
@@ -28,7 +28,7 @@
     "@crxjs/vite-plugin": "^3.0.0",
     "@tailwindcss/vite": "^4.3.5",
     "@testing-library/dom": "^10.4.2",
-    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/jest-dom": "^8.0.0",
     "@testing-library/react": "^16.3.3",
     "@types/chrome": "^0.3.7",
     "@types/node": "^26.6.6",
@@ -37,10 +37,10 @@
     "@vitejs/plugin-react": "^6.3.0",
     "fake-indexeddb": "^6.2.8",
     "jsdom": "^29.1.1",
-    "rollup": "^4.68.3",
+    "rollup": "^4.68.7",
     "tailwindcss": "^4.1.0",
     "typescript": "^5.9.3",
     "vite": "^8.3.8",
-    "vitest": "^5.1.0"
+    "vitest": "^5.1.1"
   }
 }
