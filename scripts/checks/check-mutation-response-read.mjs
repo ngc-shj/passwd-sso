@@ -41,17 +41,22 @@
  *     closed).
  *
  * A SOURCE is a call to `fetchApi` (bare, a property `x.fetchApi` for an
- * injected one, or a local name holding it — a parameter defaulting to it, a
- * `const` alias) or to a RESPONSE HELPER: a function (declaration, or a `const`
- * bound to an arrow/function expression or to `useCallback(fn, deps)`) under
- * src/lib or a scan root that returns a source call, directly or through a
- * local `const` it was awaited into — derived to a fixpoint, not listed by
- * hand. A helper whose returned call takes the request init from one of its
- * own parameters forwards the question to its call site's argument at that
- * position; any other helper is mutating when its returned call is. A local
- * helper resolves through the file's own binding (lib/scope-bindings); an
- * imported name resolves to an exported helper of that name (by name, so two
- * exported helpers sharing a name can only over-report).
+ * injected one, or a local name that may hold it — a parameter defaulting to
+ * it, a `const`/`let`/`var` initialised with it or assigned it later, an alias
+ * of such a name, a destructured `{ fetchApi: f }`) or to a RESPONSE HELPER: a
+ * function (declaration, or a `const` bound to an arrow/function expression or
+ * to `useCallback(fn, deps)`) under src/lib or a scan root that returns a
+ * source call, directly or through a local `const` it was awaited into —
+ * derived to a fixpoint, not listed by hand. A helper whose returned call
+ * takes the request init from one of its own parameters forwards the question
+ * to its call site's argument at that position; any other helper is mutating
+ * when its returned call is. A local helper resolves through the file's own
+ * binding (lib/scope-bindings). An imported one (named, aliased, default, or a
+ * member of a namespace import) resolves through its import specifier — `@/…`
+ * or relative, following `export { … } from` — to the declaring module, since
+ * two modules may export same-named helpers with different verdicts. When the
+ * specifier does not resolve to a scanned module, every exported helper of
+ * that name could be the one called, and the most conservative verdict wins.
  *
  * The error path is covered too: every body read of such a response is denied,
  * since `readApiErrorBody` reads through `parseJsonBodyOnce` as well.
@@ -103,7 +108,7 @@
 import { SyntaxKind } from "ts-morph";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
+import { DEFAULT_SOURCE_EXTENSIONS as SOURCE_EXTENSIONS, createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
 import {
   FN_KINDS,
   bindingIndex,
@@ -187,6 +192,9 @@ if (parseErrors.length > 0) {
   process.exit(1);
 }
 
+const relBySf = new Map(files.map(({ sf, rel }) => [sf, rel]));
+const fileByRel = new Map(files.map((f) => [f.rel, f]));
+
 const bindingCache = new Map();
 function bindingsOf(sf) {
   return () => {
@@ -262,40 +270,166 @@ function initMutates(init, sf) {
 
 // ── Source calls and response helpers ────────────────────────────────────────
 
-/** name → [{ sf, fn, exported, forward: number | null }] */
+/** name → [{ sf, fn, name, exported, isDefault, forward: number | null }] */
 const helpers = new Map();
 
 /**
  * `fetchApi`, `x.fetchApi`, or a local name that holds it: a parameter
  * defaulting to it (`fetcher: FetchLike = fetchApi`) or a `const` alias.
  */
-function isFetchApiCallee(callee, sf) {
+function isFetchApiCallee(callee, sf, seen = new Set()) {
   if (callee.getKind() === SyntaxKind.PropertyAccessExpression) return callee.getName() === "fetchApi";
   if (callee.getKind() !== SyntaxKind.Identifier) return false;
-  if (callee.getText() === "fetchApi") return true;
-  const decl = visibleBinding(callee.getText(), callee, bindingsOf(sf));
-  if (!decl) return false;
-  const isConst =
-    decl.getKind() === SyntaxKind.Parameter ||
-    (decl.getKind() === SyntaxKind.VariableDeclaration &&
-      decl.getVariableStatement()?.getDeclarationKind() === "const");
-  return isConst && unwrapExpression(decl.getInitializer?.())?.getText() === "fetchApi";
+  const name = callee.getText();
+  if (name === "fetchApi") return true;
+  const decl = visibleBinding(name, callee, bindingsOf(sf));
+  if (!decl || seen.has(decl)) return false;
+  seen.add(decl);
+  const holdsFetchApi = (e) => {
+    const v = unwrapExpression(e);
+    return v?.getKind() === SyntaxKind.Identifier && isFetchApiCallee(v, sf, seen);
+  };
+  // Any binding that may hold it — whatever its declaration kind — is a
+  // source, so the gate fails closed: a `let`/`var` initialised with it, one
+  // assigned it later (`f = fetchApi`), an alias of an alias, or a destructured
+  // `{ fetchApi: f }`.
+  const nameNode = decl.getNameNode();
+  if (nameNode.getKind() === SyntaxKind.Identifier) {
+    if (holdsFetchApi(decl.getInitializer?.())) return true;
+  } else {
+    const el = nameNode.getDescendantsOfKind(SyntaxKind.BindingElement).find((b) => b.getName() === name);
+    if (el && (el.getPropertyNameNode()?.getText() ?? el.getName()) === "fetchApi") return true;
+  }
+  if (!identifierAssignmentsOf(sf).has(name)) return false;
+  return referencesTo(name, decl, nameNode, sf).some((id) => {
+    const p = outermost(id).getParent();
+    return (
+      p?.getKind() === SyntaxKind.BinaryExpression &&
+      p.getOperatorToken().getKind() === SyntaxKind.EqualsToken &&
+      unwrapExpression(p.getLeft()) === id &&
+      holdsFetchApi(p.getRight())
+    );
+  });
+}
+
+/** The scanned file an import specifier names (`@/…` or relative), or null. */
+function moduleFile(spec, fromRel) {
+  let base;
+  if (spec.startsWith("@/")) base = `src/${spec.slice(2)}`;
+  else if (spec.startsWith(".")) base = posix.join(posix.dirname(fromRel), spec);
+  else return null;
+  const tries = [base, ...SOURCE_EXTENSIONS.map((x) => base + x), ...SOURCE_EXTENSIONS.map((x) => `${base}/index${x}`)];
+  const rel = tries.find((t) => fileByRel.has(t));
+  return rel ? fileByRel.get(rel) : null;
+}
+
+/** How the module-level name `local` is imported into `sf`: { spec, exported }, or null. */
+function importOf(local, sf) {
+  for (const decl of sf.getImportDeclarations()) {
+    if (decl.isTypeOnly()) continue;
+    const spec = decl.getModuleSpecifierValue();
+    if (decl.getDefaultImport()?.getText() === local) return { spec, exported: "default" };
+    const named = decl.getNamedImports().find((n) => !n.isTypeOnly() && (n.getAliasNode()?.getText() ?? n.getName()) === local);
+    if (named) return { spec, exported: named.getName() };
+  }
+  return null;
+}
+
+/** The namespace import `local` binds in `sf` (`import * as local from spec`): its spec, or null. */
+function namespaceImportOf(local, sf) {
+  const decl = sf.getImportDeclarations().find((d) => !d.isTypeOnly() && d.getNamespaceImport()?.getText() === local);
+  return decl ? decl.getModuleSpecifierValue() : null;
+}
+
+/**
+ * The helper an import of `exported` from `spec` names: { found: true, helper }
+ * when the specifier resolves to the declaring module (helper null when that
+ * function is not a response helper), { found: false } when it cannot be
+ * resolved. Follows `export { x as y } from "…"` and `export { x }`.
+ */
+function resolveExport(spec, exported, fromRel, seen = new Set()) {
+  const target = moduleFile(spec, fromRel);
+  if (!target) return { found: false };
+  const key = `${target.rel}:${exported}`;
+  if (seen.has(key)) return { found: false };
+  seen.add(key);
+  const own = candidatesBySf.get(target.sf) ?? [];
+  const declared = own.find((c) => isExportNamed(c, exported));
+  if (declared) return { found: true, helper: helpers.get(declared.name)?.find((h) => h.fn === declared.fn) ?? null };
+  for (const decl of target.sf.getExportDeclarations()) {
+    const el = decl.getNamedExports().find((n) => (n.getAliasNode()?.getText() ?? n.getName()) === exported);
+    if (!el) continue;
+    const from = decl.getModuleSpecifierValue();
+    if (from) return resolveExport(from, el.getName(), target.rel, seen);
+    const local = own.find((c) => c.name === el.getName());
+    if (local) return { found: true, helper: helpers.get(local.name)?.find((h) => h.fn === local.fn) ?? null };
+  }
+  return { found: false };
+}
+
+/** Whether a declaration is the module's export under `exported` ("default" for the default export). */
+function isExportNamed(decl, exported) {
+  return exported === "default" ? decl.isDefault : decl.exported && decl.name === exported;
+}
+
+/**
+ * The most conservative reading of a name that could be any exported helper
+ * spelled `exported`: mutating when one of them is, or when they forward
+ * different arguments; null when none is a helper.
+ */
+function conservativeHelper(exported) {
+  const bucket = [...helpers.values()].flat().filter((h) => isExportNamed(h, exported));
+  if (bucket.length === 0) return null;
+  const forward = bucket[0].forward;
+  if (forward !== null && bucket.every((h) => h.forward === forward)) return bucket[0];
+  return { ...bucket[0], forward: null };
+}
+
+const assignmentCache = new Map();
+/** Names assigned an identifier somewhere in `sf` (`x = y`): a cheap pre-filter for the scope-aware walk. */
+function identifierAssignmentsOf(sf) {
+  let names = assignmentCache.get(sf);
+  if (!names) {
+    names = new Set();
+    for (const b of sf.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
+      if (b.getOperatorToken().getKind() !== SyntaxKind.EqualsToken) continue;
+      const left = unwrapExpression(b.getLeft());
+      if (left.getKind() === SyntaxKind.Identifier && unwrapExpression(b.getRight())?.getKind() === SyntaxKind.Identifier) names.add(left.getText());
+    }
+    assignmentCache.set(sf, names);
+  }
+  return names;
 }
 
 /** The helper record a call's callee names, or null. */
 function helperFor(call, sf) {
   const callee = call.getExpression();
+  const rel = relBySf.get(sf);
+  // `ns.send(...)` through `import * as ns from spec`.
+  if (callee.getKind() === SyntaxKind.PropertyAccessExpression) {
+    const ns = callee.getExpression();
+    if (ns.getKind() !== SyntaxKind.Identifier || visibleBinding(ns.getText(), ns, bindingsOf(sf))) return null;
+    const spec = namespaceImportOf(ns.getText(), sf);
+    if (spec === null) return null;
+    const resolved = resolveExport(spec, callee.getName(), rel);
+    return resolved.found ? resolved.helper : conservativeHelper(callee.getName());
+  }
   if (callee.getKind() !== SyntaxKind.Identifier) return null;
   const name = callee.getText();
-  const candidates = helpers.get(name);
-  if (!candidates) return null;
   const local = visibleBinding(name, callee, bindingsOf(sf));
   if (local) {
     const fn = local.getKind() === SyntaxKind.VariableDeclaration ? hookWrapped(unwrapExpression(local.getInitializer())) : local;
-    return candidates.find((h) => h.fn === fn) ?? null;
+    return helpers.get(name)?.find((h) => h.fn === fn) ?? null;
   }
-  // Not bound in this file: an import (or a global). Match an exported helper.
-  return candidates.find((h) => h.exported) ?? null;
+  // Not bound in this file: an import, resolved through its specifier to the
+  // declaring module. Two modules may export helpers of the same name, so a
+  // name alone decides nothing; when the specifier cannot be resolved (a
+  // module outside the scan, an `export *`, a global), every exported helper
+  // of that name could be the one called, and the most conservative wins.
+  const imported = importOf(name, sf);
+  if (!imported) return conservativeHelper(name);
+  const resolved = resolveExport(imported.spec, imported.exported, rel);
+  return resolved.found ? resolved.helper : conservativeHelper(imported.exported);
 }
 
 /**
@@ -369,20 +503,20 @@ function returnedCall(ret, sf) {
 function functionCandidates(sf) {
   const out = [];
   for (const fn of sf.getDescendantsOfKind(SyntaxKind.FunctionDeclaration)) {
-    if (fn.getName() && fn.getBody()) out.push({ name: fn.getName(), fn, exported: fn.isExported() });
+    if (fn.getName() && fn.getBody()) out.push({ name: fn.getName(), fn, exported: fn.isExported(), isDefault: fn.isDefaultExport() });
   }
   for (const decl of sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration)) {
     if (decl.getNameNode().getKind() !== SyntaxKind.Identifier) continue;
     if (decl.getVariableStatement?.()?.getDeclarationKind() !== "const") continue;
     const init = hookWrapped(unwrapExpression(decl.getInitializer()));
     if (!init || !FN_KINDS.has(init.getKind())) continue;
-    out.push({ name: decl.getName(), fn: init, exported: decl.getVariableStatement()?.isExported() ?? false });
+    out.push({ name: decl.getName(), fn: init, exported: decl.getVariableStatement()?.isExported() ?? false, isDefault: false });
   }
   return out;
 }
 
 /** The helper record `fn` earns from its returned source calls, or null. */
-function classifyHelper({ fn, exported }, sf) {
+function classifyHelper({ name, fn, exported, isDefault }, sf) {
   let forward = null;
   let mutating = false;
   let any = false;
@@ -406,12 +540,13 @@ function classifyHelper({ fn, exported }, sf) {
     else if (initMutates(init, sf)) mutating = true;
   }
   if (!any) return null;
-  if (mutating) return { sf, fn, exported, forward: null };
-  if (forward !== null) return { sf, fn, exported, forward };
+  if (mutating) return { sf, fn, name, exported, isDefault, forward: null };
+  if (forward !== null) return { sf, fn, name, exported, isDefault, forward };
   return null; // only GET requests
 }
 
-const candidates = files.flatMap(({ sf }) => functionCandidates(sf).map((c) => ({ ...c, sf })));
+const candidatesBySf = new Map(files.map(({ sf }) => [sf, functionCandidates(sf)]));
+const candidates = [...candidatesBySf].flatMap(([sf, list]) => list.map((c) => ({ ...c, sf })));
 for (let changed = true; changed; ) {
   changed = false;
   for (const c of candidates) {

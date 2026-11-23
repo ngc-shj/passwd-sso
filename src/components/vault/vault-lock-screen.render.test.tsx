@@ -229,6 +229,7 @@ describe("VaultLockScreen passphrase unlock", () => {
     [API_ERROR.ACCOUNT_LOCKED, "accountLocked"],
     [API_ERROR.RATE_LIMIT_EXCEEDED, "rateLimited"],
     [API_ERROR.SERVICE_UNAVAILABLE, "retryLater"],
+    ["VAULT_UNLOCK_INTERRUPTED", "unlockInterrupted"],
     ["SOMETHING_ELSE", "unlockError"],
   ])("maps a %s unlock error to the %s message", async (code, message) => {
     mockUnlock.mockRejectedValue(new MockVaultUnlockError(code, null));
@@ -238,6 +239,17 @@ describe("VaultLockScreen passphrase unlock", () => {
 
     expect(await screen.findByText(message)).toBeInTheDocument();
     expect(passphraseInput().value).toBe("");
+  });
+
+  it("says an interrupted unlock was interrupted, not that the passphrase was wrong", async () => {
+    mockUnlock.mockRejectedValue(new MockVaultUnlockError("VAULT_UNLOCK_INTERRUPTED"));
+    render(<VaultLockScreen />);
+
+    submitPassphrase("my passphrase");
+
+    expect(await screen.findByText("unlockInterrupted")).toBeInTheDocument();
+    expect(screen.queryByText("wrongPassphrase")).toBeNull();
+    expect(screen.queryByText("unlockError")).toBeNull();
   });
 
   it("shows the generic unlock error for a non-VaultUnlockError failure", async () => {
@@ -317,6 +329,7 @@ describe("VaultLockScreen passkey unlock click", () => {
     [API_ERROR.ACCOUNT_LOCKED, "accountLocked"],
     [API_ERROR.RATE_LIMIT_EXCEEDED, "rateLimited"],
     [API_ERROR.SERVICE_UNAVAILABLE, "serviceUnavailable"],
+    ["VAULT_UNLOCK_INTERRUPTED", "unlockInterrupted"],
     ["SOMETHING_ELSE", "unlockError"],
   ])("maps a %s passkey error to the %s message", async (code, message) => {
     mockUnlockWithPasskey.mockRejectedValue(new MockVaultUnlockError(code, null));
@@ -375,6 +388,7 @@ describe("VaultLockScreen auto-unlock outcomes", () => {
   it.each([
     [API_ERROR.RATE_LIMIT_EXCEEDED, "rateLimited"],
     [API_ERROR.SERVICE_UNAVAILABLE, "serviceUnavailable"],
+    ["VAULT_UNLOCK_INTERRUPTED", "unlockInterrupted"],
     ["SOMETHING_ELSE", "unlockError"],
   ])("maps a %s stored-PRF unlock error to the %s message, not the lockout", async (code, message) => {
     mockUnlockWithStoredPrf.mockRejectedValue(new MockVaultUnlockError(code, null));

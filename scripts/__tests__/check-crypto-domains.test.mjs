@@ -585,6 +585,44 @@ const body = {
     expect(errors).toHaveLength(0);
   });
 
+  it("flags INITIAL_VAULT_KEY_VERSION outside the setup sites", () => {
+    const errors = checkKeyVersionHardcode([
+      {
+        rel: "src/lib/vault/rotate-key-server.ts",
+        content: `import { INITIAL_VAULT_KEY_VERSION } from "@/lib/constants";\nconst v = INITIAL_VAULT_KEY_VERSION;\n`,
+      },
+    ]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/INITIAL_VAULT_KEY_VERSION used 1 time\(s\) in src\/lib\/vault\/rotate-key-server\.ts \(allowed 0\)/);
+  });
+
+  it("flags a second INITIAL_VAULT_KEY_VERSION use in vault-context", () => {
+    const errors = checkKeyVersionHardcode([
+      {
+        rel: "src/lib/vault/vault-context.tsx",
+        content: `import { INITIAL_VAULT_KEY_VERSION } from "@/lib/constants";\ninstall({ keyVersion: INITIAL_VAULT_KEY_VERSION });\ncommitKeyVersion(INITIAL_VAULT_KEY_VERSION);\n`,
+      },
+    ]);
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toMatch(/used 2 time\(s\) in src\/lib\/vault\/vault-context\.tsx \(allowed 1\)/);
+  });
+
+  it("allows one INITIAL_VAULT_KEY_VERSION use in each setup site, its definition and its re-export", () => {
+    const errors = checkKeyVersionHardcode([
+      {
+        rel: "src/lib/vault/vault-context.tsx",
+        content: `import { INITIAL_VAULT_KEY_VERSION } from "@/lib/constants";\ninstall({ keyVersion: INITIAL_VAULT_KEY_VERSION });\n// INITIAL_VAULT_KEY_VERSION in a comment\n`,
+      },
+      {
+        rel: "src/app/api/vault/setup/route.ts",
+        content: `import { INITIAL_VAULT_KEY_VERSION } from "@/lib/constants/vault/vault";\ndata: { keyVersion: INITIAL_VAULT_KEY_VERSION }\n`,
+      },
+      { rel: "src/lib/constants/vault/vault.ts", content: `export const INITIAL_VAULT_KEY_VERSION = 1;\n` },
+      { rel: "src/lib/constants/index.ts", content: `export { VAULT_STATUS, INITIAL_VAULT_KEY_VERSION } from "./vault/vault";\n` },
+    ]);
+    expect(errors).toHaveLength(0);
+  });
+
   it("does not flag a ternary expression like data.keyVersion : 1", () => {
     const files = [
       {

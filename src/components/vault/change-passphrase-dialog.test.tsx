@@ -28,6 +28,7 @@ vi.mock("@/lib/vault/vault-context", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/lib/vault/vault-context")>();
   return {
     useVault: () => ({ changePassphrase: mockChangePassphrase }),
+    PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED: actual.PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED,
     // The real classes: the dialog branches on `instanceof`.
     VaultChangeOutcomeUnknownError: actual.VaultChangeOutcomeUnknownError,
     VaultChangedElsewhereError: actual.VaultChangedElsewhereError,
@@ -222,6 +223,61 @@ describe("ChangePassphraseDialog", () => {
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });
     expect(mockToast.error).toHaveBeenCalledWith("vaultChangedElsewhere", { duration: Infinity });
+    expect(mockToast.success).not.toHaveBeenCalled();
+  });
+
+  it("asks to unlock once with the passphrase when the server has no passphrase verifier (VERIFIER_NOT_SET)", async () => {
+    mockChangePassphrase.mockRejectedValue({ error: "VERIFIER_NOT_SET" });
+
+    render(<ChangePassphraseDialog open={true} onOpenChange={onOpenChange} />);
+    fillForm("oldpass", "longenoughpass", "longenoughpass");
+    fireEvent.click(screen.getByRole("button", { name: "changePassphraseButton" }));
+
+    expect(await screen.findByText("verifierNotSetHint")).toBeInTheDocument();
+    expect(onOpenChange).not.toHaveBeenCalled();
+  });
+
+  async function submitValidForm() {
+    render(<ChangePassphraseDialog open={true} onOpenChange={onOpenChange} />);
+    fillForm("oldpass", "longenoughpass", "longenoughpass");
+    fireEvent.click(screen.getByRole("button", { name: "changePassphraseButton" }));
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+  }
+
+  it("says the passphrase was not changed when the vault locked before the change was sent", async () => {
+    mockChangePassphrase.mockResolvedValue("PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED");
+
+    await submitValidForm();
+
+    expect(mockToast.warning).toHaveBeenCalledWith("changePassphraseNotStartedVaultLocked", { duration: Infinity });
+    expect(mockToast.success).not.toHaveBeenCalled();
+  });
+
+  it("says to unlock with the new passphrase, not that the vault is ready, when it locked while the change committed", async () => {
+    mockChangePassphrase.mockResolvedValue({
+      outcome: "PASSPHRASE_CHANGE_COMMITTED_VAULT_LOCKED",
+      effects: { invalidationFailed: false },
+    });
+
+    await submitValidForm();
+
+    expect(mockToast.warning).toHaveBeenCalledWith("changePassphraseCommittedVaultLocked", { duration: Infinity });
+    expect(mockToast.warning).not.toHaveBeenCalledWith("sessionInvalidateFailed", expect.anything());
+    expect(mockToast.success).not.toHaveBeenCalled();
+  });
+
+  it("still warns that other devices were not signed out when the vault locked while the change committed", async () => {
+    mockChangePassphrase.mockResolvedValue({
+      outcome: "PASSPHRASE_CHANGE_COMMITTED_VAULT_LOCKED",
+      effects: { invalidationFailed: true },
+    });
+
+    await submitValidForm();
+
+    expect(mockToast.warning).toHaveBeenCalledWith("changePassphraseCommittedVaultLocked", { duration: Infinity });
+    expect(mockToast.warning).toHaveBeenCalledWith("sessionInvalidateFailed", { duration: Infinity });
     expect(mockToast.success).not.toHaveBeenCalled();
   });
 

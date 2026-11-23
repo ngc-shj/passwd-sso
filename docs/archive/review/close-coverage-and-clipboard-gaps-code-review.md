@@ -343,3 +343,98 @@ Red-proof ledgers are in the scratchpad: `r3-fix-a/`, `r3-fix-b/` and `r3-fix-c/
 
 ### T3-4 — resolved
 - `raceParkedOnUpdate` awaits `Promise.allSettled(requests)` after releasing the blocker.
+
+---
+
+# Review round 4
+
+Scope: the round-3 fixes, `git diff cdc3f1fb4..e98ff648c`.
+
+**Resolved from round 3:** F-R3-1, S3-3, S3-6, T3-1 to T3-4, and the `checkStoredVerifier` migration (behaviour-equivalent at all five sites). The round-3 ledgers were re-executed and match.
+
+**R43:** no widening. The rotate predicate, the refusal sets (FORBIDDEN removed) and the generate CAS all narrow.
+
+**Rotate as a guessing oracle:** not a finding. It is limited to 3 per 15 minutes, the same as change-passphrase, and offline guessing through `unlock/data` already dominates.
+
+## New and continuing findings
+
+- **F-R4-1 / S4-1 [Major, continuing F-R3-3]** — `rotateKey` compares the lock counter and *then* awaits the body read before installing keys. A lock during the read installs keys into a locked provider and shows "rotated successfully".
+- **S4-3 [Major]** — the decrypted ECDH private key buffer is never zeroed in `unlock`, `unlockWithPasskey` or `unlockWithStoredPrf`.
+- **T4-1 [Major]** — the `not-set` branch of the recover reset step is unpinned.
+  - **Mutant:** deleting it passes all 22 tests.
+  - **Effect under the mutant:** the request falls into the CAS write without proof, which fails open.
+- **T4-2 [Major]** — in the C11 gate self-test, 11 rewritten tracker clauses have green mutants that are real false negatives, and 2 allow sides are unpinned.
+- **T4-3 [Major]** — the pagehide/unmount lock-counter bump is unpinned.
+- **S4-4 [Major]** — the gate resolves an imported helper to the first exported helper with the same name.
+  - **Effect:** a false negative.
+  - **Header claim:** that same-name helpers "can only over-report" is false.
+- **F-R4-2 / S4-2 / A4-1 [Minor]** — proven-stale refusals keep the vault unlocked. Three cases:
+  - a rotate `INVALID_PASSPHRASE` after the local check passed;
+  - a change-passphrase `INVALID_PASSPHRASE` from a stale tab;
+  - a generate `VAULT_WRAP_CONFLICT`.
+- **F-R4-3 [Minor]** — a lock while the operation is being prepared surfaces as an error into an unmounted dialog instead of "not started". `changePassphrase` also captures the lock counter only after two key derivations.
+- **F-R4-4 [Minor]** — `ROTATION_COMMITTED_VAULT_LOCKED` drops `rotationEffects`, so the "sign out other devices" banner is lost.
+- **F-R4-5 / S4-A1 [Minor]** — the rotate dialog shows the change-passphrase hint for `VERIFIER_NOT_SET`. The hint does not say the unlock must use the passphrase, so a passkey-only user loops.
+- **F-R4-6 [Minor, regression from the round-3 side-fix]** — the notification-bell delete decides the badge change from the render-time `isRead`. If a mark-read request is still in flight, the badge is decremented twice.
+- **T4-4 [Minor]** — older C11 clauses are unpinned, and `let f2 = fetchApi` is an undeclared bypass.
+- **A4-2 [Minor]** — the pagehide zeroing bumps the lock counter but leaves `vaultStatus` as UNLOCKED.
+
+## Process note
+
+Many round-4 findings continue the round-3 lock-counter fix, which was a point check at a single await. These are fixed structurally rather than site by site:
+- a single synchronous install function is the only writer of key material, and it refuses when any lock has happened since the flow started;
+- the lock is checked after every await in the key-changing flows;
+- each `checkStoredVerifier` call site is written so that deleting a mapping degrades to a refusal.
+
+## Resolution Status (round 4)
+
+Red-proof ledgers are in the scratchpad: `r4-fix-a/`, `r4-fix-b/` and `r4-fix-c/`, each with a `ledger.md`. Every new test is red on the pre-fix copy or on a named mutant, and every deny pin has an allow pin.
+
+### F-R4-1 / S4-1 / F-R4-3 / F-R4-4 / T4-3 / A4-2 — resolved structurally
+- **One drop path.** `dropKeyMaterial()` is the only place that bumps the lock counter and drops keys. `lock()` and the pagehide/unmount zeroing both call it.
+  - Pagehide now sets LOCKED (A4-2). The two drop paths had drifted: the old pagehide path left the wrap and the encryption key resident.
+- **One install path.** `installKeyMaterial(epoch, …)` is synchronous and is the only writer of key material, for setup, the three unlock paths, `changePassphrase` and `rotateKey`.
+  - It refuses if a lock happened since the flow began, and nothing is awaited between its check and its writes.
+  - The unlock paths used to write the refs, then await the ECDH decrypt, then set UNLOCKED. A pagehide in between left keys in a page cached for back/forward navigation. This was not reported, but it is in the same class, so it was fixed too.
+- **Lock checks after every await.** `lockedSince(epoch)` runs after every await in `changePassphrase` and `rotateKey` that precedes a ref read or a request.
+  - In `rotateKey`, a throw caused by a lock before the request is sent (`!sent && lockedSince`) becomes `ROTATION_NOT_STARTED_VAULT_LOCKED`.
+  - In `changePassphrase`, the epoch is now captured at entry. Before, it was captured after the two key derivations.
+- **Committed but locked keeps its effects (F-R4-4).** A 2xx under a lock reads the body but does not install it. The rotate result `{outcome: ROTATION_COMMITTED_VAULT_LOCKED, effects}` carries the effects; for change-passphrase it is `{invalidationFailed}`. The dialogs render the same banners.
+- **T4-3.** Pagehide during an in-flight rotate or change POST is now pinned: nothing is installed.
+- **Migration-loop checks.** Each check, before an attachment GET, a migrate PUT and the refetch, is pinned by the number of requests sent after the lock.
+- **Interrupted unlock.** An unlock interrupted after the server accepted the credential throws `VAULT_UNLOCK_INTERRUPTED` and shows a neutral "interrupted, try again" message.
+  - It is never reported as a wrong passphrase, and it is never counted toward lockout.
+  - `resolveUnlockError` now requires every caller to supply that message.
+
+### F-R4-2 / S4-2 / A4-1 — resolved
+- `changePassphrase` and the recovery-key dialog now check the passphrase locally first, as `rotateKey` already did. A server `INVALID_PASSPHRASE` after a passing local check therefore proves the verifier moved elsewhere.
+  - That refusal, and the generate route's `VAULT_WRAP_CONFLICT`, now `lock()` and show the "changed elsewhere" notice.
+  - A local typo stays an inline error with the vault unlocked. That side is pinned with a lock-on-every-refusal mutant.
+- The recovery-key flow captures the epoch at its start:
+  - **Lock before the POST:** nothing is sent, and a "not created" notice is shown.
+  - **Lock after a committed 2xx:** the key is zeroed, never shown, and a persistent notice says a new key was created and the previous one no longer works.
+
+### S4-3 — resolved
+The decrypted ECDH private key buffer is zeroed in each unlock function's `finally`. So are the `buffer.slice` copies in setup and in the rotate re-wrap, which had the same problem.
+
+### F-R4-5 / S4-A1 — resolved
+- The rotate dialog has its own `VERIFIER_NOT_SET` message. It and the change-passphrase hint now say to unlock once *with the passphrase, not a passkey*.
+- Requiring a stored verifier for rotation is the security property, so passkey-only users are told how to establish one.
+
+### F-R4-6 — resolved
+- **Mechanism:** a write-through `writeNotifications()` updates a ref and the state together. The delete and mark-read responses decide the badge change from the latest list at response time.
+- **Tests:**
+  - "mark-read then delete" and "delete then mark-read" each decrement once;
+  - both responses arriving in the same `act` decrement once. This is red under a `useLayoutEffect`-synced ref, which shows why the write-through is needed.
+
+### T4-1 — resolved
+- All six `checkStoredVerifier` call sites now read `if (verifier !== "ok") return verifier === "not-set" ? … : …`. Deleting a mapping at any site degrades to a refusal, which was proved per site.
+- The reset step has a new `not-set` test that asserts nothing is written, audited, invalidated or cleared. It is red on the deletion mutant of the previous code.
+
+### T4-2 / T4-4 / S4-4 — resolved
+- **S4-4:** `helperFor` now resolves an imported helper through its import specifier.
+  - Supported forms: `@/` and relative paths; index files; renamed, default and namespace imports; and re-exports, with loop protection.
+  - An unresolvable or ambiguous case takes the most cautious verdict across same-name helpers.
+  - The false header claim was rewritten.
+- **T4-4 alias:** any alias of `fetchApi` (const, let or var, a later assignment, a destructured binding or a parameter default) is now a source.
+- **Self-test:** it grew from 75 to 130 rows. All 60 mutants are red: the reviewer's list plus the agent's own sweep of the clauses it touched.

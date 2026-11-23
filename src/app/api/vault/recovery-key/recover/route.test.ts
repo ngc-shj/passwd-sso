@@ -396,6 +396,25 @@ describe("POST /api/vault/recovery-key/recover", () => {
       );
     });
 
+    it("returns 404 RECOVERY_KEY_NOT_SET and replaces nothing when no recovery key is set", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({
+        ...userWithRecovery,
+        recoveryVerifierHmac: null,
+      });
+
+      const res = await POST(createRequest("POST", URL, { body: resetBody }));
+
+      expect(res.status).toBe(404);
+      expect((await res.json()).error).toBe("RECOVERY_KEY_NOT_SET");
+      expect(mockTxUpdateMany).not.toHaveBeenCalled();
+      expect(mockPrismaUser.updateMany).not.toHaveBeenCalled();
+      expect(mockPrismaUser.update).not.toHaveBeenCalled();
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
+      expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+      expect(mockResetClear).not.toHaveBeenCalled();
+    });
+
     it("returns 401 on invalid verifier in reset step", async () => {
       const res = await POST(createRequest("POST", URL, {
         body: { ...resetBody, verifierHash: "f".repeat(64) },

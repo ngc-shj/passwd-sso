@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,17 @@ export function NotificationBell() {
   const locale = useLocale();
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  // Write-through copy of the list: every write sets it and the state
+  // together, so a response handler reads the list as of the last write —
+  // including one another handler made a moment ago that React has not
+  // rendered yet. A ref synced after commit lags that write, and deciding
+  // from the rendered item misses a mark-read that landed meanwhile; either
+  // lets mark-read and delete both decrement the badge for one item.
+  const notificationsRef = useRef<NotificationItem[]>([]);
+  const writeNotifications = useCallback((next: NotificationItem[]) => {
+    notificationsRef.current = next;
+    setNotifications(next);
+  }, []);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -61,14 +72,14 @@ export function NotificationBell() {
       );
       if (res.ok) {
         const data = await res.json();
-        setNotifications(data.items);
+        writeNotifications(data.items);
       }
     } catch {
       // Silently ignore
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [writeNotifications]);
 
   // Poll unread count (pause when tab is hidden)
   useEffect(() => {
@@ -116,14 +127,14 @@ export function NotificationBell() {
       const res = await fetchApi(API_PATH.NOTIFICATIONS, { method: "PATCH" });
       if (res.ok) {
         setUnreadCount(0);
-        setNotifications((prev) =>
-          prev.map((n) => ({ ...n, isRead: true })),
+        writeNotifications(
+          notificationsRef.current.map((n) => ({ ...n, isRead: true })),
         );
       }
     } catch {
       // Silently ignore
     }
-  }, []);
+  }, [writeNotifications]);
 
   const markAsRead = useCallback(async (id: string) => {
     try {
@@ -131,27 +142,34 @@ export function NotificationBell() {
         method: "PATCH",
       });
       if (res.ok) {
-        setUnreadCount((c) => Math.max(0, c - 1));
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
+        // Already read, or deleted while this request was in flight: the
+        // other path has accounted for this item in the badge.
+        const current = notificationsRef.current;
+        const target = current.find((n) => n.id === id);
+        if (!target || target.isRead) return;
+        writeNotifications(
+          current.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
         );
+        setUnreadCount((c) => Math.max(0, c - 1));
       }
     } catch {
       // Silently ignore
     }
-  }, []);
+  }, [writeNotifications]);
 
-  const deleteNotification = useCallback(async (removed: NotificationItem) => {
+  const deleteNotification = useCallback(async (id: string) => {
     try {
-      const res = await fetchApi(apiPath.notificationById(removed.id), {
+      const res = await fetchApi(apiPath.notificationById(id), {
         method: "DELETE",
       });
       if (res.ok) {
-        // The caller passes the item it rendered, so the badge decision never
-        // depends on a ref synced after commit (a click can land before that
-        // effect runs) nor on a setter inside the list updater, which would
-        // run twice under StrictMode.
-        setNotifications((prev) => prev.filter((n) => n.id !== removed.id));
+        // Decided from the list as of now, not as rendered at click time: a
+        // mark-read that succeeded meanwhile has already decremented. Kept
+        // out of a state updater, which StrictMode runs twice.
+        const current = notificationsRef.current;
+        const removed = current.find((n) => n.id === id);
+        if (!removed) return;
+        writeNotifications(current.filter((n) => n.id !== id));
         if (!removed.isRead) {
           setUnreadCount((c) => Math.max(0, c - 1));
         }
@@ -159,7 +177,7 @@ export function NotificationBell() {
     } catch {
       // Silently ignore
     }
-  }, []);
+  }, [writeNotifications]);
 
   return (
     <DropdownMenu open={open} onOpenChange={handleOpenChange}>
@@ -227,7 +245,7 @@ export function NotificationBell() {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      deleteNotification(n);
+                      deleteNotification(n.id);
                     }}
                     className="shrink-0 text-xs text-muted-foreground hover:text-destructive"
                   >

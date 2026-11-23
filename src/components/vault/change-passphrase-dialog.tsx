@@ -3,7 +3,12 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { useVault, VaultChangedElsewhereError, VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
+import {
+  PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED,
+  useVault,
+  VaultChangedElsewhereError,
+  VaultChangeOutcomeUnknownError,
+} from "@/lib/vault/vault-context";
 import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { Button } from "@/components/ui/button";
@@ -68,12 +73,28 @@ export function ChangePassphraseDialog({
     setLoading(true);
     setError("");
     try {
-      const effects = await changePassphrase(currentPassphrase, newPassphrase);
+      const result = await changePassphrase(currentPassphrase, newPassphrase);
+      if (result === PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED) {
+        // The vault locked before anything was written (this dialog unmounts
+        // with it): the passphrase was not changed.
+        toast.warning(t("changePassphraseNotStartedVaultLocked"), { duration: Infinity });
+        handleOpenChange(false);
+        return;
+      }
+      // Only PassphraseChangeCommittedVaultLocked
+      // (PASSPHRASE_CHANGE_COMMITTED_VAULT_LOCKED) carries an outcome.
+      const committedVaultLocked = "outcome" in result;
+      const effects = committedVaultLocked ? result.effects : result;
+      if (committedVaultLocked) {
+        // The vault locked after the change was sent: it committed, and the
+        // next unlock takes the new passphrase.
+        toast.warning(t("changePassphraseCommittedVaultLocked"), { duration: Infinity });
+      }
       if (effects.invalidationFailed) {
         // The change committed; only signing out other devices failed.
         // Persistent so the user acts on it rather than dismissing it.
         toast.warning(tApi("sessionInvalidateFailed"), { duration: Infinity });
-      } else {
+      } else if (!committedVaultLocked) {
         toast.success(t("passphraseChanged"));
       }
       handleOpenChange(false);
@@ -95,7 +116,7 @@ export function ChangePassphraseDialog({
       const apiErr = err as { error?: string } | undefined;
       const errorCode = apiErr?.error;
 
-      if (errorCode === "VERIFIER_NOT_SET") {
+      if (errorCode === API_ERROR.VERIFIER_NOT_SET) {
         setError(t("verifierNotSetHint"));
       } else if (errorCode === API_ERROR.INVALID_PASSPHRASE) {
         setError(tApi("invalidPassphrase"));

@@ -134,11 +134,10 @@ async function handleVerify(data: z.infer<typeof verifySchema>, userId: string, 
     storedHmac: user.recoveryVerifierHmac,
     storedVersion: user.recoveryVerifierVersion,
   });
-  if (verifier === "not-set") {
-    return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET);
-  }
-  if (verifier === "wrong") {
-    return errorResponse(API_ERROR.INVALID_RECOVERY_KEY);
+  if (verifier !== "ok") {
+    return errorResponse(
+      verifier === "not-set" ? API_ERROR.RECOVERY_KEY_NOT_SET : API_ERROR.INVALID_RECOVERY_KEY,
+    );
   }
 
   // Return encrypted data for client-side decryption (never return HMAC)
@@ -180,11 +179,10 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
     storedHmac: user.recoveryVerifierHmac,
     storedVersion: user.recoveryVerifierVersion,
   });
-  if (verifier === "not-set") {
-    return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET);
-  }
-  if (verifier === "wrong") {
-    return errorResponse(API_ERROR.INVALID_RECOVERY_KEY);
+  if (verifier !== "ok") {
+    return errorResponse(
+      verifier === "not-set" ? API_ERROR.RECOVERY_KEY_NOT_SET : API_ERROR.INVALID_RECOVERY_KEY,
+    );
   }
 
   // M1: update the passphrase/recovery-key material AND write the audit record

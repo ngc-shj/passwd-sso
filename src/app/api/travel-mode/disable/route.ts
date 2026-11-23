@@ -66,11 +66,11 @@ async function handlePOST(request: NextRequest) {
     storedHmac: user.passphraseVerifierHmac,
     storedVersion: user.passphraseVerifierVersion,
   });
-  if (verifier === "not-set") {
-    return errorResponse(API_ERROR.VAULT_NOT_SETUP);
-  }
+  if (verifier !== "ok") {
+    if (verifier === "not-set") {
+      return errorResponse(API_ERROR.VAULT_NOT_SETUP);
+    }
 
-  if (verifier === "wrong") {
     await recordFailure(session.user.id, request);
 
     await logAuditAsync({

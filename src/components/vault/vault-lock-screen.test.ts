@@ -5,7 +5,7 @@ vi.mock("@/i18n/navigation", () => ({
 }));
 
 import { formatLockedUntil, resolveUnlockError } from "./vault-lock-screen";
-import { VaultUnlockError } from "@/lib/vault/vault-context";
+import { VaultUnlockError, VAULT_UNLOCK_INTERRUPTED } from "@/lib/vault/vault-context";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 
 /**
@@ -93,6 +93,7 @@ describe("resolveUnlockError", () => {
     lockedUntil: (lockedUntil: string | null | undefined) => `locked:${lockedUntil ?? "none"}`,
     rateLimited: "rate-limited",
     unavailable: "unavailable",
+    interrupted: "interrupted",
     fallback: "fallback",
   };
 
@@ -128,6 +129,13 @@ describe("resolveUnlockError", () => {
     expect(resolveUnlockError(new VaultUnlockError(API_ERROR.SERVICE_UNAVAILABLE), msgs)).toEqual({
       kind: "message",
       message: "unavailable",
+    });
+  });
+
+  it("reports an interrupted unlock as interrupted, not as a failed attempt", () => {
+    expect(resolveUnlockError(new VaultUnlockError(VAULT_UNLOCK_INTERRUPTED), msgs)).toEqual({
+      kind: "message",
+      message: "interrupted",
     });
   });
 

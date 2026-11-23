@@ -42,7 +42,7 @@ import {
   MIN_ACCEPTED_CEK_WRAP_AAD_VERSION,
   CURRENT_CEK_WRAP_AAD_VERSION,
 } from "@/lib/crypto/crypto-aad";
-import { API_PATH, apiPath, VAULT_STATUS, ATTACHMENT_ENCRYPTION_MODE } from "@/lib/constants";
+import { API_PATH, apiPath, VAULT_STATUS, ATTACHMENT_ENCRYPTION_MODE, INITIAL_VAULT_KEY_VERSION } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
@@ -58,6 +58,9 @@ import { AutoLockProvider } from "./auto-lock-context";
 import { EmergencyAccessProvider, confirmPendingEmergencyGrants } from "../emergency-access/emergency-access-context";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { PRE_ROUTE_AND_PRE_TX_REFUSALS } from "./pre-commit-refusals";
+import { VAULT_UNLOCK_INTERRUPTED } from "./vault-unlock-codes";
+
+export { VAULT_UNLOCK_INTERRUPTED };
 
 /** Error thrown by `unlock()` when the server rejects the request with a specific error code. */
 export class VaultUnlockError extends Error {
@@ -162,6 +165,35 @@ export async function notifyUnlockFailure(): Promise<void> {
   }
 }
 
+/**
+ * Decrypt the vault's ECDH private key (team E2E) with the unwrapped secret
+ * key. Null when the vault holds none or it does not decrypt — non-fatal, team
+ * features are then unavailable. The returned view is over the decrypted
+ * buffer itself: the caller zeroes it once it has been copied in.
+ */
+async function decryptEcdhPrivateKey(
+  secretKey: Uint8Array,
+  vaultData: { encryptedEcdhPrivateKey?: string; ecdhPrivateKeyIv?: string; ecdhPrivateKeyAuthTag?: string },
+): Promise<Uint8Array | null> {
+  if (!vaultData.encryptedEcdhPrivateKey || !vaultData.ecdhPrivateKeyIv || !vaultData.ecdhPrivateKeyAuthTag) {
+    return null;
+  }
+  try {
+    const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
+    const decrypted = await decryptBinary(
+      {
+        ciphertext: hexDecode(vaultData.encryptedEcdhPrivateKey),
+        iv: vaultData.ecdhPrivateKeyIv,
+        authTag: vaultData.ecdhPrivateKeyAuthTag,
+      },
+      ecdhWrapKey,
+    );
+    return new Uint8Array(decrypted);
+  } catch {
+    return null;
+  }
+}
+
 // Re-export so existing consumers can keep importing from vault-context
 export type { VaultStatus };
 
@@ -195,16 +227,22 @@ export interface RotationEffects {
 export const ROTATION_EFFECTS_UNAVAILABLE = "ROTATION_EFFECTS_UNAVAILABLE";
 
 /**
- * `rotateKey`'s result when the server committed the rotation but the vault
- * was locked (auto-lock, the user) while the request was in flight. The new
- * key material was not installed into the locked vault; the next unlock reads
- * the committed wrap. The caller must not report the vault as usable.
+ * Discriminant of `rotateKey`'s result when the server committed the rotation
+ * but the vault was locked (auto-lock, the user, page hide) after the request
+ * was sent. The new key material was not installed into the locked vault; the
+ * next unlock reads the committed wrap. The caller must not report the vault
+ * as usable, but still reports the rotation's effects.
  */
 export const ROTATION_COMMITTED_VAULT_LOCKED = "ROTATION_COMMITTED_VAULT_LOCKED";
 
+export interface RotationCommittedVaultLocked {
+  outcome: typeof ROTATION_COMMITTED_VAULT_LOCKED;
+  effects: RotationEffects | typeof ROTATION_EFFECTS_UNAVAILABLE | null;
+}
+
 /**
- * `rotateKey`'s result when the vault was locked while the rotation was being
- * prepared (re-encrypting entries, before the rotate POST). Nothing was sent:
+ * `rotateKey`'s result when the vault was locked before the rotation was sent,
+ * or the server refused it after the vault was locked. Nothing was written:
  * the server still holds the old key and wrap, and the rotation must be started
  * again after unlocking.
  */
@@ -217,6 +255,29 @@ export const ROTATION_NOT_STARTED_VAULT_LOCKED = "ROTATION_NOT_STARTED_VAULT_LOC
 export interface PassphraseChangeEffects {
   invalidationFailed: boolean;
 }
+
+/** `changePassphrase`'s counterpart of ROTATION_COMMITTED_VAULT_LOCKED. */
+export const PASSPHRASE_CHANGE_COMMITTED_VAULT_LOCKED = "PASSPHRASE_CHANGE_COMMITTED_VAULT_LOCKED";
+
+export interface PassphraseChangeCommittedVaultLocked {
+  outcome: typeof PASSPHRASE_CHANGE_COMMITTED_VAULT_LOCKED;
+  effects: PassphraseChangeEffects;
+}
+
+/** `changePassphrase`'s counterpart of ROTATION_NOT_STARTED_VAULT_LOCKED. */
+export const PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED = "PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED";
+
+export type PassphraseChangeResult =
+  | PassphraseChangeEffects
+  | PassphraseChangeCommittedVaultLocked
+  | typeof PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED;
+
+export type RotateKeyResult =
+  | RotationEffects
+  | typeof ROTATION_EFFECTS_UNAVAILABLE
+  | RotationCommittedVaultLocked
+  | typeof ROTATION_NOT_STARTED_VAULT_LOCKED
+  | null;
 
 export interface TenantPasswordPolicy {
   minPasswordLength: number;
@@ -238,18 +299,16 @@ interface VaultContextValue {
   unlockWithStoredPrf: () => Promise<boolean>;
   lock: () => void;
   setup: (passphrase: string) => Promise<void>;
-  changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<PassphraseChangeEffects>;
+  changePassphrase: (currentPassphrase: string, newPassphrase: string) => Promise<PassphraseChangeResult>;
   rotateKey: (
     passphrase: string,
     onProgress?: (progress: { phase: "migrating" | "rewrapping" | "committing" | "entries" | "history", current: number, total: number }) => void,
-  ) => Promise<
-    | RotationEffects
-    | typeof ROTATION_EFFECTS_UNAVAILABLE
-    | typeof ROTATION_COMMITTED_VAULT_LOCKED
-    | typeof ROTATION_NOT_STARTED_VAULT_LOCKED
-    | null
-  >;
+  ) => Promise<RotateKeyResult>;
   verifyPassphrase: (passphrase: string) => Promise<boolean>;
+  /** The current lock epoch, for a flow outside the provider to pass to lockedSince. */
+  getLockEpoch: () => number;
+  /** Whether the vault was locked (its key material dropped) since `epoch`. */
+  lockedSince: (epoch: number) => boolean;
   getSecretKey: () => Uint8Array | null;
   getAccountSalt: () => Uint8Array | null;
   getKeyVersion: () => number;
@@ -316,11 +375,78 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ECDH key pair for team E2E encryption
   const ecdhPrivateKeyBytesRef = useRef<Uint8Array | null>(null);
   const ecdhPublicKeyJwkRef = useRef<string | null>(null);
-  // Bumped whenever the key material is dropped (lock, page hide). A key change
-  // whose request was in flight across a bump must not install its result.
-  // Every path that drops key material must bump it (lock() and the
-  // zeroSensitiveKeys effect today).
+  // Bumped whenever the key material is dropped. Only dropKeyMaterial writes it
+  // and only dropKeyMaterial drops key material, so the two cannot drift.
   const lockEpochRef = useRef(0);
+
+  // Whether the key material was dropped since a flow captured `epoch` at its
+  // start. A flow checks it after every await that precedes reading the refs
+  // or sending a request.
+  const lockedSince = useCallback((epoch: number) => lockEpochRef.current !== epoch, []);
+
+  const dropKeyMaterial = useCallback(() => {
+    lockEpochRef.current += 1;
+    if (secretKeyRef.current) {
+      secretKeyRef.current.fill(0);
+      secretKeyRef.current = null;
+    }
+    if (ecdhPrivateKeyBytesRef.current) {
+      ecdhPrivateKeyBytesRef.current.fill(0);
+      ecdhPrivateKeyBytesRef.current = null;
+    }
+    ecdhPublicKeyJwkRef.current = null;
+    wrappedKeyRef.current = null;
+    setEncryptionKey(null);
+    setVaultStatus((prev) =>
+      prev === VAULT_STATUS.UNLOCKED ? VAULT_STATUS.LOCKED : prev
+    );
+  }, []);
+
+  /**
+   * The only writer of key material into the provider for setup, the unlock
+   * paths, changePassphrase and rotateKey. Synchronous: between its epoch check
+   * and its writes nothing can run, so a lock since `epoch` (the flow's start)
+   * either happened before the check — and nothing is installed — or happens
+   * after, and drops what was installed. Buffers are copied in; the caller
+   * zeroes its own. Returns false when it refused.
+   */
+  const installKeyMaterial = useCallback(
+    (
+      epoch: number,
+      material: {
+        accountSalt: Uint8Array;
+        wrappedKey: { ciphertext: string; iv: string; authTag: string };
+        secretKey?: Uint8Array;
+        keyVersion?: number;
+        encryptionKey?: CryptoKey;
+        ecdh?: { privateKeyBytes: Uint8Array; publicKeyJwk: string | null };
+        markUnlocked?: boolean;
+      },
+    ): boolean => {
+      if (lockEpochRef.current !== epoch) return false;
+      if (material.secretKey) {
+        // Every reader got a copy (getSecretKey), never this buffer.
+        secretKeyRef.current?.fill(0);
+        secretKeyRef.current = new Uint8Array(material.secretKey);
+      }
+      if (material.keyVersion !== undefined) commitKeyVersion(material.keyVersion);
+      accountSaltRef.current = material.accountSalt;
+      wrappedKeyRef.current = {
+        ciphertext: material.wrappedKey.ciphertext,
+        iv: material.wrappedKey.iv,
+        authTag: material.wrappedKey.authTag,
+      };
+      if (material.ecdh) {
+        ecdhPrivateKeyBytesRef.current?.fill(0);
+        ecdhPrivateKeyBytesRef.current = new Uint8Array(material.ecdh.privateKeyBytes);
+        ecdhPublicKeyJwkRef.current = material.ecdh.publicKeyJwk;
+      }
+      if (material.encryptionKey) setEncryptionKey(material.encryptionKey);
+      if (material.markUnlocked) setVaultStatus(VAULT_STATUS.UNLOCKED);
+      return true;
+    },
+    [commitKeyVersion],
+  );
 
   // ─── Fetch vault status on session load ───────────────────────
 
@@ -404,53 +530,34 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const lock = useCallback(() => {
     // Revoke all delegation sessions (best-effort, survives page unload)
     fetchApi(API_PATH.VAULT_DELEGATION, { method: "DELETE", keepalive: true }).catch(() => {});
-    lockEpochRef.current += 1;
-    if (secretKeyRef.current) {
-      secretKeyRef.current.fill(0);
-      secretKeyRef.current = null;
-    }
-    if (ecdhPrivateKeyBytesRef.current) {
-      ecdhPrivateKeyBytesRef.current.fill(0);
-      ecdhPrivateKeyBytesRef.current = null;
-    }
-    ecdhPublicKeyJwkRef.current = null;
-    wrappedKeyRef.current = null;
-    setEncryptionKey(null);
-    setVaultStatus((prev) =>
-      prev === VAULT_STATUS.UNLOCKED ? VAULT_STATUS.LOCKED : prev
-    );
-  }, []);
+    dropKeyMaterial();
+  }, [dropKeyMaterial]);
 
   // ─── SecretKey cleanup on unmount / page unload ─────────────
+  // A page hide is a lock: it drops the same material and sets LOCKED, so a
+  // page restored from the bfcache comes back locked and the provider never
+  // holds UNLOCKED without a key. On unmount the state updates are no-ops.
 
   useEffect(() => {
     const zeroSensitiveKeys = () => {
-      lockEpochRef.current += 1;
       if (secretKeyRef.current) {
         // Vault is unlocked — revoke delegations before zeroing keys
         fetchApi(API_PATH.VAULT_DELEGATION, { method: "DELETE", keepalive: true }).catch(() => {});
-        secretKeyRef.current.fill(0);
-        secretKeyRef.current = null;
       }
-      if (ecdhPrivateKeyBytesRef.current) {
-        ecdhPrivateKeyBytesRef.current.fill(0);
-        ecdhPrivateKeyBytesRef.current = null;
-      }
+      dropKeyMaterial();
     };
     window.addEventListener("pagehide", zeroSensitiveKeys);
     return () => {
       window.removeEventListener("pagehide", zeroSensitiveKeys);
       zeroSensitiveKeys(); // also zero on unmount
     };
-  }, []);
+  }, [dropKeyMaterial]);
 
   // ─── bfcache restore guard (INV-C1.6) ────────────────────────
-  // When the browser restores a bfcache page, the pagehide handler has already
-  // zeroed secretKeyRef. If vaultStatus still reads UNLOCKED (the "never-overwrite"
-  // rule in checkVaultStatus prevented a re-lock), the pane would show decrypted
-  // state with a null key (S7). Call lock() to force LOCKED and unmount the pane.
-  // lock() zeroes wrappedKeyRef/salt and setEncryptionKey(null) — bare setVaultStatus
-  // alone would leave those refs resident (S11/S13).
+  // pagehide now sets LOCKED itself; this guard remains for a page frozen
+  // before that update rendered, whose restored render could still read
+  // UNLOCKED with a null key (S7). lock() drops the key material and the
+  // encryption key — bare setVaultStatus alone would leave them resident (S11/S13).
   useEffect(() => {
     const handlePageshow = (event: PageTransitionEvent) => {
       if (!event.persisted) return;
@@ -466,6 +573,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ─── Setup (first time) ───────────────────────────────────────
 
   const setup = useCallback(async (passphrase: string) => {
+    const lockEpoch = lockEpochRef.current;
     // 1. Generate secret key and account salt
     const secretKey = generateSecretKey();
     let ecdhPrivBytes: Uint8Array | null = null;
@@ -497,13 +605,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const ecdhPubJwk = await exportPublicKey(ecdhKeyPair.publicKey);
       ecdhPrivBytes = await exportPrivateKey(ecdhKeyPair.privateKey);
       const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
-      const ecdhEncrypted = await encryptBinary(
-        ecdhPrivBytes.buffer.slice(
-          ecdhPrivBytes.byteOffset,
-          ecdhPrivBytes.byteOffset + ecdhPrivBytes.byteLength,
-        ) as ArrayBuffer,
-        ecdhWrapKey,
-      );
+      // A copy of exactly the key bytes, zeroed once encrypted.
+      const ecdhSourceBytes = ecdhPrivBytes.slice();
+      let ecdhEncrypted: Awaited<ReturnType<typeof encryptBinary>>;
+      try {
+        ecdhEncrypted = await encryptBinary(ecdhSourceBytes.buffer as ArrayBuffer, ecdhWrapKey);
+      } finally {
+        ecdhSourceBytes.fill(0);
+      }
 
       // 9. Send to server
       const res = await fetchApi(API_PATH.VAULT_SETUP, {
@@ -529,15 +638,20 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         throw new Error(err?.error || "Setup failed");
       }
 
-      // 10. Store secretKey, keyVersion, accountSalt, wrappedKey, ECDH keys, and encryption key in memory
-      secretKeyRef.current = new Uint8Array(secretKey);
-      commitKeyVersion(1);
-      accountSaltRef.current = accountSalt;
-      wrappedKeyRef.current = { ciphertext: wrappedKey.ciphertext, iv: wrappedKey.iv, authTag: wrappedKey.authTag };
-      ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivBytes);
-      ecdhPublicKeyJwkRef.current = ecdhPubJwk;
-      setEncryptionKey(encKey);
-      setVaultStatus(VAULT_STATUS.UNLOCKED);
+      // 10. Store secretKey, keyVersion, accountSalt, wrappedKey, ECDH keys, and
+      // encryption key in memory — unless the page was hidden (or the provider
+      // unmounted) while setting up: the vault exists on the server now, so it
+      // is left LOCKED for an unlock rather than SETUP_REQUIRED.
+      const installed = installKeyMaterial(lockEpoch, {
+        secretKey,
+        keyVersion: INITIAL_VAULT_KEY_VERSION,
+        accountSalt,
+        wrappedKey,
+        ecdh: { privateKeyBytes: ecdhPrivBytes, publicKeyJwk: ecdhPubJwk },
+        encryptionKey: encKey,
+        markUnlocked: true,
+      });
+      if (!installed) setVaultStatus(VAULT_STATUS.LOCKED);
     } finally {
       // The success path copied both into refs; a rejected or refused POST, or
       // a throw while deriving, must not leave them in memory.
@@ -545,16 +659,21 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       ecdhPrivBytes?.fill(0);
       authKeyBytes?.fill(0);
     }
-  }, [commitKeyVersion]);
+  }, [installKeyMaterial]);
 
   // ─── Unlock ───────────────────────────────────────────────────
 
   const unlock = useCallback(async (passphrase: string): Promise<boolean> => {
-    // One finally zeroes the unwrapped key and the auth key bytes on every
-    // exit — a refused or rejected unlock POST included; the success path
-    // copied the secret key into secretKeyRef.
+    // A page hide or unmount while unlocking drops what this unlock would
+    // install: installKeyMaterial refuses, and the unlock throws
+    // VAULT_UNLOCK_INTERRUPTED.
+    const lockEpoch = lockEpochRef.current;
+    // One finally zeroes the unwrapped key, the auth key bytes and the ECDH
+    // private key on every exit — a refused or rejected unlock POST included;
+    // the success path copied the keys into the refs.
     let secretKey: Uint8Array | null = null;
     let authKeyBytes: Uint8Array | null = null;
+    let ecdhPrivateKeyBytes: Uint8Array | null = null;
     try {
       // 1. Fetch encrypted secret key + verification artifact (session-protected)
       const dataRes = await fetchApi(API_PATH.VAULT_UNLOCK_DATA);
@@ -629,36 +748,30 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         return false;
       }
 
-      // 6. Store secretKey, keyVersion, accountSalt, wrappedKey for EA auto-confirm and changePassphrase
-      secretKeyRef.current = new Uint8Array(secretKey);
-      commitKeyVersion(vaultData.keyVersion ?? 1);
-      accountSaltRef.current = accountSalt;
-      wrappedKeyRef.current = {
-        ciphertext: vaultData.encryptedSecretKey,
-        iv: vaultData.secretKeyIv,
-        authTag: vaultData.secretKeyAuthTag,
-      };
+      // 6. Restore ECDH private key if available (team E2E)
+      ecdhPrivateKeyBytes = await decryptEcdhPrivateKey(secretKey, vaultData);
 
-      // 6b. Restore ECDH private key if available (team E2E)
-      if (vaultData.encryptedEcdhPrivateKey && vaultData.ecdhPrivateKeyIv && vaultData.ecdhPrivateKeyAuthTag) {
-        try {
-          const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
-          const ecdhPrivDecrypted = await decryptBinary(
-            {
-              ciphertext: hexDecode(vaultData.encryptedEcdhPrivateKey),
-              iv: vaultData.ecdhPrivateKeyIv,
-              authTag: vaultData.ecdhPrivateKeyAuthTag,
-            },
-            ecdhWrapKey,
-          );
-          ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivDecrypted);
-          ecdhPublicKeyJwkRef.current = vaultData.ecdhPublicKey ?? null;
-        } catch {
-          // ECDH restoration failure is non-fatal — team features will be unavailable
-        }
+      // 7. Store secretKey, keyVersion, accountSalt, wrappedKey (for EA
+      // auto-confirm and changePassphrase), the ECDH key and the encryption key
+      if (!installKeyMaterial(lockEpoch, {
+        secretKey,
+        keyVersion: vaultData.keyVersion ?? 1,
+        accountSalt,
+        wrappedKey: {
+          ciphertext: vaultData.encryptedSecretKey,
+          iv: vaultData.secretKeyIv,
+          authTag: vaultData.secretKeyAuthTag,
+        },
+        ecdh: ecdhPrivateKeyBytes
+          ? { privateKeyBytes: ecdhPrivateKeyBytes, publicKeyJwk: vaultData.ecdhPublicKey ?? null }
+          : undefined,
+        encryptionKey: encKey,
+        markUnlocked: true,
+      })) {
+        throw new VaultUnlockError(VAULT_UNLOCK_INTERRUPTED);
       }
 
-      // 7. Auto-confirm pending emergency access grants (async nonblocking)
+      // 8. Auto-confirm pending emergency access grants (async nonblocking)
       const userId = sessionUserId;
       if (userId && secretKeyRef.current) {
         const sk = new Uint8Array(secretKeyRef.current);
@@ -667,10 +780,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           .finally(() => sk.fill(0));
       }
 
-      // 8. Store encryption key in memory
-      setEncryptionKey(encKey);
-      setVaultStatus(VAULT_STATUS.UNLOCKED);
-
       return true;
     } catch (err) {
       if (err instanceof VaultUnlockError) throw err;
@@ -678,18 +787,22 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     } finally {
       secretKey?.fill(0);
       authKeyBytes?.fill(0);
+      ecdhPrivateKeyBytes?.fill(0);
     }
-  }, [sessionUserId, commitKeyVersion]);
+  }, [sessionUserId, installKeyMaterial]);
 
   // ─── Unlock with Passkey (PRF) ───────────────────────────────
 
   const unlockWithPasskey = useCallback(async (): Promise<boolean> => {
     // One finally zeroes the PRF output, the unwrapped key and the auth key
-    // bytes on every exit (a refused or rejected verify or unlock POST
-    // included); the success path copied the secret key into secretKeyRef.
+    // bytes and the ECDH private key on every exit (a refused or rejected
+    // verify or unlock POST included); the success path copied the keys into
+    // the refs. A page hide while unlocking refuses the install, as in unlock.
+    const lockEpoch = lockEpochRef.current;
     let prfOutput: Uint8Array | null = null;
     let secretKey: Uint8Array | null = null;
     let authKeyBytes: Uint8Array | null = null;
+    let ecdhPrivateKeyBytes: Uint8Array | null = null;
     try {
       // 1. Fetch vault data and WebAuthn options in parallel
       const [dataRes, optionsRes] = await Promise.all([
@@ -793,37 +906,29 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         return false;
       }
 
-      // 7. Store refs (same as passphrase unlock)
-      const accountSalt = hexDecode(vaultData.accountSalt);
-      secretKeyRef.current = new Uint8Array(secretKey);
-      commitKeyVersion(vaultData.keyVersion ?? 1);
-      accountSaltRef.current = accountSalt;
-      wrappedKeyRef.current = {
-        ciphertext: vaultData.encryptedSecretKey,
-        iv: vaultData.secretKeyIv,
-        authTag: vaultData.secretKeyAuthTag,
-      };
+      // 7. Restore ECDH private key if available
+      ecdhPrivateKeyBytes = await decryptEcdhPrivateKey(secretKey, vaultData);
 
-      // 7b. Restore ECDH private key if available
-      if (vaultData.encryptedEcdhPrivateKey && vaultData.ecdhPrivateKeyIv && vaultData.ecdhPrivateKeyAuthTag) {
-        try {
-          const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
-          const ecdhPrivDecrypted = await decryptBinary(
-            {
-              ciphertext: hexDecode(vaultData.encryptedEcdhPrivateKey),
-              iv: vaultData.ecdhPrivateKeyIv,
-              authTag: vaultData.ecdhPrivateKeyAuthTag,
-            },
-            ecdhWrapKey,
-          );
-          ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivDecrypted);
-          ecdhPublicKeyJwkRef.current = vaultData.ecdhPublicKey ?? null;
-        } catch {
-          // ECDH restoration failure is non-fatal
-        }
+      // 8. Store refs and set unlocked (same as passphrase unlock)
+      if (!installKeyMaterial(lockEpoch, {
+        secretKey,
+        keyVersion: vaultData.keyVersion ?? 1,
+        accountSalt: hexDecode(vaultData.accountSalt),
+        wrappedKey: {
+          ciphertext: vaultData.encryptedSecretKey,
+          iv: vaultData.secretKeyIv,
+          authTag: vaultData.secretKeyAuthTag,
+        },
+        ecdh: ecdhPrivateKeyBytes
+          ? { privateKeyBytes: ecdhPrivateKeyBytes, publicKeyJwk: vaultData.ecdhPublicKey ?? null }
+          : undefined,
+        encryptionKey: encKey,
+        markUnlocked: true,
+      })) {
+        throw new VaultUnlockError(VAULT_UNLOCK_INTERRUPTED);
       }
 
-      // 8. Auto-confirm pending emergency access grants
+      // 9. Auto-confirm pending emergency access grants
       const userId = sessionUserId;
       if (userId && secretKeyRef.current) {
         const sk = new Uint8Array(secretKeyRef.current);
@@ -831,10 +936,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           .catch(() => {})
           .finally(() => sk.fill(0));
       }
-
-      // 9. Set unlocked
-      setEncryptionKey(encKey);
-      setVaultStatus(VAULT_STATUS.UNLOCKED);
 
       return true;
     } catch (err) {
@@ -848,8 +949,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       prfOutput?.fill(0);
       secretKey?.fill(0);
       authKeyBytes?.fill(0);
+      ecdhPrivateKeyBytes?.fill(0);
     }
-  }, [sessionUserId, commitKeyVersion]);
+  }, [sessionUserId, installKeyMaterial]);
 
   // ─── Unlock with stored PRF (single-ceremony sign-in flow) ──────
 
@@ -867,10 +969,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     // Single finally zeroizes both the PRF output and the unwrapped secret key
     // on every exit (early returns and throws alike); the PRF buffer's
     // ownership was transferred to us by takePrf above. secretKey is hoisted
-    // here so the finally covers the post-derivation throw paths too.
+    // here so the finally covers the post-derivation throw paths too, and the
+    // decrypted ECDH private key. A page hide while unlocking refuses the
+    // install, as in unlock.
+    const lockEpoch = lockEpochRef.current;
     const prfOutput = handoff.prfOutput;
     let secretKey: Uint8Array | null = null;
     let authKeyBytes: Uint8Array | null = null;
+    let ecdhPrivateKeyBytes: Uint8Array | null = null;
     try {
       const prfData = handoff.prfData;
 
@@ -923,34 +1029,26 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         return false;
       }
 
-      // Store refs (same as passkey unlock)
-      const accountSalt = hexDecode(vaultData.accountSalt);
-      secretKeyRef.current = new Uint8Array(secretKey);
-      commitKeyVersion(vaultData.keyVersion ?? 1);
-      accountSaltRef.current = accountSalt;
-      wrappedKeyRef.current = {
-        ciphertext: vaultData.encryptedSecretKey,
-        iv: vaultData.secretKeyIv,
-        authTag: vaultData.secretKeyAuthTag,
-      };
-
       // Restore ECDH private key if available
-      if (vaultData.encryptedEcdhPrivateKey && vaultData.ecdhPrivateKeyIv && vaultData.ecdhPrivateKeyAuthTag) {
-        try {
-          const ecdhWrapKey = await deriveEcdhWrappingKey(secretKey);
-          const ecdhPrivDecrypted = await decryptBinary(
-            {
-              ciphertext: hexDecode(vaultData.encryptedEcdhPrivateKey),
-              iv: vaultData.ecdhPrivateKeyIv,
-              authTag: vaultData.ecdhPrivateKeyAuthTag,
-            },
-            ecdhWrapKey,
-          );
-          ecdhPrivateKeyBytesRef.current = new Uint8Array(ecdhPrivDecrypted);
-          ecdhPublicKeyJwkRef.current = vaultData.ecdhPublicKey ?? null;
-        } catch {
-          // ECDH restoration failure is non-fatal
-        }
+      ecdhPrivateKeyBytes = await decryptEcdhPrivateKey(secretKey, vaultData);
+
+      // Store refs and set unlocked (same as passkey unlock)
+      if (!installKeyMaterial(lockEpoch, {
+        secretKey,
+        keyVersion: vaultData.keyVersion ?? 1,
+        accountSalt: hexDecode(vaultData.accountSalt),
+        wrappedKey: {
+          ciphertext: vaultData.encryptedSecretKey,
+          iv: vaultData.secretKeyIv,
+          authTag: vaultData.secretKeyAuthTag,
+        },
+        ecdh: ecdhPrivateKeyBytes
+          ? { privateKeyBytes: ecdhPrivateKeyBytes, publicKeyJwk: vaultData.ecdhPublicKey ?? null }
+          : undefined,
+        encryptionKey: encKey,
+        markUnlocked: true,
+      })) {
+        throw new VaultUnlockError(VAULT_UNLOCK_INTERRUPTED);
       }
 
       // Auto-confirm pending emergency access grants
@@ -962,10 +1060,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           .finally(() => sk.fill(0));
       }
 
-      // Set unlocked
-      setEncryptionKey(encKey);
-      setVaultStatus(VAULT_STATUS.UNLOCKED);
-
       return true;
     } catch (err) {
       if (err instanceof VaultUnlockError) throw err;
@@ -974,8 +1068,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       prfOutput.fill(0);
       secretKey?.fill(0);
       authKeyBytes?.fill(0);
+      ecdhPrivateKeyBytes?.fill(0);
     }
-  }, [sessionUserId, commitKeyVersion]);
+  }, [sessionUserId, installKeyMaterial]);
 
   const verifyPassphrase = useCallback(async (passphrase: string): Promise<boolean> => {
     if (!accountSaltRef.current || !wrappedKeyRef.current) return false;
@@ -992,23 +1087,39 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ─── Change Passphrase ────────────────────────────────────────
 
   const changePassphrase = useCallback(
-    async (currentPassphrase: string, newPassphrase: string) => {
+    async (currentPassphrase: string, newPassphrase: string): Promise<PassphraseChangeResult> => {
       if (!accountSaltRef.current || !secretKeyRef.current) {
         throw new Error("Vault must be unlocked to change passphrase");
       }
+      // A lock from here on drops the key material this change started from.
+      // Before the POST is sent it is checked after every await (nothing is
+      // sent); after, installKeyMaterial refuses to install the new wrap.
+      const lockEpoch = lockEpochRef.current;
+
+      // 0. Refuse a mistyped current passphrase locally, with the vault left
+      // unlocked. A server INVALID_PASSPHRASE after this check passed then
+      // means the verifier moved elsewhere (see below).
+      const currentOk = await verifyPassphrase(currentPassphrase);
+      if (lockedSince(lockEpoch)) return PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED;
+      if (!currentOk) throw { error: API_ERROR.INVALID_PASSPHRASE };
 
       // 1. Compute current verifier for server-side identity confirmation
       const currentVerifierHash = await computePassphraseVerifier(
         currentPassphrase,
         accountSaltRef.current
       );
+      if (lockedSince(lockEpoch)) return PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED;
 
       // 2. Generate new account salt
       const newAccountSalt = generateAccountSalt();
 
       // 3. Derive new wrapping key and re-wrap secretKey
       const newWrappingKey = await deriveWrappingKey(newPassphrase, newAccountSalt);
+      // The null check only narrows the type: the refs are dropped only by
+      // dropKeyMaterial, which moves the epoch.
+      if (lockedSince(lockEpoch) || !secretKeyRef.current) return PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED;
       const rewrapped = await wrapSecretKey(secretKeyRef.current, newWrappingKey);
+      if (lockedSince(lockEpoch)) return PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED;
 
       // 4. Compute new verifier
       const newVerifierHash = await computePassphraseVerifier(
@@ -1016,8 +1127,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         newAccountSalt
       );
 
-      // 5. Send to server
-      const lockEpoch = lockEpochRef.current;
+      // 5. Send to server — not when the vault was locked while preparing.
+      if (lockedSince(lockEpoch)) return PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED;
       let res: Response;
       try {
         res = await fetchApi(API_PATH.VAULT_CHANGE_PASSPHRASE, {
@@ -1042,7 +1153,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       let invalidationFailed = false;
       if (!res.ok) {
         const err = await readApiErrorBody(res);
-        if (err?.error === WRAP_MOVED_ELSEWHERE_CHANGE_PASSPHRASE) {
+        // The server's verifier refused the passphrase the local check above
+        // accepted: the wrap moved elsewhere, and this tab's state is stale.
+        if (
+          err?.error === WRAP_MOVED_ELSEWHERE_CHANGE_PASSPHRASE ||
+          err?.error === API_ERROR.INVALID_PASSPHRASE
+        ) {
           lock();
           throw new VaultChangedElsewhereError(err.error);
         }
@@ -1051,24 +1167,27 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             lock();
             throw new VaultChangeOutcomeUnknownError();
           }
+          // Refused before committing, but the vault has been locked since:
+          // there is no dialog left to show the refusal inline.
+          if (lockedSince(lockEpoch)) return PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED;
           throw err;
         }
         invalidationFailed = true;
       }
 
       // 6. Update local accountSalt and wrappedKey (secretKey unchanged) —
-      // unless the vault was locked while the request was in flight: the next
+      // unless the vault was locked after the request was sent: the next
       // unlock reads the committed wrap, and a locked vault holds no wrap.
-      if (lockEpochRef.current !== lockEpoch) return { invalidationFailed };
-      accountSaltRef.current = newAccountSalt;
-      wrappedKeyRef.current = {
-        ciphertext: rewrapped.ciphertext,
-        iv: rewrapped.iv,
-        authTag: rewrapped.authTag,
-      };
+      const installed = installKeyMaterial(lockEpoch, {
+        accountSalt: newAccountSalt,
+        wrappedKey: rewrapped,
+      });
+      if (!installed) {
+        return { outcome: PASSPHRASE_CHANGE_COMMITTED_VAULT_LOCKED, effects: { invalidationFailed } };
+      }
       return { invalidationFailed };
     },
-    [lock]
+    [lock, lockedSince, installKeyMaterial, verifyPassphrase]
   );
 
   // ─── Rotate Key ───────────────────────────────────────────────
@@ -1077,194 +1196,207 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     async (
       passphrase: string,
       onProgress?: (progress: { phase: "migrating" | "rewrapping" | "committing" | "entries" | "history", current: number, total: number }) => void,
-    ) => {
+    ): Promise<RotateKeyResult> => {
       if (!secretKeyRef.current || !accountSaltRef.current || !encryptionKey) {
         throw new Error("Vault must be unlocked to rotate key");
       }
 
       const oldEncryptionKey = encryptionKey;
       const oldKeyVersion = keyVersionRef.current;
-      // A lock at any point from here on drops the key material this rotation
-      // started from; see the checks before and after the rotate POST.
+      // A lock from here on drops the key material this rotation started from.
+      // Until the rotate POST is sent, every await that precedes reading the
+      // refs or sending a request is followed by a lockedSince check, and a
+      // throw once locked is reported the same way (catch below): nothing of
+      // the rotation is sent, and the result is ROTATION_NOT_STARTED_VAULT_LOCKED.
+      // After it is sent, installKeyMaterial refuses to install into a vault
+      // locked since here.
       const lockEpoch = lockEpochRef.current;
-
-      // The new wrap and verifier are derived from the typed passphrase, so a
-      // typo would become the new passphrase. Refuse it here before
-      // re-encrypting anything; the server's verifier check is the authority
-      // (a tab whose state predates a change elsewhere still passes this one).
-      if (!(await verifyPassphrase(passphrase))) {
-        throw { error: API_ERROR.INVALID_PASSPHRASE };
-      }
-
-      // 1. Compute currentAuthHash (proof of the current secret key) and
-      // currentVerifierHash (proof of the typed passphrase, under the current
-      // salt) for server-side verification
-      const currentAuthKeyBytes = await deriveAuthKeyBytes(secretKeyRef.current);
-      let currentAuthHash: string;
-      try {
-        currentAuthHash = await computeAuthHash(currentAuthKeyBytes);
-      } finally {
-        currentAuthKeyBytes.fill(0);
-      }
-      const currentVerifierHash = await computePassphraseVerifier(passphrase, accountSaltRef.current);
-
-      // 2. Fetch rotation data (entries, history, attachment CEK data, mode-0 IDs)
-      const dataRes = await fetchApi(API_PATH.VAULT_ROTATE_KEY_DATA);
-      if (!dataRes.ok) {
-        const err = await dataRes.json().catch(() => ({}));
-        throw err;
-      }
-      const rotationData = await dataRes.json() as {
-        entries: Array<{
-          id: string;
-          encryptedBlob: string;
-          blobIv: string;
-          blobAuthTag: string;
-          encryptedOverview: string;
-          overviewIv: string;
-          overviewAuthTag: string;
-          keyVersion: number;
-          aadVersion: number;
-        }>;
-        historyEntries: Array<{
-          id: string;
-          entryId: string;
-          encryptedBlob: string;
-          blobIv: string;
-          blobAuthTag: string;
-          keyVersion: number;
-          aadVersion: number;
-        }>;
-        mode2Attachments: Array<{
-          id: string;
-          entryId: string;
-          cekEncrypted: string | null; // base64
-          cekIv: string | null;
-          cekAuthTag: string | null;
-          cekKeyVersion: number | null;
-          cekWrapAadVersion: number | null;
-        }>;
-        mode0Attachments: Array<{ id: string; entryId: string }>;
-        mode0AttachmentsOverflow: boolean;
-      };
-
-      // 3. Migrate all mode-0 attachments to mode-2 using OLD encryption key.
-      //    Loop until mode0Attachments is empty (handles overflow pagination).
-      let legacyAttachmentsMigrated = 0;
-      let currentRotationData = rotationData;
-      while (currentRotationData.mode0Attachments.length > 0) {
-        const total = currentRotationData.mode0Attachments.length;
-        for (let i = 0; i < total; i++) {
-          const { id: attId, entryId } = currentRotationData.mode0Attachments[i];
-          onProgress?.({ phase: "migrating", current: i, total });
-
-          // GET the legacy attachment.
-          const attRes = await fetchApi(apiPath.passwordAttachmentById(entryId, attId));
-          if (!attRes.ok) {
-            throw new Error(`MIGRATE_FETCH_FAILED:${attId}`);
-          }
-          const att = (await attRes.json()) as {
-            encryptedData: string; // base64
-            iv: string;
-            authTag: string;
-            encryptionMode: number;
-          };
-          if (att.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY) {
-            // Concurrent migration — skip; next iteration will pick up the
-            // updated mode0Attachments list.
-            continue;
-          }
-
-          // Decode stored ciphertext bytes for body decrypt + hash binding.
-          const storedBinary = atob(att.encryptedData);
-          const storedBytes = new Uint8Array(storedBinary.length);
-          for (let j = 0; j < storedBinary.length; j++) {
-            storedBytes[j] = storedBinary.charCodeAt(j);
-          }
-
-          // I5.4 — bind the migration request to the exact stored bytes the
-          // client decrypted (defense against session-attacker body replacement).
-          const hashBuf = await crypto.subtle.digest("SHA-256", storedBytes);
-          const hashBytes = new Uint8Array(hashBuf);
-          let oldEncryptedDataHash = "";
-          for (const b of hashBytes) {
-            oldEncryptedDataHash += b.toString(16).padStart(2, "0");
-          }
-
-          // Decrypt body with OLD encryption key + data AAD.
-          const dataAad = buildAttachmentAAD(entryId, attId);
-          const plaintext = await decryptBinary(
-            { ciphertext: storedBytes, iv: att.iv, authTag: att.authTag },
-            oldEncryptionKey,
-            dataAad,
-          );
-
-          // Generate fresh CEK, encrypt body under CEK + same data AAD.
-          const cekKey = await crypto.subtle.generateKey(
-            { name: "AES-GCM", length: 256 },
-            true,
-            ["encrypt", "decrypt"],
-          );
-          const newBody = await encryptBinary(plaintext, cekKey, dataAad);
-
-          // Wrap CEK under OLD encryption key + wrap AAD with OLD keyVersion.
-          const cekRaw = await crypto.subtle.exportKey("raw", cekKey);
-          const wrapAad = buildAttachmentCekWrapAAD(entryId, attId, oldKeyVersion, 1);
-          const wrappedCek = await encryptBinary(
-            cekRaw,
-            oldEncryptionKey,
-            wrapAad,
-          );
-          // I8.2 zeroize exported raw CEK bytes.
-          new Uint8Array(cekRaw).fill(0);
-
-          // Base64-encode CEK ciphertext and body ciphertext for the JSON PUT.
-          const encodeB64 = (bytes: Uint8Array): string => {
-            let s = "";
-            for (const byte of bytes) s += String.fromCharCode(byte);
-            return btoa(s);
-          };
-
-          const migrateRes = await fetchApi(
-            apiPath.passwordAttachmentMigrate(entryId, attId),
-            {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                oldEncryptedDataHash,
-                encryptedData: encodeB64(newBody.ciphertext),
-                iv: newBody.iv,
-                authTag: newBody.authTag,
-                cekEncrypted: encodeB64(wrappedCek.ciphertext),
-                cekIv: wrappedCek.iv,
-                cekAuthTag: wrappedCek.authTag,
-                cekKeyVersion: oldKeyVersion,
-                cekWrapAadVersion: CURRENT_CEK_WRAP_AAD_VERSION,
-              }),
-            },
-          );
-          if (!migrateRes.ok) {
-            const err = await readApiErrorBody(migrateRes);
-            throw new Error(err?.error ?? `MIGRATE_FAILED:${attId}`);
-          }
-          legacyAttachmentsMigrated += 1;
-          onProgress?.({ phase: "migrating", current: i + 1, total });
-        }
-
-        // Re-fetch rotation data to pick up next page (overflow) and observe
-        // any newly mode-2 rows for the rewrap step.
-        const refetchRes = await fetchApi(API_PATH.VAULT_ROTATE_KEY_DATA);
-        if (!refetchRes.ok) {
-          throw new Error("ROTATE_DATA_REFETCH_FAILED");
-        }
-        currentRotationData = (await refetchRes.json()) as typeof currentRotationData;
-      }
-
-      const { entries, historyEntries } = rotationData;
-
-      // 4. Generate new secret key and derive new encryption key
       const newSecretKey = generateSecretKey();
+      let sent = false;
       try {
+        // The new wrap and verifier are derived from the typed passphrase, so a
+        // typo would become the new passphrase. Refuse it here before
+        // re-encrypting anything, with the vault left unlocked. A server
+        // INVALID_PASSPHRASE after this check passed then means the verifier
+        // moved elsewhere (see the response handling).
+        const passphraseOk = await verifyPassphrase(passphrase);
+        if (lockedSince(lockEpoch)) return ROTATION_NOT_STARTED_VAULT_LOCKED;
+        if (!passphraseOk) {
+          throw { error: API_ERROR.INVALID_PASSPHRASE };
+        }
+
+        // 1. Compute currentAuthHash (proof of the current secret key) and
+        // currentVerifierHash (proof of the typed passphrase, under the current
+        // salt) for server-side verification
+        const currentAuthKeyBytes = await deriveAuthKeyBytes(secretKeyRef.current);
+        let currentAuthHash: string;
+        try {
+          currentAuthHash = await computeAuthHash(currentAuthKeyBytes);
+        } finally {
+          currentAuthKeyBytes.fill(0);
+        }
+        if (lockedSince(lockEpoch)) return ROTATION_NOT_STARTED_VAULT_LOCKED;
+        const currentVerifierHash = await computePassphraseVerifier(passphrase, accountSaltRef.current);
+        if (lockedSince(lockEpoch)) return ROTATION_NOT_STARTED_VAULT_LOCKED;
+
+        // 2. Fetch rotation data (entries, history, attachment CEK data, mode-0 IDs)
+        const dataRes = await fetchApi(API_PATH.VAULT_ROTATE_KEY_DATA);
+        if (!dataRes.ok) {
+          const err = await dataRes.json().catch(() => ({}));
+          throw err;
+        }
+        const rotationData = await dataRes.json() as {
+          entries: Array<{
+            id: string;
+            encryptedBlob: string;
+            blobIv: string;
+            blobAuthTag: string;
+            encryptedOverview: string;
+            overviewIv: string;
+            overviewAuthTag: string;
+            keyVersion: number;
+            aadVersion: number;
+          }>;
+          historyEntries: Array<{
+            id: string;
+            entryId: string;
+            encryptedBlob: string;
+            blobIv: string;
+            blobAuthTag: string;
+            keyVersion: number;
+            aadVersion: number;
+          }>;
+          mode2Attachments: Array<{
+            id: string;
+            entryId: string;
+            cekEncrypted: string | null; // base64
+            cekIv: string | null;
+            cekAuthTag: string | null;
+            cekKeyVersion: number | null;
+            cekWrapAadVersion: number | null;
+          }>;
+          mode0Attachments: Array<{ id: string; entryId: string }>;
+          mode0AttachmentsOverflow: boolean;
+        };
+
+        // 3. Migrate all mode-0 attachments to mode-2 using OLD encryption key.
+        //    Loop until mode0Attachments is empty (handles overflow pagination).
+        let legacyAttachmentsMigrated = 0;
+        let currentRotationData = rotationData;
+        while (currentRotationData.mode0Attachments.length > 0) {
+          const total = currentRotationData.mode0Attachments.length;
+          for (let i = 0; i < total; i++) {
+            const { id: attId, entryId } = currentRotationData.mode0Attachments[i];
+            onProgress?.({ phase: "migrating", current: i, total });
+            if (lockedSince(lockEpoch)) return ROTATION_NOT_STARTED_VAULT_LOCKED;
+
+            // GET the legacy attachment.
+            const attRes = await fetchApi(apiPath.passwordAttachmentById(entryId, attId));
+            if (!attRes.ok) {
+              throw new Error(`MIGRATE_FETCH_FAILED:${attId}`);
+            }
+            const att = (await attRes.json()) as {
+              encryptedData: string; // base64
+              iv: string;
+              authTag: string;
+              encryptionMode: number;
+            };
+            if (att.encryptionMode !== ATTACHMENT_ENCRYPTION_MODE.VAULT_KEY) {
+              // Concurrent migration — skip; next iteration will pick up the
+              // updated mode0Attachments list.
+              continue;
+            }
+
+            // Decode stored ciphertext bytes for body decrypt + hash binding.
+            const storedBinary = atob(att.encryptedData);
+            const storedBytes = new Uint8Array(storedBinary.length);
+            for (let j = 0; j < storedBinary.length; j++) {
+              storedBytes[j] = storedBinary.charCodeAt(j);
+            }
+
+            // I5.4 — bind the migration request to the exact stored bytes the
+            // client decrypted (defense against session-attacker body replacement).
+            const hashBuf = await crypto.subtle.digest("SHA-256", storedBytes);
+            const hashBytes = new Uint8Array(hashBuf);
+            let oldEncryptedDataHash = "";
+            for (const b of hashBytes) {
+              oldEncryptedDataHash += b.toString(16).padStart(2, "0");
+            }
+
+            // Decrypt body with OLD encryption key + data AAD.
+            const dataAad = buildAttachmentAAD(entryId, attId);
+            const plaintext = await decryptBinary(
+              { ciphertext: storedBytes, iv: att.iv, authTag: att.authTag },
+              oldEncryptionKey,
+              dataAad,
+            );
+
+            // Generate fresh CEK, encrypt body under CEK + same data AAD.
+            const cekKey = await crypto.subtle.generateKey(
+              { name: "AES-GCM", length: 256 },
+              true,
+              ["encrypt", "decrypt"],
+            );
+            const newBody = await encryptBinary(plaintext, cekKey, dataAad);
+
+            // Wrap CEK under OLD encryption key + wrap AAD with OLD keyVersion.
+            const cekRaw = await crypto.subtle.exportKey("raw", cekKey);
+            const wrapAad = buildAttachmentCekWrapAAD(entryId, attId, oldKeyVersion, 1);
+            const wrappedCek = await encryptBinary(
+              cekRaw,
+              oldEncryptionKey,
+              wrapAad,
+            );
+            // I8.2 zeroize exported raw CEK bytes.
+            new Uint8Array(cekRaw).fill(0);
+
+            // Base64-encode CEK ciphertext and body ciphertext for the JSON PUT.
+            const encodeB64 = (bytes: Uint8Array): string => {
+              let s = "";
+              for (const byte of bytes) s += String.fromCharCode(byte);
+              return btoa(s);
+            };
+
+            if (lockedSince(lockEpoch)) return ROTATION_NOT_STARTED_VAULT_LOCKED;
+            const migrateRes = await fetchApi(
+              apiPath.passwordAttachmentMigrate(entryId, attId),
+              {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  oldEncryptedDataHash,
+                  encryptedData: encodeB64(newBody.ciphertext),
+                  iv: newBody.iv,
+                  authTag: newBody.authTag,
+                  cekEncrypted: encodeB64(wrappedCek.ciphertext),
+                  cekIv: wrappedCek.iv,
+                  cekAuthTag: wrappedCek.authTag,
+                  cekKeyVersion: oldKeyVersion,
+                  cekWrapAadVersion: CURRENT_CEK_WRAP_AAD_VERSION,
+                }),
+              },
+            );
+            if (!migrateRes.ok) {
+              const err = await readApiErrorBody(migrateRes);
+              throw new Error(err?.error ?? `MIGRATE_FAILED:${attId}`);
+            }
+            legacyAttachmentsMigrated += 1;
+            onProgress?.({ phase: "migrating", current: i + 1, total });
+          }
+
+          // Re-fetch rotation data to pick up next page (overflow) and observe
+          // any newly mode-2 rows for the rewrap step.
+          if (lockedSince(lockEpoch)) return ROTATION_NOT_STARTED_VAULT_LOCKED;
+          const refetchRes = await fetchApi(API_PATH.VAULT_ROTATE_KEY_DATA);
+          if (!refetchRes.ok) {
+            throw new Error("ROTATE_DATA_REFETCH_FAILED");
+          }
+          currentRotationData = (await refetchRes.json()) as typeof currentRotationData;
+        }
+
+        const { entries, historyEntries } = rotationData;
+
+        // 4. Derive the new encryption key from the new secret key
         const newEncKey = await deriveEncryptionKey(newSecretKey);
         const newKeyVersion = oldKeyVersion + 1;
 
@@ -1408,24 +1540,22 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           onProgress?.({ phase: "rewrapping", current: i + 1, total: currentRotationData.mode2Attachments.length });
         }
 
-        // Locked while re-encrypting: lock() also dropped the ECDH key, and a
+        // 8. Re-wrap ECDH private key with new secret key. Locked while
+        // re-encrypting or deriving: the lock dropped the ECDH key, and a
         // rotation for a vault the user has already left must not be sent.
-        // Nothing was sent; the finally drops the new key.
-        if (lockEpochRef.current !== lockEpoch) return ROTATION_NOT_STARTED_VAULT_LOCKED;
-
-        // 8. Re-wrap ECDH private key with new secret key
         const ecdhWrapKey = await deriveEcdhWrappingKey(newSecretKey);
+        if (lockedSince(lockEpoch)) return ROTATION_NOT_STARTED_VAULT_LOCKED;
         if (!ecdhPrivateKeyBytesRef.current) {
           throw new Error("ECDH_KEY_UNAVAILABLE");
         }
-        const ecdhSourceBytes = ecdhPrivateKeyBytesRef.current;
-        const ecdhEncrypted = await encryptBinary(
-          ecdhSourceBytes.buffer.slice(
-            ecdhSourceBytes.byteOffset,
-            ecdhSourceBytes.byteOffset + ecdhSourceBytes.byteLength,
-          ) as ArrayBuffer,
-          ecdhWrapKey,
-        );
+        // A copy of exactly the key bytes, zeroed once encrypted.
+        const ecdhSourceBytes = ecdhPrivateKeyBytesRef.current.slice();
+        let ecdhEncrypted: Awaited<ReturnType<typeof encryptBinary>>;
+        try {
+          ecdhEncrypted = await encryptBinary(ecdhSourceBytes.buffer as ArrayBuffer, ecdhWrapKey);
+        } finally {
+          ecdhSourceBytes.fill(0);
+        }
 
         // 9. Generate new accountSalt, derive wrapping key, wrap new secretKey
         const newAccountSalt = generateAccountSalt();
@@ -1447,9 +1577,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         onProgress?.({ phase: "committing", current: 0, total: 1 });
         // The same, for a lock while the new wrap was being derived: checked
         // immediately before the POST.
-        if (lockEpochRef.current !== lockEpoch) return ROTATION_NOT_STARTED_VAULT_LOCKED;
+        if (lockedSince(lockEpoch)) return ROTATION_NOT_STARTED_VAULT_LOCKED;
 
         let res: Response;
+        sent = true;
         try {
           res = await fetchApi(API_PATH.VAULT_ROTATE_KEY, {
             method: "POST",
@@ -1480,7 +1611,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
         if (!res.ok) {
           const err = await readApiErrorBody(res);
-          if (err?.error === WRAP_MOVED_ELSEWHERE_ROTATE_KEY) {
+          // The server's verifier refused the passphrase the local check
+          // accepted: the wrap moved elsewhere, and this tab's state is stale.
+          if (
+            err?.error === WRAP_MOVED_ELSEWHERE_ROTATE_KEY ||
+            err?.error === API_ERROR.INVALID_PASSPHRASE
+          ) {
             lock();
             throw new VaultChangedElsewhereError(err.error);
           }
@@ -1488,51 +1624,55 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             lock();
             throw new VaultChangeOutcomeUnknownError();
           }
+          // Refused before committing, but the vault has been locked since:
+          // there is no dialog left to show the refusal inline.
+          if (lockedSince(lockEpoch)) return ROTATION_NOT_STARTED_VAULT_LOCKED;
           throw err;
         }
-
-        // Committed, but the vault was locked while the request was in flight:
-        // installing the new key would refill a locked vault. The finally drops
-        // it, and the next unlock reads the committed wrap.
-        if (lockEpochRef.current !== lockEpoch) return ROTATION_COMMITTED_VAULT_LOCKED;
 
         // The rotation has committed: the server now holds only the new wrapping
         // and every row is under the new key. An unreadable body must not keep
         // the old key in memory — the client already holds everything it sent,
-        // so it switches regardless, and only the server's report is lost.
+        // so it switches regardless, and only the server's report is lost. The
+        // body is read even when the vault has been locked, so that its effects
+        // (an invalidation failure in particular) still reach the user.
         const parsed = await parseJsonBodyOnce(res);
         const result =
           typeof parsed === "object" && parsed !== null
             ? (parsed as { keyVersion?: unknown; rotationEffects?: RotationEffects })
             : null;
-
-        // 12. Update in-memory state. The retired key is zeroed first: every
-        // reader got a copy of it (getSecretKey), never this buffer.
-        secretKeyRef.current?.fill(0);
-        secretKeyRef.current = new Uint8Array(newSecretKey);
-        commitKeyVersion(typeof result?.keyVersion === "number" ? result.keyVersion : newKeyVersion);
-        accountSaltRef.current = newAccountSalt;
-        wrappedKeyRef.current = {
-          ciphertext: newWrappedKey.ciphertext,
-          iv: newWrappedKey.iv,
-          authTag: newWrappedKey.authTag,
-        };
-        // ecdhPrivateKeyBytesRef remains valid — private key bytes did not change.
-        setEncryptionKey(newEncKey);
-        if (!result) return ROTATION_EFFECTS_UNAVAILABLE;
         // The dialog uses these counts to surface operator banners.
-        const effects = result.rotationEffects;
-        if (effects) {
-          return { ...effects, legacyAttachmentsMigrated };
-        }
-        return null;
+        const effects = !result
+          ? ROTATION_EFFECTS_UNAVAILABLE
+          : result.rotationEffects
+            ? { ...result.rotationEffects, legacyAttachmentsMigrated }
+            : null;
+
+        // 12. Update in-memory state — unless the vault was locked after the
+        // POST was sent: the next unlock reads the committed wrap, and the
+        // finally drops the new key. ecdhPrivateKeyBytesRef remains valid —
+        // the private key bytes did not change.
+        const installed = installKeyMaterial(lockEpoch, {
+          secretKey: newSecretKey,
+          keyVersion: typeof result?.keyVersion === "number" ? result.keyVersion : newKeyVersion,
+          accountSalt: newAccountSalt,
+          wrappedKey: newWrappedKey,
+          encryptionKey: newEncKey,
+        });
+        if (!installed) return { outcome: ROTATION_COMMITTED_VAULT_LOCKED, effects };
+        return effects;
+      } catch (err) {
+        // Nothing was sent: a throw once locked is the lock's doing (a dropped
+        // ref read) or has no dialog left to show it.
+        if (!sent && lockedSince(lockEpoch)) return ROTATION_NOT_STARTED_VAULT_LOCKED;
+        throw err;
       } finally {
         // The success path copied it into secretKeyRef; every other path
         // (a refusal, an unknown outcome, a throw while re-encrypting) drops it.
         newSecretKey.fill(0);
       }
     },
-    [encryptionKey, sessionUserId, commitKeyVersion, lock, verifyPassphrase],
+    [encryptionKey, sessionUserId, lock, lockedSince, installKeyMaterial, verifyPassphrase],
   );
 
   const getSecretKey = useCallback(() => {
@@ -1544,6 +1684,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const getKeyVersion = useCallback(() => keyVersionRef.current, []);
+
+  const getLockEpoch = useCallback(() => lockEpochRef.current, []);
 
   const getEcdhPrivateKeyBytes = useCallback(() => {
     return ecdhPrivateKeyBytesRef.current ? new Uint8Array(ecdhPrivateKeyBytesRef.current) : null;
@@ -1572,6 +1714,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         changePassphrase,
         rotateKey,
         verifyPassphrase,
+        getLockEpoch,
+        lockedSince,
         getSecretKey,
         getAccountSalt,
         getKeyVersion,

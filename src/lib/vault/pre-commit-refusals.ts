@@ -23,7 +23,10 @@ export const PROXY_PRE_ROUTE_REFUSALS = [
 // RATE_LIMIT_EXCEEDED, SERVICE_UNAVAILABLE (limiter fail-closed),
 // PAYLOAD_TOO_LARGE, INVALID_JSON, VALIDATION_ERROR, VAULT_NOT_SETUP,
 // VERIFIER_NOT_SET (no stored passphrase verifier, checked before the
-// transaction), INVALID_PASSPHRASE.
+// transaction), INVALID_PASSPHRASE. Each caller first checks the passphrase
+// against its local wrap, so an INVALID_PASSPHRASE that still arrives proves
+// the verifier moved elsewhere: the callers lock on it, like on their route's
+// compare-and-swap refusal, although it wrote nothing.
 export const PRE_ROUTE_AND_PRE_TX_REFUSALS: ReadonlySet<string> = new Set([
   ...PROXY_PRE_ROUTE_REFUSALS,
   API_ERROR.RATE_LIMIT_EXCEEDED,

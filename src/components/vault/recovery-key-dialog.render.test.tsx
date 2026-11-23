@@ -17,6 +17,10 @@ const { vault } = vi.hoisted(() => ({
     recoveryKeyInvalidated: false,
     getSecretKey: vi.fn(),
     getAccountSalt: vi.fn(),
+    verifyPassphrase: vi.fn(),
+    lock: vi.fn(),
+    getLockEpoch: vi.fn(),
+    lockedSince: vi.fn(),
     setHasRecoveryKey: vi.fn(),
   },
 }));
@@ -46,7 +50,7 @@ const {
   mockReadApiErrorBody: vi.fn(),
   mockFetchApi: vi.fn(),
   mockCopy: vi.fn(),
-  mockToast: { success: vi.fn(), error: vi.fn() },
+  mockToast: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
 }));
 
 vi.mock("@/lib/crypto/crypto-client", () => ({
@@ -213,6 +217,9 @@ describe("RecoveryKeyDialog generate flow", () => {
     localStorage.clear();
     vault.getSecretKey.mockReturnValue(new Uint8Array([1, 2, 3]));
     vault.getAccountSalt.mockReturnValue(new Uint8Array([4, 5, 6]));
+    vault.verifyPassphrase.mockResolvedValue(true);
+    vault.getLockEpoch.mockReturnValue(7);
+    vault.lockedSince.mockImplementation((epoch: number) => epoch !== 7);
     mockComputeVerifier.mockResolvedValue("current-verifier");
     mockGenerateRecoveryKey.mockReturnValue(new Uint8Array(32));
     mockWrap.mockResolvedValue({
@@ -253,14 +260,32 @@ describe("RecoveryKeyDialog generate flow", () => {
     expect(screen.getByText("recoveryKeyWarning")).toBeInTheDocument();
   });
 
-  it("shows the invalid-passphrase message when the server rejects the passphrase", async () => {
-    mockFetchApi.mockResolvedValue({ ok: false });
+  it("refuses a mistyped passphrase inline, without calling the API or locking the vault", async () => {
+    vault.verifyPassphrase.mockResolvedValue(false);
+    const onOpenChange = vi.fn();
+    render(<RecoveryKeyDialog open={true} onOpenChange={onOpenChange} />);
+
+    submitPassphrase("not the passphrase");
+
+    expect(await screen.findByText("invalidPassphrase")).toBeInTheDocument();
+    expect(vault.verifyPassphrase).toHaveBeenCalledWith("not the passphrase");
+    expect(mockFetchApi).not.toHaveBeenCalled();
+    expect(vault.lock).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getByText("recoveryKey")).not.toBeDisabled();
+  });
+
+  it("locks the vault with a changed-elsewhere notice when the server refuses a passphrase the local wrap accepted", async () => {
+    mockFetchApi.mockResolvedValue({ ok: false, status: 401 });
     mockReadApiErrorBody.mockResolvedValue({ error: "INVALID_PASSPHRASE" });
-    render(<RecoveryKeyDialog open={true} onOpenChange={vi.fn()} />);
+    const onOpenChange = vi.fn();
+    render(<RecoveryKeyDialog open={true} onOpenChange={onOpenChange} />);
 
     submitPassphrase();
 
-    expect(await screen.findByText("invalidPassphrase")).toBeInTheDocument();
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(vault.lock).toHaveBeenCalledTimes(1);
+    expect(mockToast.error).toHaveBeenCalledWith("vaultChangedElsewhere", { duration: Infinity });
     expect(screen.queryByText(FORMATTED_KEY)).toBeNull();
   });
 
@@ -273,18 +298,22 @@ describe("RecoveryKeyDialog generate flow", () => {
 
     expect(await screen.findByText("apiErr:RATE_LIMIT_EXCEEDED")).toBeInTheDocument();
     expect(screen.queryByText("recoveryKeyOutcomeUnknown")).toBeNull();
+    expect(vault.lock).not.toHaveBeenCalled();
   });
 
-  it("shows the wrap-conflict message, not the outcome-unknown one, when the vault changed under the request", async () => {
+  it("locks the vault with a changed-elsewhere notice, not the outcome-unknown one, when another writer moved the wrap (VAULT_WRAP_CONFLICT)", async () => {
     mockFetchApi.mockResolvedValue({ ok: false, status: 409 });
     mockReadApiErrorBody.mockResolvedValue({ error: "VAULT_WRAP_CONFLICT" });
-    render(<RecoveryKeyDialog open={true} onOpenChange={vi.fn()} />);
+    const onOpenChange = vi.fn();
+    render(<RecoveryKeyDialog open={true} onOpenChange={onOpenChange} />);
 
     submitPassphrase();
 
-    expect(await screen.findByText("apiErr:VAULT_WRAP_CONFLICT")).toBeInTheDocument();
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(vault.lock).toHaveBeenCalledTimes(1);
+    expect(mockToast.error).toHaveBeenCalledWith("vaultChangedElsewhere", { duration: Infinity });
     expect(screen.queryByText("recoveryKeyOutcomeUnknown")).toBeNull();
-    expect(screen.queryByText(FORMATTED_KEY)).toBeNull();
+    expect(vault.setHasRecoveryKey).not.toHaveBeenCalled();
   });
 
   it("tells the user to generate a new key, without showing one, when a 502 carries no app error envelope", async () => {
@@ -310,6 +339,47 @@ describe("RecoveryKeyDialog generate flow", () => {
     expect(await screen.findByText("recoveryKeyOutcomeUnknown")).toBeInTheDocument();
     expect(screen.queryByText(FORMATTED_KEY)).toBeNull();
     expect(screen.queryByText("unknownError")).toBeNull();
+  });
+
+  /** Simulate a vault lock: the epoch moves on, as dropKeyMaterial does. */
+  function lockVault() {
+    vault.getLockEpoch.mockReturnValue(8);
+    vault.lockedSince.mockImplementation((epoch: number) => epoch !== 8);
+  }
+
+  it("sends nothing and leaves a persistent notice when the vault is locked while the passphrase is checked", async () => {
+    vault.verifyPassphrase.mockImplementation(async () => {
+      lockVault();
+      return true;
+    });
+    const onOpenChange = vi.fn();
+    render(<RecoveryKeyDialog open={true} onOpenChange={onOpenChange} />);
+
+    submitPassphrase();
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(mockToast.warning).toHaveBeenCalledWith("recoveryKeyNotStartedVaultLocked", { duration: Infinity });
+    expect(mockFetchApi).not.toHaveBeenCalled();
+    // No copy of the secret key is taken once the vault has locked.
+    expect(vault.getSecretKey).not.toHaveBeenCalled();
+    expect(screen.queryByText("invalidPassphrase")).toBeNull();
+  });
+
+  it("does not show a key created after the vault locked, and says the previous one no longer works", async () => {
+    mockFetchApi.mockImplementation(async () => {
+      lockVault();
+      return { ok: true };
+    });
+    const onOpenChange = vi.fn();
+    render(<RecoveryKeyDialog open={true} onOpenChange={onOpenChange} />);
+
+    submitPassphrase();
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(mockToast.error).toHaveBeenCalledWith("recoveryKeyCommittedVaultLocked", { duration: Infinity });
+    expect(mockFormatRecoveryKey).not.toHaveBeenCalled();
+    expect(screen.queryByText(FORMATTED_KEY)).toBeNull();
+    expect(vault.setHasRecoveryKey).not.toHaveBeenCalled();
   });
 
   it("copies the displayed recovery key and confirms with a success toast", async () => {

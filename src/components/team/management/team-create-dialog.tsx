@@ -79,6 +79,7 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
         lockedUntil: (lockedUntil) => formatLockedUntil(lockedUntil, tVault),
         rateLimited: tVault("rateLimited"),
         unavailable: tVault("retryLater"),
+        interrupted: tVault("unlockInterrupted"),
         fallback: tVault("unlockError"),
       });
       if (resolved.kind === "sessionExpired") {

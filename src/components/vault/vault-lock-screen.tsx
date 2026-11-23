@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
 import { useRouter } from "@/i18n/navigation";
 import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
+import { VAULT_UNLOCK_INTERRUPTED } from "@/lib/vault/vault-unlock-codes";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { API_PATH, SESSION_STORAGE_KEY } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
@@ -53,6 +54,7 @@ export function resolveUnlockError(
     lockedUntil: (lockedUntil: string | null | undefined) => string;
     rateLimited: string;
     unavailable: string;
+    interrupted: string;
     fallback: string;
   },
 ): UnlockErrorResolution {
@@ -66,6 +68,10 @@ export function resolveUnlockError(
       return { kind: "message", message: msgs.rateLimited };
     case API_ERROR.SERVICE_UNAVAILABLE:
       return { kind: "message", message: msgs.unavailable };
+    // The credential was accepted, but the page was hidden before the vault
+    // took the key: neither a wrong passphrase nor a failed attempt.
+    case VAULT_UNLOCK_INTERRUPTED:
+      return { kind: "message", message: msgs.interrupted };
     default:
       return { kind: "message", message: msgs.fallback };
   }
@@ -133,6 +139,7 @@ export function VaultLockScreen() {
         lockedUntil: (lockedUntil) => formatLockedUntil(lockedUntil, t),
         rateLimited: t("rateLimited"),
         unavailable: t("retryLater"),
+        interrupted: t("unlockInterrupted"),
         fallback: t("unlockError"),
       });
       setPassphrase("");
@@ -146,6 +153,7 @@ export function VaultLockScreen() {
       lockedUntil: (lockedUntil: string | null | undefined) => formatLockedUntil(lockedUntil, t),
       rateLimited: t("rateLimited"),
       unavailable: tw("serviceUnavailable"),
+      interrupted: t("unlockInterrupted"),
       fallback: tw("unlockError"),
     }),
     [t, tw],

@@ -24,6 +24,9 @@ import {
   ROTATION_EFFECTS_UNAVAILABLE,
   ROTATION_COMMITTED_VAULT_LOCKED,
   ROTATION_NOT_STARTED_VAULT_LOCKED,
+  PASSPHRASE_CHANGE_COMMITTED_VAULT_LOCKED,
+  PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED,
+  VAULT_UNLOCK_INTERRUPTED,
   VaultChangeOutcomeUnknownError,
   VaultChangedElsewhereError,
 } from "./vault-context";
@@ -41,7 +44,7 @@ import {
 import * as cryptoClient from "@/lib/crypto/crypto-client";
 // Same, for the ECDH private key bytes setup exports.
 import * as cryptoTeam from "@/lib/crypto/crypto-team";
-import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { buildAttachmentAAD, buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { wrapSecretKeyWithPrf } from "@/lib/auth/webauthn/webauthn-client";
 // Namespace import used ONLY to attach a pass-through spy that captures the
 // real unwrapped key for a zeroization assertion — crypto still runs for real.
@@ -602,8 +605,8 @@ describe("VaultProvider — changePassphrase response handling", () => {
   it("throws and keeps the old wrap when the server refuses the change", async () => {
     const { result, sent } = await setUpWithChangeResponse({
       ok: false,
-      status: 401,
-      json: async () => ({ error: "INVALID_PASSPHRASE" }),
+      status: 429,
+      json: async () => ({ error: "RATE_LIMIT_EXCEEDED" }),
     });
     const saltBefore = hex(result.current.getAccountSalt());
 
@@ -616,7 +619,7 @@ describe("VaultProvider — changePassphrase response handling", () => {
       }
     });
 
-    expect(caught).toEqual({ error: "INVALID_PASSPHRASE" });
+    expect(caught).toEqual({ error: "RATE_LIMIT_EXCEEDED" });
     expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
     expect(sent.accountSalt).not.toBe(saltBefore);
     expect(hex(result.current.getAccountSalt())).toBe(saltBefore);
@@ -627,16 +630,29 @@ describe("VaultProvider — changePassphrase response handling", () => {
     expect(oldOk).toBe(true);
   }, 60_000);
 
-  async function changeCatching(result: { current: ReturnType<typeof useVault> }) {
+  async function changeCatching(result: { current: ReturnType<typeof useVault> }, current = PASSPHRASE) {
     let caught: unknown;
     await act(async () => {
       try {
-        await result.current.changePassphrase(PASSPHRASE, NEW_PASSPHRASE);
+        await result.current.changePassphrase(current, NEW_PASSPHRASE);
       } catch (e) {
         caught = e;
       }
     });
     return caught;
+  }
+
+  async function changeOutcome(result: { current: ReturnType<typeof useVault> }) {
+    let outcome: unknown;
+    let caught: unknown;
+    await act(async () => {
+      try {
+        outcome = await result.current.changePassphrase(PASSPHRASE, NEW_PASSPHRASE);
+      } catch (e) {
+        caught = e;
+      }
+    });
+    return { outcome, caught };
   }
 
   /** The vault is locked and no key material from before the change remains. */
@@ -721,17 +737,109 @@ describe("VaultProvider — changePassphrase response handling", () => {
     const { result, sent } = await setUpWithChangeResponse({ ok: true, json: async () => ({ success: true }) }, { onPost });
     onPost.run = () => result.current.lock();
 
-    const caught = await changeCatching(result);
+    const { outcome, caught } = await changeOutcome(result);
     let newOk = true;
     await act(async () => {
       newOk = await result.current.verifyPassphrase(NEW_PASSPHRASE);
     });
 
     expect(caught).toBeUndefined();
+    expect(outcome).toEqual({
+      outcome: PASSPHRASE_CHANGE_COMMITTED_VAULT_LOCKED,
+      effects: { invalidationFailed: false },
+    });
     expectLocked(result);
     expect(hex(result.current.getAccountSalt())).not.toBe(sent.accountSalt);
     expect(newOk).toBe(false);
   }, 60_000);
+
+  it("does not install the new wrap when the page is hidden while the committed change is in flight", async () => {
+    const onPost: { run?: () => void } = {};
+    const { result, sent } = await setUpWithChangeResponse(
+      { ok: false, status: 500, json: async () => ({ error: "SESSION_INVALIDATE_FAILED" }) },
+      { onPost },
+    );
+    onPost.run = () => window.dispatchEvent(new Event("pagehide"));
+
+    const { outcome, caught } = await changeOutcome(result);
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toEqual({
+      outcome: PASSPHRASE_CHANGE_COMMITTED_VAULT_LOCKED,
+      effects: { invalidationFailed: true },
+    });
+    expectLocked(result);
+    expect(hex(result.current.getAccountSalt())).not.toBe(sent.accountSalt);
+  }, 60_000);
+
+  it("refuses a mistyped current passphrase locally, sends nothing and keeps the vault unlocked", async () => {
+    const { result, sent } = await setUpWithChangeResponse({ ok: true, json: async () => ({ success: true }) });
+    const keyBefore = result.current.encryptionKey;
+
+    const caught = await changeCatching(result, "not the passphrase");
+
+    expect(caught).toEqual({ error: "INVALID_PASSPHRASE" });
+    expect(sent.accountSalt).toBeUndefined();
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expect(result.current.encryptionKey).toBe(keyBefore);
+    expect(result.current.getSecretKey()?.some((b) => b !== 0)).toBe(true);
+  }, 60_000);
+
+  it("locks the vault and throws VaultChangedElsewhereError when the server refuses a passphrase the local wrap accepted", async () => {
+    // The local check passed, so the server's verifier has moved: another tab
+    // or device changed the passphrase, and this tab's wrap is stale.
+    const { result } = await setUpWithChangeResponse({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "INVALID_PASSPHRASE" }),
+    });
+
+    const caught = await changeCatching(result);
+
+    expect(caught).toBeInstanceOf(VaultChangedElsewhereError);
+    expect((caught as VaultChangedElsewhereError).code).toBe("INVALID_PASSPHRASE");
+    expectLocked(result);
+  }, 60_000);
+
+  /**
+   * Lock the vault right after the `nth` call (1-based) of a crypto function
+   * resolves; crypto stays real.
+   */
+  function lockAfterNthCall(
+    name: "deriveWrappingKey" | "wrapSecretKey",
+    nth: number,
+    lock: () => void,
+  ) {
+    let calls = 0;
+    const actual = cryptoClient[name] as (...args: unknown[]) => Promise<unknown>;
+    const spy = vi.spyOn(cryptoClient, name).mockImplementation((async (...args: unknown[]) => {
+      const value = await actual(...args);
+      calls += 1;
+      if (calls === nth) lock();
+      return value;
+    }) as never);
+    return () => spy.mockRestore();
+  }
+
+  it.each([
+    ["while the current passphrase is verified", "deriveWrappingKey", 1],
+    ["between re-wrapping the key and the POST", "wrapSecretKey", 1],
+  ] as const)(
+    "sends nothing and reports the change as not started when the vault is locked %s",
+    async (_when, name, nth) => {
+      const { result, sent } = await setUpWithChangeResponse({ ok: true, json: async () => ({ success: true }) });
+      const restore = lockAfterNthCall(name, nth, () => result.current.lock());
+
+      const { outcome, caught } = await changeOutcome(result);
+      restore();
+
+      expect(caught).toBeUndefined();
+      expect(outcome).toBe(PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED);
+      expect(sent.accountSalt).toBeUndefined();
+      expectLocked(result);
+    },
+    60_000,
+  );
 });
 
 describe("VaultProvider — verifyPassphrase before unlock", () => {
@@ -1271,7 +1379,7 @@ describe("VaultProvider — bfcache pageshow guard (INV-C1.6)", () => {
   );
 
   it(
-    "T1: pagehide zeroes secretKeyRef (status stays UNLOCKED), persisted pageshow forces lock()",
+    "T1: pagehide drops the key material and locks the vault; a persisted pageshow leaves it locked",
     async () => {
       const { fetchMock } = makeFetchEnv(null);
       globalThis.fetch = fetchMock as unknown as typeof fetch;
@@ -1285,17 +1393,17 @@ describe("VaultProvider — bfcache pageshow guard (INV-C1.6)", () => {
       expect(result.current.encryptionKey).not.toBeNull();
       expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
 
-      // Simulate bfcache: pagehide zeroes secretKeyRef but does NOT call lock().
-      // After pagehide: secretKeyRef.current === null, vaultStatus still UNLOCKED.
+      // A page hide is a lock: every ref and the encryption key are dropped,
+      // and the status no longer reads UNLOCKED over a null key.
       act(() => {
         window.dispatchEvent(new Event("pagehide"));
       });
-      // encryptionKey is still set (pagehide does not call lock()/setEncryptionKey(null))
-      // vaultStatus is still UNLOCKED
-      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+      expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
+      expect(result.current.encryptionKey).toBeNull();
+      expect(result.current.getSecretKey()).toBeNull();
+      expect(result.current.getEcdhPrivateKeyBytes()).toBeNull();
 
       // Simulate bfcache restore: persisted pageshow fires.
-      // Handler checks secretKeyRef.current === null && vaultStatus === UNLOCKED → calls lock().
       act(() => {
         window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true }));
       });
@@ -1578,12 +1686,12 @@ describe("VaultProvider — rotateKey response handling (C11)", () => {
     expect(oldOk).toBe(false);
   }, 60_000);
 
-  it.each(["INVALID_PASSPHRASE", "VERIFIER_NOT_SET"])(
+  it.each(["RATE_LIMIT_EXCEEDED", "VERIFIER_NOT_SET"])(
     "stays unlocked on the old key when the server refuses with %s before committing",
     async (code) => {
       const { result, sent, oldKey } = await setUpWithRotateResponse({
         ok: false,
-        status: code === "INVALID_PASSPHRASE" ? 401 : 409,
+        status: code === "RATE_LIMIT_EXCEEDED" ? 429 : 409,
         json: async () => ({ error: code }),
       });
       const saltBefore = toHex(result.current.getAccountSalt());
@@ -1605,6 +1713,20 @@ describe("VaultProvider — rotateKey response handling (C11)", () => {
     },
     60_000,
   );
+
+  it("locks the vault and throws VaultChangedElsewhereError when the server refuses a passphrase the local wrap accepted", async () => {
+    const { result } = await setUpWithRotateResponse({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "INVALID_PASSPHRASE" }),
+    });
+
+    const { caught } = await rotate(result);
+
+    expect(caught).toBeInstanceOf(VaultChangedElsewhereError);
+    expect((caught as VaultChangedElsewhereError).code).toBe("INVALID_PASSPHRASE");
+    expectLocked(result);
+  }, 60_000);
 
   it("sends a verifier of the typed passphrase under the current salt", async () => {
     const { result, sent } = await setUpWithRotateResponse({
@@ -1647,9 +1769,121 @@ describe("VaultProvider — rotateKey response handling (C11)", () => {
     restore();
 
     expect(caught).toBeUndefined();
-    expect(outcome).toBe(ROTATION_COMMITTED_VAULT_LOCKED);
+    expect(outcome).toEqual({ outcome: ROTATION_COMMITTED_VAULT_LOCKED, effects: null });
     expectLocked(result);
     expect(captured.key?.every((b) => b === 0)).toBe(true);
+  }, 60_000);
+
+  const INVALIDATION_FAILED_EFFECTS = {
+    recoveryKeyInvalidated: true,
+    emergencyGrantsCleared: 0,
+    prfCredentialsCleared: 0,
+    cekRewrapsAttempted: 0,
+    cekRewrapsSucceeded: 0,
+    cekRewrapsFailed: 0,
+    invalidatedMcpAccessTokens: null,
+    invalidatedMcpRefreshTokens: null,
+    cacheTombstoneFailures: null,
+    invalidationFailed: true,
+  };
+
+  it("does not install the new key into a vault locked while the committed rotation's body is being read", async () => {
+    const holder: { lock?: () => void } = {};
+    const { result } = await setUpWithRotateResponse({
+      ok: true,
+      json: async () => {
+        holder.lock?.();
+        return { success: true, keyVersion: 2, rotationEffects: null };
+      },
+    });
+    holder.lock = () => result.current.lock();
+    const { captured, restore } = captureNewSecretKey();
+
+    const { outcome, caught } = await rotate(result);
+    restore();
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toEqual({ outcome: ROTATION_COMMITTED_VAULT_LOCKED, effects: null });
+    expectLocked(result);
+    expect(captured.key?.every((b) => b === 0)).toBe(true);
+  }, 60_000);
+
+  it("still reports the committed rotation's effects when the vault was locked while it was in flight", async () => {
+    const onPost: { run?: () => void } = {};
+    const { result } = await setUpWithRotateResponse(
+      { ok: true, json: async () => ({ success: true, keyVersion: 2, rotationEffects: INVALIDATION_FAILED_EFFECTS }) },
+      onPost,
+    );
+    onPost.run = () => result.current.lock();
+
+    const { outcome } = await rotate(result);
+
+    expect(outcome).toEqual({
+      outcome: ROTATION_COMMITTED_VAULT_LOCKED,
+      effects: { ...INVALIDATION_FAILED_EFFECTS, legacyAttachmentsMigrated: 0 },
+    });
+    expectLocked(result);
+  }, 60_000);
+
+  it("does not install the new key when the page is hidden while the committed rotation is in flight", async () => {
+    const onPost: { run?: () => void } = {};
+    const { result, sent } = await setUpWithRotateResponse(
+      { ok: true, json: async () => ({ success: true, keyVersion: 2, rotationEffects: null }) },
+      onPost,
+    );
+    onPost.run = () => window.dispatchEvent(new Event("pagehide"));
+
+    const { outcome, caught } = await rotate(result);
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toEqual({ outcome: ROTATION_COMMITTED_VAULT_LOCKED, effects: null });
+    expectLocked(result);
+    expect(toHex(result.current.getAccountSalt())).not.toBe(sent.body?.accountSalt);
+    expect(result.current.getKeyVersion()).toBe(1);
+  }, 60_000);
+
+  it("sends nothing and reports the rotation as not started when the vault is locked while the passphrase is verified", async () => {
+    const { result, sent } = await setUpWithRotateResponse({
+      ok: true,
+      json: async () => ({ success: true, keyVersion: 2, rotationEffects: null }),
+    });
+    // verifyPassphrase's derivation is the rotation's first deriveWrappingKey.
+    const actual = cryptoClient.deriveWrappingKey;
+    const spy = vi.spyOn(cryptoClient, "deriveWrappingKey").mockImplementationOnce(async (...args) => {
+      const key = await actual(...args);
+      result.current.lock();
+      return key;
+    });
+
+    const { outcome, caught } = await rotate(result);
+    spy.mockRestore();
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toBe(ROTATION_NOT_STARTED_VAULT_LOCKED);
+    expect(sent.dataFetches).toBe(0);
+    expect(sent.body).toBeNull();
+    expectLocked(result);
+  }, 60_000);
+
+  it("sends nothing and reports the rotation as not started when the vault is locked while the ECDH key is re-wrapped", async () => {
+    const { result, sent } = await setUpWithRotateResponse({
+      ok: true,
+      json: async () => ({ success: true, keyVersion: 2, rotationEffects: null }),
+    });
+    const actual = cryptoTeam.deriveEcdhWrappingKey;
+    const spy = vi.spyOn(cryptoTeam, "deriveEcdhWrappingKey").mockImplementationOnce(async (...args) => {
+      const key = await actual(...args);
+      result.current.lock();
+      return key;
+    });
+
+    const { outcome, caught } = await rotate(result);
+    spy.mockRestore();
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toBe(ROTATION_NOT_STARTED_VAULT_LOCKED);
+    expect(sent.body).toBeNull();
+    expectLocked(result);
   }, 60_000);
 
   /** Rotate with an onProgress callback that runs `onPhase` once, at `phase`. */
@@ -1698,6 +1932,139 @@ describe("VaultProvider — rotateKey response handling (C11)", () => {
     60_000,
   );
 
+  /**
+   * An unlocked vault holding one legacy (mode-0) attachment that the rotation
+   * migrates first: GET it, PUT the migrated copy, then re-fetch the rotation
+   * data (which then lists no mode-0 rows). `hooks` run inside the GET and PUT.
+   */
+  async function setUpWithLegacyAttachment(hooks: { onGet?: () => void; onPut?: () => void } = {}) {
+    const ENTRY = "entry-1";
+    const ATT = "att-1";
+    const { fetchMock } = makeFetchEnv(null);
+    const sent: {
+      dataFetches: number;
+      gets: number;
+      puts: number;
+      body: { legacyAttachmentsMigratedThisCycle?: number } | null;
+    } = { dataFetches: 0, gets: 0, puts: 0, body: null };
+    const stored: { encryptedData: string; iv: string; authTag: string } = { encryptedData: "", iv: "", authTag: "" };
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/vault/rotate-key/data") {
+        sent.dataFetches += 1;
+        return {
+          ok: true,
+          json: async () => ({
+            entries: [],
+            historyEntries: [],
+            mode2Attachments: [],
+            mode0Attachments: sent.puts === 0 ? [{ id: ATT, entryId: ENTRY }] : [],
+            mode0AttachmentsOverflow: false,
+          }),
+        };
+      }
+      if (url === `/api/passwords/${ENTRY}/attachments/${ATT}`) {
+        sent.gets += 1;
+        hooks.onGet?.();
+        return { ok: true, json: async () => ({ ...stored, encryptionMode: 0 }) };
+      }
+      if (url === `/api/passwords/${ENTRY}/attachments/${ATT}/migrate` && init?.method === "PUT") {
+        sent.puts += 1;
+        hooks.onPut?.();
+        return { ok: true, json: async () => ({}) };
+      }
+      if (url === "/api/vault/rotate-key" && init?.method === "POST") {
+        sent.body = JSON.parse(init.body as string);
+        return { ok: true, json: async () => ({ success: true, keyVersion: 2, rotationEffects: null }) };
+      }
+      return fetchMock(url, init);
+    }) as unknown as typeof fetch;
+
+    const hook = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await hook.result.current.setup(PASSPHRASE);
+    });
+    const key = hook.result.current.encryptionKey;
+    if (!key) throw new Error("setup left no encryption key");
+    const plaintext = new TextEncoder().encode("legacy attachment body");
+    const encrypted = await cryptoClient.encryptBinary(plaintext.buffer, key, buildAttachmentAAD(ENTRY, ATT));
+    stored.encryptedData = btoa(String.fromCharCode(...encrypted.ciphertext));
+    stored.iv = encrypted.iv;
+    stored.authTag = encrypted.authTag;
+    return { result: hook.result, sent };
+  }
+
+  async function rotateLockingAtFirstMigration(
+    result: { current: ReturnType<typeof useVault> },
+    lockAtFirstMigration: boolean,
+  ) {
+    let outcome: unknown;
+    let caught: unknown;
+    let ran = false;
+    await act(async () => {
+      try {
+        outcome = await result.current.rotateKey(PASSPHRASE, (progress) => {
+          if (lockAtFirstMigration && progress.phase === "migrating" && !ran) {
+            ran = true;
+            result.current.lock();
+          }
+        });
+      } catch (e) {
+        caught = e;
+      }
+    });
+    return { outcome, caught };
+  }
+
+  it("migrates a legacy attachment and then sends the rotation when the vault stays unlocked", async () => {
+    const { result, sent } = await setUpWithLegacyAttachment();
+
+    const { outcome, caught } = await rotateLockingAtFirstMigration(result, false);
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toBeNull();
+    expect(sent).toMatchObject({ gets: 1, puts: 1, dataFetches: 2 });
+    expect(sent.body?.legacyAttachmentsMigratedThisCycle).toBe(1);
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expect(result.current.getKeyVersion()).toBe(2);
+  }, 60_000);
+
+  it("sends no attachment request and no rotation when the vault is locked before the attachment GET", async () => {
+    const { result, sent } = await setUpWithLegacyAttachment();
+
+    const { outcome, caught } = await rotateLockingAtFirstMigration(result, true);
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toBe(ROTATION_NOT_STARTED_VAULT_LOCKED);
+    expect(sent).toMatchObject({ gets: 0, puts: 0, dataFetches: 1, body: null });
+    expectLocked(result);
+  }, 60_000);
+
+  it("sends no migrate PUT and no rotation when the vault is locked while the attachment is fetched", async () => {
+    const holder: { lock?: () => void } = {};
+    const { result, sent } = await setUpWithLegacyAttachment({ onGet: () => holder.lock?.() });
+    holder.lock = () => result.current.lock();
+
+    const { outcome, caught } = await rotateLockingAtFirstMigration(result, false);
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toBe(ROTATION_NOT_STARTED_VAULT_LOCKED);
+    expect(sent).toMatchObject({ gets: 1, puts: 0, dataFetches: 1, body: null });
+    expectLocked(result);
+  }, 60_000);
+
+  it("sends no re-fetch and no rotation when the vault is locked while the attachment is migrated", async () => {
+    const holder: { lock?: () => void } = {};
+    const { result, sent } = await setUpWithLegacyAttachment({ onPut: () => holder.lock?.() });
+    holder.lock = () => result.current.lock();
+
+    const { outcome, caught } = await rotateLockingAtFirstMigration(result, false);
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toBe(ROTATION_NOT_STARTED_VAULT_LOCKED);
+    expect(sent).toMatchObject({ gets: 1, puts: 1, dataFetches: 1, body: null });
+    expectLocked(result);
+  }, 60_000);
+
   it("sends the rotation when the vault stays unlocked while it is being prepared", async () => {
     const { result, sent } = await setUpWithRotateResponse({
       ok: true,
@@ -1738,8 +2105,8 @@ describe("VaultProvider — rotateKey response handling (C11)", () => {
   it("keeps the current secret key intact when the rotation is refused", async () => {
     const { result } = await setUpWithRotateResponse({
       ok: false,
-      status: 401,
-      json: async () => ({ error: "INVALID_PASSPHRASE" }),
+      status: 429,
+      json: async () => ({ error: "RATE_LIMIT_EXCEEDED" }),
     });
     const actualDerive = cryptoClient.deriveAuthKeyBytes;
     const inputs: Uint8Array[] = [];
@@ -2304,5 +2671,173 @@ describe("VaultProvider — auth key bytes are zeroized after use", () => {
 
     expect(result.current.getKeyVersion()).toBe(2);
     expectAllZeroized(derived, 2);
+  }, 60_000);
+});
+
+describe("VaultProvider — the unlock paths zeroize the decrypted ECDH private key (S4-3)", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearPrf();
+  });
+
+  const PRF_BYTES = new Uint8Array(32).fill(0x3c);
+
+  /**
+   * Set up (keeping a copy of the ECDH private key setup generated), PRF-wrap
+   * the secret key for the passkey paths, then lock. The WebAuthn ceremony
+   * (the browser boundary) is stubbed to return the PRF output.
+   */
+  async function setUpThenLock() {
+    const { fetchMock } = makeFetchEnv(null);
+    const baseHandler = fetchMock.getMockImplementation();
+    const state: { prf: object } = { prf: {} };
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/webauthn/authenticate/options") {
+        return { ok: true, json: async () => ({ options: {}, challengeId: "c1", prfSalt: "aa".repeat(32) }) };
+      }
+      if (url === "/api/webauthn/authenticate/verify") {
+        return { ok: true, json: async () => ({ verified: true, prf: state.prf }) };
+      }
+      if (!baseHandler) throw new Error("fetch env has no base handler");
+      return baseHandler(url, init);
+    }) as unknown as typeof fetch;
+
+    const generated: { ecdhPrivateKey: Uint8Array | null } = { ecdhPrivateKey: null };
+    const actualExport = cryptoTeam.exportPrivateKey;
+    const exportSpy = vi.spyOn(cryptoTeam, "exportPrivateKey").mockImplementation(async (key) => {
+      const bytes = await actualExport(key);
+      generated.ecdhPrivateKey = new Uint8Array(bytes);
+      return bytes;
+    });
+    const hook = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await hook.result.current.setup(PASSPHRASE);
+    });
+    exportSpy.mockRestore();
+
+    const secretKey = hook.result.current.getSecretKey();
+    if (!secretKey) throw new Error("setup left no secret key");
+    const wrapped = await wrapSecretKeyWithPrf(secretKey, PRF_BYTES);
+    const prfData = {
+      prfEncryptedSecretKey: wrapped.ciphertext,
+      prfSecretKeyIv: wrapped.iv,
+      prfSecretKeyAuthTag: wrapped.authTag,
+    };
+    state.prf = prfData;
+    vi.spyOn(webauthnClient, "startPasskeyAuthentication").mockResolvedValue({
+      responseJSON: { id: "cred-1" },
+      prfOutput: new Uint8Array(PRF_BYTES),
+    } as Awaited<ReturnType<typeof webauthnClient.startPasskeyAuthentication>>);
+    act(() => {
+      hook.result.current.lock();
+    });
+    return { result: hook.result, generated, prfData };
+  }
+
+  /** Pass-through spy (crypto stays real) capturing every decrypted buffer. */
+  function captureDecrypted() {
+    const buffers: ArrayBuffer[] = [];
+    const actual = cryptoClient.decryptBinary;
+    vi.spyOn(cryptoClient, "decryptBinary").mockImplementation(async (...args) => {
+      const buffer = await actual(...args);
+      buffers.push(buffer);
+      return buffer;
+    });
+    return buffers;
+  }
+
+  const UNLOCKS = {
+    unlock: (vault: ReturnType<typeof useVault>) => vault.unlock(PASSPHRASE),
+    unlockWithPasskey: (vault: ReturnType<typeof useVault>) => vault.unlockWithPasskey(),
+    unlockWithStoredPrf: (vault: ReturnType<typeof useVault>) => vault.unlockWithStoredPrf(),
+  };
+
+  it.each(Object.keys(UNLOCKS) as (keyof typeof UNLOCKS)[])(
+    "%s zeroizes the decrypted ECDH private key and keeps a working copy of it",
+    async (path) => {
+      const { result, generated, prfData } = await setUpThenLock();
+      stashPrf({ prfOutput: new Uint8Array(PRF_BYTES), prfData });
+      const decrypted = captureDecrypted();
+
+      let ok = false;
+      await act(async () => {
+        ok = await UNLOCKS[path](result.current);
+      });
+
+      expect(ok).toBe(true);
+      // The ECDH private key is the only thing the unlock paths decrypt.
+      expect(decrypted).toHaveLength(1);
+      expect(new Uint8Array(decrypted[0]).every((b) => b === 0)).toBe(true);
+      const held = result.current.getEcdhPrivateKeyBytes();
+      expect(held?.some((b) => b !== 0)).toBe(true);
+      expect(held).toEqual(generated.ecdhPrivateKey);
+    },
+    60_000,
+  );
+});
+
+describe("VaultProvider — a page hide while setting up or unlocking installs nothing", () => {
+  it("unlock reports an interruption, not a failed attempt, and leaves the vault locked when the page is hidden during the unlock POST", async () => {
+    const { fetchMock } = makeFetchEnv(null);
+    const baseHandler = fetchMock.getMockImplementation();
+    const state = { locked: false, unlockPosts: [] as string[] };
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/vault/unlock" && state.locked) {
+        state.unlockPosts.push(JSON.parse(init?.body as string).authHash);
+        if (state.unlockPosts.length === 1) window.dispatchEvent(new Event("pagehide"));
+      }
+      if (!baseHandler) throw new Error("fetch env has no base handler");
+      return baseHandler(url, init);
+    }) as unknown as typeof fetch;
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await result.current.setup(PASSPHRASE);
+    });
+    act(() => {
+      result.current.lock();
+    });
+    state.locked = true;
+
+    let ok: boolean | undefined;
+    let caught: unknown;
+    await act(async () => {
+      try {
+        ok = await result.current.unlock(PASSPHRASE);
+      } catch (e) {
+        caught = e;
+      }
+    });
+
+    expect(ok).toBeUndefined();
+    expect(caught).toBeInstanceOf(VaultUnlockError);
+    expect((caught as VaultUnlockError).code).toBe(VAULT_UNLOCK_INTERRUPTED);
+    // Only the real unlock POST: no dummy-hash failure report (notifyUnlockFailure)
+    // counting toward the server's lockout.
+    expect(state.unlockPosts).toHaveLength(1);
+    expect(state.unlockPosts[0]).not.toBe("0".repeat(64));
+    expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(result.current.getSecretKey()).toBeNull();
+    expect(result.current.getEcdhPrivateKeyBytes()).toBeNull();
+  }, 60_000);
+
+  it("setup leaves the committed vault locked, not set up in memory, when the page is hidden during the setup POST", async () => {
+    const { fetchMock } = makeFetchEnv(null);
+    const baseHandler = fetchMock.getMockImplementation();
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/vault/setup") window.dispatchEvent(new Event("pagehide"));
+      if (!baseHandler) throw new Error("fetch env has no base handler");
+      return baseHandler(url, init);
+    }) as unknown as typeof fetch;
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.SETUP_REQUIRED));
+
+    await act(async () => {
+      await result.current.setup(PASSPHRASE);
+    });
+
+    expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(result.current.getSecretKey()).toBeNull();
   }, 60_000);
 });

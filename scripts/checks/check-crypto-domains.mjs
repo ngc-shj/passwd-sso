@@ -279,16 +279,35 @@ export function checkKeyVersionHardcode(files) {
   const keyVersionLiteralRe = /(?:^|[,{])\s*keyVersion\s*:\s*\d/m;
   const errors = [];
 
+  // The named first version replaces the literal at the two setup sites, so it
+  // is held to the same rule: one use in each setup site, none anywhere else
+  // (a use in vault-context beyond setup's would be a rotation/unlock path
+  // installing a literal version). Import/export lines do not count.
+  const INITIAL_VERSION_USES = new Map([
+    ["src/app/api/vault/setup/route.ts", 1],
+    ["src/lib/vault/vault-context.tsx", 1],
+  ]);
+  const initialVersionRe = /\bINITIAL_VAULT_KEY_VERSION\b/g;
+
   for (const { rel, content } of files) {
-    if (KEY_VERSION_HARDCODE_ALLOWLIST.has(rel)) continue;
     const activeLines = content
       .split("\n")
       .filter((line) => {
         const trimmed = line.trimStart();
         return !trimmed.startsWith("//") && !trimmed.startsWith("*");
-      })
-      .join("\n");
-    if (keyVersionLiteralRe.test(activeLines)) {
+      });
+    const uses = activeLines
+      .filter((line) => !/^\s*(?:import|export)\b/.test(line))
+      .join("\n")
+      .match(initialVersionRe)?.length ?? 0;
+    const allowedUses = INITIAL_VERSION_USES.get(rel) ?? 0;
+    if (uses > allowedUses) {
+      errors.push(
+        `Check E: INITIAL_VAULT_KEY_VERSION used ${uses} time(s) in ${rel} (allowed ${allowedUses}) — only vault setup may install the first version; thread the live key version instead`
+      );
+    }
+    if (KEY_VERSION_HARDCODE_ALLOWLIST.has(rel)) continue;
+    if (keyVersionLiteralRe.test(activeLines.join("\n"))) {
       errors.push(
         `Check E: hardcoded keyVersion literal found in non-allowlisted file: ${rel} — thread the live key version instead`
       );

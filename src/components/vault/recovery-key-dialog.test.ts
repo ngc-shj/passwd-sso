@@ -63,6 +63,8 @@ function allZero(arr: Uint8Array): boolean {
   return arr.every((b) => b === 0);
 }
 
+const notLocked = () => false;
+
 // ── Tests ──────────────────────────────────────────────────────
 
 describe("generateRecoveryKeyFlow", () => {
@@ -99,7 +101,7 @@ describe("generateRecoveryKeyFlow", () => {
       json: () => Promise.resolve({ success: true }),
     });
 
-    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(result).toEqual({ ok: true, formattedKey: "ABCD-EFGH-IJKL" });
   });
@@ -110,7 +112,7 @@ describe("generateRecoveryKeyFlow", () => {
       json: () => Promise.resolve({ success: true }),
     });
 
-    await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(allZero(secretKey)).toBe(true);
     expect(allZero(recoveryKey)).toBe(true);
@@ -122,7 +124,7 @@ describe("generateRecoveryKeyFlow", () => {
       json: () => Promise.resolve({ success: true }),
     });
 
-    await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(mockFetch).toHaveBeenCalledWith(
       "/api/vault/recovery-key/generate",
@@ -148,7 +150,7 @@ describe("generateRecoveryKeyFlow", () => {
       json: () => Promise.resolve({ error: "INVALID_PASSPHRASE" }),
     });
 
-    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(result).toEqual({ ok: false, errorCode: "INVALID_PASSPHRASE" });
   });
@@ -159,7 +161,7 @@ describe("generateRecoveryKeyFlow", () => {
       json: () => Promise.resolve({ error: "INVALID_PASSPHRASE" }),
     });
 
-    await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(allZero(secretKey)).toBe(true);
     expect(allZero(recoveryKey)).toBe(true);
@@ -172,7 +174,7 @@ describe("generateRecoveryKeyFlow", () => {
       json: () => Promise.reject(new SyntaxError("Unexpected token '<'")),
     });
 
-    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(result).toEqual({ ok: false, outcomeUnknown: true });
   });
@@ -180,7 +182,7 @@ describe("generateRecoveryKeyFlow", () => {
   it("reports the outcome as unknown when the POST rejects in transit", async () => {
     mockFetch.mockRejectedValue(new TypeError("Failed to fetch"));
 
-    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(result).toEqual({ ok: false, outcomeUnknown: true });
     expect(allZero(secretKey)).toBe(true);
@@ -194,7 +196,7 @@ describe("generateRecoveryKeyFlow", () => {
       json: () => Promise.resolve({ error: "INTERNAL_ERROR" }),
     });
 
-    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(result).toEqual({ ok: false, outcomeUnknown: true });
   });
@@ -206,7 +208,7 @@ describe("generateRecoveryKeyFlow", () => {
       json: () => Promise.resolve({ error: "VERIFIER_NOT_SET" }),
     });
 
-    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(result).toEqual({ ok: false, errorCode: "VERIFIER_NOT_SET" });
   });
@@ -218,7 +220,7 @@ describe("generateRecoveryKeyFlow", () => {
       json: () => Promise.resolve({ error: "VAULT_WRAP_CONFLICT" }),
     });
 
-    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(result).toEqual({ ok: false, errorCode: "VAULT_WRAP_CONFLICT" });
   });
@@ -229,9 +231,61 @@ describe("generateRecoveryKeyFlow", () => {
       json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
     });
 
-    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(result).toEqual({ ok: true, formattedKey: "ABCD-EFGH-IJKL" });
+  });
+
+  // ── Vault locked during the flow ──────────────────────────
+
+  it("sends nothing and reports not-started when the vault was locked before the POST", async () => {
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, () => true);
+
+    expect(result).toEqual({ ok: false, notStartedVaultLocked: true });
+    expect(mockFetch).not.toHaveBeenCalled();
+    expect(allZero(secretKey)).toBe(true);
+    expect(allZero(recoveryKey)).toBe(true);
+  });
+
+  it("does not return a committed key when the vault was locked after the POST was sent", async () => {
+    const lock = { locked: false };
+    mockFetch.mockImplementation(async () => {
+      lock.locked = true;
+      return { ok: true, json: () => Promise.resolve({ success: true }) };
+    });
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, () => lock.locked);
+
+    expect(result).toEqual({ ok: false, committedVaultLocked: true });
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFormatRecoveryKey).not.toHaveBeenCalled();
+    expect(allZero(recoveryKey)).toBe(true);
+  });
+
+  it("does not return a committed key when the vault was locked while it was being formatted", async () => {
+    const lock = { locked: false };
+    mockFetch.mockResolvedValue({ ok: true, json: () => Promise.resolve({ success: true }) });
+    mockFormatRecoveryKey.mockImplementation(async () => {
+      lock.locked = true;
+      return "ABCD-EFGH-IJKL";
+    });
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, () => lock.locked);
+
+    expect(result).toEqual({ ok: false, committedVaultLocked: true });
+    expect(allZero(recoveryKey)).toBe(true);
+  });
+
+  it("reports a refusal received after the vault was locked as not-started", async () => {
+    const lock = { locked: false };
+    mockFetch.mockImplementation(async () => {
+      lock.locked = true;
+      return { ok: false, status: 429, json: () => Promise.resolve({ error: "RATE_LIMIT_EXCEEDED" }) };
+    });
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, () => lock.locked);
+
+    expect(result).toEqual({ ok: false, notStartedVaultLocked: true });
   });
 
   // ── Exception path ────────────────────────────────────────
@@ -239,7 +293,7 @@ describe("generateRecoveryKeyFlow", () => {
   it("returns null errorCode on crypto exception", async () => {
     mockWrapSecretKeyWithRecovery.mockRejectedValue(new Error("crypto failure"));
 
-    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(result).toEqual({ ok: false, errorCode: null });
   });
@@ -247,7 +301,7 @@ describe("generateRecoveryKeyFlow", () => {
   it("zeros secretKey and recoveryKey on crypto exception", async () => {
     mockWrapSecretKeyWithRecovery.mockRejectedValue(new Error("crypto failure"));
 
-    await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(allZero(secretKey)).toBe(true);
     expect(allZero(recoveryKey)).toBe(true);
@@ -256,7 +310,7 @@ describe("generateRecoveryKeyFlow", () => {
   it("zeros secretKey even when exception occurs before recoveryKey generation", async () => {
     mockComputePassphraseVerifier.mockRejectedValue(new Error("verifier failure"));
 
-    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(result).toEqual({ ok: false, errorCode: null });
     expect(allZero(secretKey)).toBe(true);

@@ -10,7 +10,9 @@
  * `["json"]`, destructured `json`, aliases, `Promise.all`/`allSettled`
  * elements, and the unresolvable combinator shapes that fail closed), in
  * src/components, src/hooks, src/app pages and src/lib client modules, and in a
- * component or page that imports a server marker. Allow: a GET,
+ * component or page that imports a server marker; any alias of fetchApi; a
+ * helper reached through an import, resolved through its specifier (S4-4).
+ * Allow: a GET,
  * `parseJsonBodyOnce`, a src/lib server module (each marker form, including a
  * mixed type/value import and a namespace import), a route handler.
  * Refuse: an empty file set and a parse error.
@@ -144,39 +146,43 @@ describe("check-mutation-response-read", () => {
   // promise combinators, `.then` returns, aliases, element access and
   // destructuring.
   const POST = 'fetchApi("/x", { method: "POST" })';
+  const READ = "body read on";
   it.each([
-    ["a .catch(() => null) promise, then res?.json()", `  const res = await ${POST}.catch(() => null);\n  return res?.json();`, 5],
-    ["a .finally(...) promise", `  const res = await ${POST}.finally(() => undefined);\n  return res.json();`, 5],
-    ["a .then((r) => r).then((r) => r.json()) chain", `  return ${POST}.then((r) => r).then((r) => r.json());`, 4],
-    ['an element access res["json"]()', `  const res = await ${POST};\n  return res["json"]();`, 5],
-    ["a computed member res[key]()", `  const res = await ${POST};\n  return res[m as "json"]();`, 5],
-    ["json destructured from the awaited response", `  const { json } = await ${POST};\n  return json();`, 4],
-    ["json destructured in a .then callback parameter", `  return ${POST}.then(({ json }) => json());`, 4],
-    ["an alias const r2 = res", `  const res = await ${POST};\n  const r2 = res;\n  return r2.json();`, 6],
+    ["a .catch(() => null) promise, then res?.json()", `  const res = await ${POST}.catch(() => null);\n  return res?.json();`, 5, READ],
+    ["a .finally(...) promise", `  const res = await ${POST}.finally(() => undefined);\n  return res.json();`, 5, READ],
+    ["a .then((r) => r).then((r) => r.json()) chain", `  return ${POST}.then((r) => r).then((r) => r.json());`, 4, READ],
+    ['an element access res["json"]()', `  const res = await ${POST};\n  return res["json"]();`, 5, READ],
+    ["a computed member res[key]()", `  const res = await ${POST};\n  return res[m as "json"]();`, 5, READ],
+    ["json destructured from the awaited response", `  const { json } = await ${POST};\n  return json();`, 4, READ],
+    ["json destructured in a .then callback parameter", `  return ${POST}.then(({ json }) => json());`, 4, READ],
+    ["an alias const r2 = res", `  const res = await ${POST};\n  const r2 = res;\n  return r2.json();`, 6, READ],
     [
       "an array-destructured Promise.all element",
       `  const [a, b] = await Promise.all([fetchApi("/a"), ${POST}]);\n  await a.json();\n  return b.json();`,
       6,
+      READ,
     ],
     [
       "an index-accessed Promise.all element",
       `  const all = await Promise.all([fetchApi("/a"), ${POST}]);\n  await all[0].json();\n  return all[1].json();`,
       6,
+      READ,
     ],
     [
       "a Promise.allSettled record's .value",
       `  const [, s] = await Promise.allSettled([fetchApi("/a"), ${POST}]);\n  return s.status === "fulfilled" ? s.value.json() : null;`,
       5,
+      READ,
     ],
-    ["a Promise.all .then(([r]) => r.json())", `  return Promise.all([${POST}]).then(([r]) => r.json());`, 4],
-    ["a Promise.race result", `  const r = await Promise.race([${POST}]);\n  return r.json();`, 5],
-    ["a Promise.all request after a spread (position unresolvable)", `  const [a] = await Promise.all([...[], ${POST}]);\n  return a;`, 4],
-    ["a Promise.all result used other than element-wise", `  const all = await Promise.all([${POST}]);\n  return all.map((r) => r.json());`, 5],
-  ])("denies %s", (_label, body, line) => {
+    ["a Promise.all .then(([r]) => r.json())", `  return Promise.all([${POST}]).then(([r]) => r.json());`, 4, READ],
+    ["a Promise.race result", `  const r = await Promise.race([${POST}]);\n  return r.json();`, 5, READ],
+    ["a Promise.all request after a spread (position unresolvable)", `  const [a] = await Promise.all([...[], ${POST}]);\n  return a;`, 4, "unresolvable position in Promise.all of"],
+    ["a Promise.all result used other than element-wise", `  const all = await Promise.all([${POST}]);\n  return all.map((r) => r.json());`, 5, "unresolvable use of"],
+  ])("denies %s", (_label, body, line, what) => {
     const r = run({ "src/components/a.tsx": component(body) });
     expect(r.code).toBe(1);
     expect(r.stderr).toContain("MUTATION_RESPONSE_JSON_READ: 1 read(s)");
-    expect(r.stderr).toContain(`src/components/a.tsx:${line} `);
+    expect(r.stderr).toContain(`src/components/a.tsx:${line}  ${what} the response of`);
   });
 
   // Every body reader consumes the body and rejects the same way `.json()`
@@ -218,6 +224,129 @@ describe("check-mutation-response-read", () => {
     const r = run({ "src/components/a.tsx": component(body) });
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("check-mutation-response-read: OK (1 files");
+  });
+
+  // T4-2 / T4-4: each row pins one tracker or method clause that a mutant
+  // could drop while every row above stayed green.
+  it.each([
+    ["a ?? fallback", `  const res = (await ${POST}) ?? null;\n  return res.json();`, 5, READ],
+    ["a || fallback", `  const res = (await ${POST}) || null;\n  return res.json();`, 5, READ],
+    ["the right side of &&", `  const res = m && (await ${POST});\n  return res ? res.json() : null;`, 5, READ],
+    ["an as-wrapped await", `  const res = (await ${POST}) as Response;\n  return res.json();`, 5, READ],
+    ["a non-null-asserted await", `  const res = (await ${POST})!;\n  return res.json();`, 5, READ],
+    ["a satisfies-wrapped await", `  const res = (await ${POST}) satisfies Response;\n  return res.json();`, 5, READ],
+    ["a .then() passthrough", `  const res = await ${POST}.then();\n  return res.json();`, 5, READ],
+    ["a .then(undefined) passthrough", `  const res = await ${POST}.then(undefined);\n  return res.json();`, 5, READ],
+    ["a .then(null) passthrough", `  const res = await ${POST}.then(null);\n  return res.json();`, 5, READ],
+    [
+      "a request returned from a .catch callback",
+      `  const r = await Promise.resolve(null).catch(async () => await ${POST});\n  return r.json();`,
+      5,
+      READ,
+    ],
+    [
+      "a .then(function (r) { return r; }) chain",
+      `  return ${POST}.then(function (r) { return r; }).then((r) => r.json());`,
+      4,
+      READ,
+    ],
+    [
+      "a computed index into a Promise.all result",
+      `  const all = await Promise.all([${POST}]);\n  const i = 0;\n  return all[i].json();`,
+      6,
+      "unresolvable element of",
+    ],
+    [
+      "a destructuring assignment ({ json } = res)",
+      `  let json: () => Promise<unknown>;\n  ({ json } = await ${POST});\n  return json();`,
+      5,
+      "unresolvable destructuring of",
+    ],
+    [
+      "a computed key destructured from the response",
+      `  const { [m]: read } = await ${POST};\n  return read();`,
+      4,
+      "unresolvable destructuring of",
+    ],
+    [
+      "{ value } destructured from a settled record",
+      `  const [{ value }] = await Promise.allSettled([${POST}]);\n  return value.json();`,
+      5,
+      READ,
+    ],
+    ["a rest element over a Promise.all result", `  const [...rs] = await Promise.all([${POST}]);\n  return rs[0].json();`, 5, READ],
+    [
+      "a rest element after a leading element",
+      `  const [a, ...rs] = await Promise.all([fetchApi("/a"), ${POST}]);\n  await a.json();\n  return rs[0].json();`,
+      6,
+      READ,
+    ],
+    [
+      "an object rest over a settled record",
+      `  const [s] = await Promise.allSettled([${POST}]);\n  const { ...rest } = s;\n  return rest.value.json();`,
+      6,
+      READ,
+    ],
+    [
+      "a computed method key in the init",
+      `  const k = "method";\n  const res = await fetchApi("/x", { [k]: "POST" });\n  return res.json();`,
+      6,
+      READ,
+    ],
+    [
+      "a method accessor in the init",
+      `  const res = await fetchApi("/x", { get method() { return "POST"; } });\n  return res.json();`,
+      5,
+      READ,
+    ],
+    [
+      "a method held in a let reassigned before the call",
+      `  let method = "GET";\n  method = "POST";\n  const res = await fetchApi("/x", { method });\n  return res.json();`,
+      7,
+      READ,
+    ],
+    ["a method computed by a call", `  const res = await fetchApi("/x", { method: String(m) });\n  return res.json();`, 5, READ],
+  ])("denies %s", (_label, body, line, what) => {
+    const r = run({ "src/components/a.tsx": component(body) });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("MUTATION_RESPONSE_JSON_READ: 1 read(s)");
+    expect(r.stderr).toContain(`src/components/a.tsx:${line}  ${what} the response of`);
+  });
+
+  it.each([
+    ["the length of a Promise.all result", `  const all = await Promise.all([${POST}]);\n  return all.length;`],
+    [
+      "the left side of && (the right side is what the expression holds)",
+      `  const res = await ${POST};\n  const g = res && (await fetchApi("/y"));\n  return g.json();`,
+    ],
+    [
+      "a property spelled like a Promise.all binding",
+      `  const all = await Promise.all([${POST}]);\n  const o = { all: 1 };\n  return [o.all, all.length];`,
+    ],
+    ["a lower-case literal get", '  const res = await fetchApi("/x", { method: "get" });\n  return res.json();'],
+    [
+      "a self-assigned name that never holds fetchApi",
+      `  let g = parseJsonBodyOnce;\n  g = g;\n  const res = await g(new Response());\n  return res;`,
+    ],
+  ])("allows %s", (_label, body) => {
+    const r = run({ "src/components/a.tsx": component(body) });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("check-mutation-response-read: OK (1 files");
+  });
+
+  // Any binding that may hold fetchApi is a source, whatever its declaration kind.
+  it.each([
+    ["a let alias", "  let f2 = fetchApi;"],
+    ["a var alias", "  var f2 = fetchApi;"],
+    ["a name assigned fetchApi later", "  let f2: typeof fetchApi;\n  f2 = fetchApi;"],
+    ["an alias of an alias", "  const f1 = fetchApi;\n  const f2 = f1;"],
+    ["a destructured { fetchApi: f2 }", "  const { fetchApi: f2 } = { fetchApi };"],
+  ])("denies a request through %s", (_label, alias) => {
+    const body = `${alias}\n  const res = await f2("/x", { method: "POST" });\n  return res.json();`;
+    const line = 4 + alias.split("\n").length + 1;
+    const r = run({ "src/components/a.tsx": component(body) });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`src/components/a.tsx:${line}  body read on the response of f2(…)`);
   });
 
   it("denies in src/hooks and src/app pages too", () => {
@@ -294,6 +423,131 @@ describe("check-mutation-response-read", () => {
   });
 
   it.each([
+    [
+      "forwards a different parameter on each return",
+      "export function send(c: boolean, a?: RequestInit, b?: RequestInit) {\n  if (c) return fetchApi(\"/x\", a);\n  return fetchApi(\"/y\", b);\n}\n",
+      'send(true, {}, { method: "POST" })',
+    ],
+    [
+      "returns a const it awaited the request into",
+      'export async function send() {\n  const r = await fetchApi("/x", { method: "POST" });\n  return r;\n}\n',
+      "send()",
+    ],
+    [
+      "returns a helper declared after it (found on a later fixpoint pass)",
+      'export function send() {\n  return inner();\n}\nfunction inner() {\n  return fetchApi("/x", { method: "POST" });\n}\n',
+      "send()",
+    ],
+  ])("denies the response of a helper that %s", (_label, helper, call) => {
+    const r = run({
+      "src/lib/send.ts": PRELUDE + helper,
+      "src/components/a.tsx":
+        'import { send } from "@/lib/send";\n' + `export async function f() {\n  const res = await ${call};\n  return res.json();\n}\n`,
+    });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("src/components/a.tsx:4  body read on the response of send(…)");
+  });
+
+  // S4-4: two modules export a helper named `send` — one mutates on its own,
+  // the other forwards its init. An import resolves through its specifier, so
+  // neither directory order nor the other module decides the verdict.
+  const MUTATING_SEND = PRELUDE + 'export function send(url: string) {\n  return fetchApi(url, { method: "POST" });\n}\n';
+  const FORWARDING_SEND = PRELUDE + "export function send(url: string, init?: RequestInit) {\n  return fetchApi(url, init);\n}\n";
+  const callSend = (importLine, callee = "send") =>
+    `${importLine}\nexport async function f() {\n  const res = await ${callee}("/x");\n  return res.json();\n}\n`;
+
+  it.each([
+    ["the mutating module sorts first", "src/lib/b/h.ts", "src/lib/z/h.ts", '"@/lib/b/h"'],
+    ["the mutating module sorts last", "src/lib/z/h.ts", "src/lib/b/h.ts", '"@/lib/z/h"'],
+    ["a relative specifier", "src/lib/z/h.ts", "src/lib/b/h.ts", '"../lib/z/h"'],
+  ])("denies a mutating helper masked by a same-named forwarding one: %s", (_label, mutating, forwarding, spec) => {
+    const r = run({
+      [mutating]: MUTATING_SEND,
+      [forwarding]: FORWARDING_SEND,
+      "src/components/a.tsx": callSend(`import { send } from ${spec};`),
+    });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("src/components/a.tsx:4  body read on the response of send(…)");
+  });
+
+  it.each([
+    ["an aliased import", 'import { send as post } from "@/lib/b/h";', "post"],
+    ["a namespace import", 'import * as api from "@/lib/b/h";', "api.send"],
+    ["an aliased re-export through an index module", 'import { post } from "@/lib/b";', "post", { "src/lib/b/index.ts": 'export { send as post } from "./h";\n' }],
+    ["a default import", 'import post from "@/lib/d";', "post", { "src/lib/d.ts": PRELUDE + 'export default function send() {\n  return fetchApi("/x", { method: "POST" });\n}\n' }],
+    // Unresolvable: every exported `send` could be the one called; the
+    // forwarding one sorts first so a first-match reading would allow it.
+    ["an import that does not resolve to a scanned module", 'import { send } from "some-package";', "send"],
+    ["a namespace import that does not resolve to a scanned module", 'import * as api from "some-package";', "api.send"],
+    ["a name bound nowhere in the file", "", "send"],
+    ["a re-export cycle", 'import { send } from "@/lib/c";', "send", { "src/lib/c.ts": 'export { send } from "./c";\n' }],
+  ])("denies a mutating helper reached through %s", (_label, importLine, callee, extra = {}) => {
+    const r = run({
+      "src/lib/a/h.ts": FORWARDING_SEND,
+      "src/lib/b/h.ts": MUTATING_SEND,
+      ...extra,
+      "src/components/a.tsx": callSend(importLine, callee),
+    });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`body read on the response of ${callee}(…)`);
+  });
+
+  it("denies an unresolvable import when same-named helpers forward different arguments", () => {
+    const r = run({
+      "src/lib/a/h.ts": FORWARDING_SEND,
+      "src/lib/b/h.ts": PRELUDE + "export function send(init?: RequestInit, url = \"/x\") {\n  return fetchApi(url, init);\n}\n",
+      "src/components/a.tsx": callSend('import { send } from "some-package";'),
+    });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("body read on the response of send(…)");
+  });
+
+  it.each([
+    ["the only such helper", {}, '"@/lib/z/h"'],
+    ["beside a same-named mutating helper", { "src/lib/b/h.ts": MUTATING_SEND }, '"@/lib/z/h"'],
+    ["by a relative specifier beside a mutating one", { "src/lib/b/h.ts": MUTATING_SEND }, '"../lib/z/h"'],
+    [
+      "through an index re-export beside a mutating one",
+      { "src/lib/b/h.ts": MUTATING_SEND, "src/lib/z/index.ts": 'export { send } from "./h";\n' },
+      '"@/lib/z"',
+    ],
+    [
+      "by an export clause beside a mutating one",
+      {
+        "src/lib/b/h.ts": MUTATING_SEND,
+        "src/lib/z/h.ts": PRELUDE + "function send(url: string, init?: RequestInit) {\n  return fetchApi(url, init);\n}\nexport { send };\n",
+      },
+      '"@/lib/z/h"',
+    ],
+    [
+      "a renamed export clause beside a mutating helper of the exported name",
+      {
+        "src/lib/b/h.ts": PRELUDE + 'export function post(url: string) {\n  return fetchApi(url, { method: "POST" });\n}\n',
+        "src/lib/z/h.ts": PRELUDE + "function send(url: string, init?: RequestInit) {\n  return fetchApi(url, init);\n}\nexport { send as post };\n",
+      },
+      '"@/lib/z/h"',
+      "import { post as send } from",
+    ],
+    [
+      "a default import beside a mutating default export",
+      {
+        "src/lib/b/h.ts": PRELUDE + 'export default function send(url: string) {\n  return fetchApi(url, { method: "POST" });\n}\n',
+        "src/lib/z/h.ts": PRELUDE + "export default function send(url: string, init?: RequestInit) {\n  return fetchApi(url, init);\n}\n",
+      },
+      '"@/lib/z/h"',
+      "import send from",
+    ],
+  ])("allows a GET through a forwarding helper imported as %s", (_label, extra, spec, importClause = "import { send } from") => {
+    const r = run({
+      "src/lib/z/h.ts": FORWARDING_SEND,
+      ...extra,
+      "src/components/a.tsx": callSend(`${importClause} ${spec};`),
+    });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("check-mutation-response-read: OK");
+  });
+
+  it.each([
     ["an absent init (GET)", '  const res = await fetchApi("/x");\n  return res.json();'],
     ["an explicit GET", '  const res = await fetchApi("/x", { method: "GET" });\n  return res.json();'],
     ["a HEAD", '  const res = await fetchApi("/x", { method: "HEAD" });\n  return res.json();'],
@@ -355,6 +609,7 @@ describe("check-mutation-response-read", () => {
     ["next/headers", 'import { headers } from "next/headers";\n'],
     ["the Prisma singleton", 'import { prisma } from "@/lib/prisma";\n'],
     ["the Prisma singleton by a relative path", 'import { prisma } from "../prisma";\n'],
+    ["the Prisma singleton as a default import", 'import prisma from "@/lib/prisma";\n'],
     ["the Prisma singleton beside a type-only binding", 'import { type PrismaClient, prisma } from "@/lib/prisma";\n'],
     ["next/headers as a namespace", 'import * as h from "next/headers";\n'],
   ])("allows a mutation read in a src/lib server module importing %s", (_label, header) => {

@@ -164,7 +164,7 @@ describe("RotateKeyDialog", () => {
     expect(screen.getByLabelText("rotateKeyPassphrase")).toHaveValue("mypass");
   });
 
-  it("asks to lock and unlock once when the server has no passphrase verifier (VERIFIER_NOT_SET)", async () => {
+  it("asks to unlock once with the passphrase, for a rotation, when the server has no passphrase verifier (VERIFIER_NOT_SET)", async () => {
     mockRotateKey.mockRejectedValue({ error: "VERIFIER_NOT_SET" });
     render(<RotateKeyDialog open={true} onOpenChange={onOpenChange} />);
     fireEvent.change(screen.getByLabelText("rotateKeyPassphrase"), {
@@ -173,8 +173,9 @@ describe("RotateKeyDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "rotateKeyButton" }));
 
     await waitFor(() => {
-      expect(screen.getByText("verifierNotSetHint")).toBeInTheDocument();
+      expect(screen.getByText("rotateKeyVerifierNotSetHint")).toBeInTheDocument();
     });
+    expect(screen.queryByText("verifierNotSetHint")).toBeNull();
   });
 
   it("closes with a persistent changed-elsewhere notice when another writer moved the wrap", async () => {
@@ -268,11 +269,46 @@ describe("RotateKeyDialog", () => {
   });
 
   it("says the vault must be unlocked, not that it is ready, when it locked while the rotation committed", async () => {
-    mockRotateKey.mockResolvedValue("ROTATION_COMMITTED_VAULT_LOCKED");
+    mockRotateKey.mockResolvedValue({ outcome: "ROTATION_COMMITTED_VAULT_LOCKED", effects: null });
 
     await submitRotation();
 
     expect(mockToast.warning).toHaveBeenCalledWith("rotateKeyCommittedVaultLocked", { duration: Infinity });
+    expect(mockToast.success).not.toHaveBeenCalled();
+  });
+
+  it("still shows the rotation's banners when the vault locked while the rotation committed", async () => {
+    mockRotateKey.mockResolvedValue({
+      outcome: "ROTATION_COMMITTED_VAULT_LOCKED",
+      effects: {
+        recoveryKeyInvalidated: false,
+        emergencyGrantsCleared: 0,
+        prfCredentialsCleared: 0,
+        cekRewrapsAttempted: 0,
+        cekRewrapsSucceeded: 0,
+        cekRewrapsFailed: 0,
+        legacyAttachmentsMigrated: 0,
+        invalidatedMcpAccessTokens: null,
+        invalidatedMcpRefreshTokens: null,
+        cacheTombstoneFailures: null,
+        invalidationFailed: true,
+      },
+    });
+
+    await submitRotation();
+
+    expect(mockToast.warning).toHaveBeenCalledWith("rotateKeyCommittedVaultLocked", { duration: Infinity });
+    expect(mockToast.warning).toHaveBeenCalledWith("rotateKeyInvalidationFailedBanner", { duration: Infinity });
+    expect(mockToast.success).not.toHaveBeenCalled();
+  });
+
+  it("warns that revocation is unconfirmed when the vault locked while the rotation committed and its effects are unavailable", async () => {
+    mockRotateKey.mockResolvedValue({ outcome: "ROTATION_COMMITTED_VAULT_LOCKED", effects: "ROTATION_EFFECTS_UNAVAILABLE" });
+
+    await submitRotation();
+
+    expect(mockToast.warning).toHaveBeenCalledWith("rotateKeyCommittedVaultLocked", { duration: Infinity });
+    expect(mockToast.warning).toHaveBeenCalledWith("rotateKeyEffectsUnavailableBanner", { duration: Infinity });
     expect(mockToast.success).not.toHaveBeenCalled();
   });
 

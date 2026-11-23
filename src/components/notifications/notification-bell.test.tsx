@@ -375,6 +375,73 @@ describe("NotificationBell", () => {
     expect(within(bell()).getByText("3")).toBeInTheDocument();
   });
 
+  describe("when mark-read is in flight and the notification is then deleted", () => {
+    function deferred() {
+      let resolve: (res: Response) => void = () => {};
+      const promise = new Promise<Response>((r) => {
+        resolve = r;
+      });
+      return { promise, resolve };
+    }
+
+    async function clickRowThenDelete() {
+      const patch = deferred();
+      const del = deferred();
+      route({
+        count: () => Promise.resolve(json({ unreadCount: 3 })),
+        list: () => Promise.resolve(json({ items: [item({ id: "n-1", title: "First" })] })),
+        patchOne: () => patch.promise,
+        del: () => del.promise,
+      });
+      render(<NotificationBell />);
+      await within(bell()).findByText("3");
+      fireEvent.click(screen.getByTestId("toggle-menu"));
+      fireEvent.click(await screen.findByRole("menuitem"));
+      fireEvent.click(screen.getByText("delete"));
+      expect(callsWith("/api/notifications/n-1", "PATCH")).toHaveLength(1);
+      expect(callsWith("/api/notifications/n-1", "DELETE")).toHaveLength(1);
+      return { patch, del };
+    }
+
+    it("decrements once when mark-read succeeds first", async () => {
+      const { patch, del } = await clickRowThenDelete();
+      await act(async () => {
+        patch.resolve(json({}));
+      });
+      await within(bell()).findByText("2");
+      await act(async () => {
+        del.resolve(json({}));
+      });
+      await waitFor(() => expect(screen.queryByText("First")).not.toBeInTheDocument());
+      expect(within(bell()).getByText("2")).toBeInTheDocument();
+    });
+
+    it("decrements once when delete succeeds first", async () => {
+      const { patch, del } = await clickRowThenDelete();
+      await act(async () => {
+        del.resolve(json({}));
+      });
+      await waitFor(() => expect(screen.queryByText("First")).not.toBeInTheDocument());
+      await act(async () => {
+        patch.resolve(json({}));
+      });
+      expect(within(bell()).getByText("2")).toBeInTheDocument();
+    });
+
+    it("decrements once when both responses land before React renders either", async () => {
+      // Both handlers run in one act, so the second reads the list before the
+      // first's write has rendered: only a list kept current at write time
+      // (not at render or commit) sees that the item is already accounted for.
+      const { patch, del } = await clickRowThenDelete();
+      await act(async () => {
+        patch.resolve(json({}));
+        del.resolve(json({}));
+      });
+      expect(screen.queryByText("First")).not.toBeInTheDocument();
+      expect(within(bell()).getByText("2")).toBeInTheDocument();
+    });
+  });
+
   it("keeps the notification when the delete request fails", async () => {
     route({
       count: () => Promise.resolve(json({ unreadCount: 1 })),

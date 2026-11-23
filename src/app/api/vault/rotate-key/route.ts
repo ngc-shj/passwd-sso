@@ -182,11 +182,10 @@ async function handlePOST(request: NextRequest) {
     storedHmac: user.passphraseVerifierHmac,
     storedVersion: user.passphraseVerifierVersion,
   });
-  if (verifier === "not-set") {
-    return errorResponse(API_ERROR.VERIFIER_NOT_SET);
-  }
-  if (verifier === "wrong") {
-    return errorResponse(API_ERROR.INVALID_PASSPHRASE);
+  if (verifier !== "ok") {
+    return errorResponse(
+      verifier === "not-set" ? API_ERROR.VERIFIER_NOT_SET : API_ERROR.INVALID_PASSPHRASE,
+    );
   }
 
   // Verify the client holds the current secret key
