@@ -2,15 +2,43 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaUser, mockRateLimiter, mockCreateRateLimiter, mockLogAudit, mockWithUserTenantRls } = vi.hoisted(() => {
+const {
+  mockAuth,
+  mockPrismaUser,
+  mockTxUpdateMany,
+  mockTxs,
+  mockRateLimiter,
+  mockCreateRateLimiter,
+  mockLogAudit,
+  mockLogAuditInTx,
+  mockWithUserTenantRls,
+  mockWithTenantRls,
+} = vi.hoisted(() => {
   const mockRateLimiter = { check: vi.fn() };
+  // Each withTenantRls call hands its callback a fresh tx with its own spies,
+  // recorded in mockTxs, so a write on the ambient client (only the snapshot
+  // read may use it) is distinguishable from one on the audited tx.
+  // mockTxUpdateMany is the behaviour (the CAS row count) every tx delegates to.
+  const mockTxUpdateMany = vi.fn();
+  const mockTxs: { user: { update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> } }[] = [];
+  const mockWithTenantRls = vi.fn(async (_p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => {
+    const tx = {
+      user: { update: vi.fn(), updateMany: vi.fn((args: unknown) => mockTxUpdateMany(args)) },
+    };
+    mockTxs.push(tx);
+    return fn(tx);
+  });
   return {
     mockAuth: vi.fn(),
-    mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
+    mockPrismaUser: { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() },
+    mockTxUpdateMany,
+    mockTxs,
     mockRateLimiter,
     mockCreateRateLimiter: vi.fn(() => mockRateLimiter),
     mockLogAudit: vi.fn(),
+    mockLogAuditInTx: vi.fn(),
     mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+    mockWithTenantRls,
   };
 });
 
@@ -33,12 +61,16 @@ vi.mock("@/lib/crypto/verifier-version", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -70,6 +102,8 @@ const userWithVault = {
   recoveryVerifierVersion: 1,
   recoveryKeySetAt: null,
   recoveryKeyInvalidatedAt: null,
+  keyVersion: 3,
+  accountSalt: "9".repeat(64),
   tenantId: "test-tenant-id",
 };
 
@@ -81,7 +115,12 @@ describe("POST /api/vault/recovery-key/generate", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRateLimiter.check.mockResolvedValue({ allowed: true });
     mockPrismaUser.findUnique.mockResolvedValue(userWithVault);
+    mockTxs.length = 0;
+    mockTxUpdateMany.mockResolvedValue({ count: 1 });
+    // Resolves like the real client so a write misrouted to the ambient
+    // client is caught by the assertions on it, not by a crash.
     mockPrismaUser.update.mockResolvedValue({});
+    mockPrismaUser.updateMany.mockResolvedValue({ count: 1 });
   });
 
   it("returns 401 when unauthenticated", async () => {
@@ -101,7 +140,7 @@ describe("POST /api/vault/recovery-key/generate", () => {
       invoke: () => POST(createRequest("POST", URL, { body: validBody })),
       limiter: mockRateLimiter,
       expectation: { envelope: "canonical" },
-      assertNoMutation: [mockPrismaUser.update],
+      assertNoMutation: [mockPrismaUser.update, mockPrismaUser.updateMany, mockTxUpdateMany],
       limiterFactory: generateLimiterFactoryRecord.replay(),
       failure: { allowed: false, redisErrored: true },
     });
@@ -166,9 +205,10 @@ describe("POST /api/vault/recovery-key/generate", () => {
     const json = await res.json();
     expect(json.success).toBe(true);
 
-    expect(mockPrismaUser.update).toHaveBeenCalledWith(
+    expect(mockTxs).toHaveLength(1);
+    expect(mockTxs[0].user.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "user-1" },
+        where: { id: "user-1", accountSalt: userWithVault.accountSalt, keyVersion: userWithVault.keyVersion },
         data: expect.objectContaining({
           recoveryEncryptedSecretKey: validBody.encryptedSecretKey,
           recoverySecretKeyIv: validBody.secretKeyIv,
@@ -180,12 +220,53 @@ describe("POST /api/vault/recovery-key/generate", () => {
       }),
     );
 
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      mockTxs[0],
+      "test-tenant-id",
       expect.objectContaining({
         action: "RECOVERY_KEY_CREATED",
         userId: "user-1",
+        metadata: { keyVersion: userWithVault.keyVersion },
       }),
     );
+  });
+
+  it("writes the wrap only through the transaction, never the ambient client", async () => {
+    const res = await POST(createRequest("POST", URL, { body: validBody }));
+
+    expect(res.status).toBe(200);
+    expect(mockTxs[0].user.updateMany).toHaveBeenCalledTimes(1);
+    expect(mockPrismaUser.update).not.toHaveBeenCalled();
+    expect(mockPrismaUser.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("writes its audit row in the wrap's transaction, not post-commit", async () => {
+    await POST(createRequest("POST", URL, { body: validBody }));
+
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockLogAuditInTx.mock.calls[0][0]).toBe(mockTxs[0]);
+    expect(mockLogAudit).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 VAULT_WRAP_CONFLICT when the vault wrap moved since the snapshot", async () => {
+    // A rotate-key (or another wrapping writer) committed between the verifier
+    // check and the write: the CAS on the snapshot's accountSalt/keyVersion
+    // matches no row.
+    mockTxUpdateMany.mockResolvedValue({ count: 0 });
+
+    const res = await POST(createRequest("POST", URL, { body: validBody }));
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({ error: "VAULT_WRAP_CONFLICT" });
+  });
+
+  it("writes no audit row when the compare-and-swap loses", async () => {
+    mockTxUpdateMany.mockResolvedValue({ count: 0 });
+
+    await POST(createRequest("POST", URL, { body: validBody }));
+
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
   });
 
   it("logs RECOVERY_KEY_REGENERATED when recovery key already exists", async () => {
@@ -198,7 +279,9 @@ describe("POST /api/vault/recovery-key/generate", () => {
     const res = await POST(createRequest("POST", URL, { body: validBody }));
     expect(res.status).toBe(200);
 
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      mockTxs[0],
+      "test-tenant-id",
       expect.objectContaining({
         action: "RECOVERY_KEY_REGENERATED",
       }),
@@ -220,7 +303,9 @@ describe("POST /api/vault/recovery-key/generate", () => {
     const res = await POST(createRequest("POST", URL, { body: validBody }));
     expect(res.status).toBe(200);
 
-    expect(mockLogAudit).toHaveBeenCalledWith(
+    expect(mockLogAuditInTx).toHaveBeenCalledWith(
+      mockTxs[0],
+      "test-tenant-id",
       expect.objectContaining({
         action: "RECOVERY_KEY_REGENERATED",
       }),

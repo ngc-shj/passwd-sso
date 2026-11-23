@@ -83,6 +83,11 @@ const CRITICAL_ACTIONS = new Set([
   // The passphrase change commits a new vault wrap; its committed-phase row
   // must land with that write, like the recovery reset above.
   "VAULT_PASSPHRASE_CHANGE",
+  // A recovery-key generate commits a second wrap of the secret key (an
+  // alternate unlock path); its row commits with that write, like the
+  // passphrase change above.
+  "RECOVERY_KEY_CREATED",
+  "RECOVERY_KEY_REGENERATED",
   "VAULT_RESET_EXECUTED",
   "ADMIN_VAULT_RESET_EXECUTE",
   // Releases the vault owner's escrowed key material to a grantee. Two emitters

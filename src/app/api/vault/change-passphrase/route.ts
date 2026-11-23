@@ -2,12 +2,13 @@ import { type NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { hmacVerifier, verifyPassphraseVerifier } from "@/lib/crypto/crypto-server";
+import { hmacVerifier } from "@/lib/crypto/crypto-server";
+import { checkStoredVerifier } from "@/lib/vault/stored-verifier-server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { getLogger } from "@/lib/logger";
-import { logAuditAsync, logAuditInTx, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
+import { logAuditAsync, logAuditInTx, personalAuditBase } from "@/lib/audit/audit";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -86,25 +87,18 @@ async function handlePOST(request: NextRequest) {
     return errorResponse(API_ERROR.VAULT_NOT_SETUP);
   }
 
-  // Verifier must be set (backfilled during unlock)
-  if (!user.passphraseVerifierHmac) {
+  // Verify current passphrase via verifier (must be set — backfilled during unlock)
+  const verifier = await checkStoredVerifier(request, {
+    userId: session.user.id,
+    tenantId: user.tenantId,
+    clientVerifierHash: data.currentVerifierHash,
+    storedHmac: user.passphraseVerifierHmac,
+    storedVersion: user.passphraseVerifierVersion,
+  });
+  if (verifier === "not-set") {
     return errorResponse(API_ERROR.VERIFIER_NOT_SET);
   }
-
-  // Verify current passphrase via verifier (dual-version: verifies against stored pepper version)
-  const verifyResult = verifyPassphraseVerifier(
-    data.currentVerifierHash,
-    user.passphraseVerifierHmac,
-    user.passphraseVerifierVersion,
-  );
-  if (!verifyResult.ok) {
-    if (verifyResult.reason === "MISSING_PEPPER_VERSION") {
-      await logAuditAsync({
-        ...tenantAuditBase(request, session.user.id, user.tenantId),
-        action: AUDIT_ACTION.VERIFIER_PEPPER_MISSING,
-        metadata: { storedVersion: user.passphraseVerifierVersion },
-      });
-    }
+  if (verifier === "wrong") {
     return errorResponse(API_ERROR.INVALID_PASSPHRASE);
   }
 

@@ -60,8 +60,10 @@ warn() {
 
 printf "${BOLD}▸ Checking deleted/moved route paths vs E2E tests${RESET}\n"
 
-# Find deleted page.tsx files under src/app/
-deleted_pages=$(git diff "${BASE}...HEAD" --diff-filter=D --name-only \
+# Find deleted or moved page.tsx files under src/app/. --no-renames: with rename
+# detection a `git mv` of a page is reported as R, never D, so a moved route
+# still referenced by a spec would pass silently. Without it the old path is a D.
+deleted_pages=$(git diff "${BASE}...HEAD" --diff-filter=D --name-only --no-renames \
   | grep -E '^src/app/.*page\.tsx$' || true)
 
 if [ -n "$deleted_pages" ]; then
@@ -94,10 +96,6 @@ if [ -n "$deleted_pages" ]; then
     fi
   done
 fi
-
-# Also check renamed/moved pages (file added + deleted in same diff)
-added_pages=$(git diff "${BASE}...HEAD" --diff-filter=A --name-only \
-  | grep -E '^src/app/.*page\.tsx$' || true)
 
 # ── 2. CSS class selector check ──────────────────────────────
 #

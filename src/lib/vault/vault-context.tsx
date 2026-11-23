@@ -49,7 +49,7 @@ import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-b
 import { fetchApi } from "@/lib/url-helpers";
 import { hexDecode, hexEncode } from "../crypto/crypto-utils";
 import { takePrf } from "@/lib/auth/prf-handoff";
-import { readPrfData } from "@/lib/auth/webauthn/passkey-response";
+import { readPasskeyOptions, readPrfData } from "@/lib/auth/webauthn/passkey-response";
 import {
   startPasskeyAuthentication,
   unwrapSecretKeyWithPrf,
@@ -85,32 +85,48 @@ export class VaultChangeOutcomeUnknownError extends Error {
   }
 }
 
+/**
+ * Thrown by `changePassphrase` / `rotateKey` when the server refused because
+ * another writer had already moved the vault wrap (a change in another tab or
+ * on another device). This request wrote nothing, but the local salt, wrap and
+ * key are stale — kept, they would let `verifyPassphrase` accept the old
+ * passphrase — so the vault has already been locked. The next unlock reads the
+ * authoritative wrap from the server.
+ */
+export class VaultChangedElsewhereError extends Error {
+  constructor(public readonly code: string) {
+    super("VAULT_CHANGED_ELSEWHERE");
+    this.name = "VaultChangedElsewhereError";
+  }
+}
+
 // Codes that prove a key-changing POST was refused before anything committed:
 // the shared PRE_ROUTE_AND_PRE_TX_REFUSALS plus each route's own.
 //
-// change-passphrase: VERIFIER_NOT_SET (pre-tx); VAULT_WRAP_CONFLICT (the CAS
-// matched no row, so nothing was written). Its only post-commit refusal is
-// SESSION_INVALIDATE_FAILED, which the caller handles as committed.
+// change-passphrase: none of its own, so it checks the shared set directly. Its
+// only post-commit refusal is SESSION_INVALIDATE_FAILED, which the caller
+// handles as committed.
 // rotate-key: ATTACHMENT_MIGRATION_INCOMPLETE, ATTACHMENT_KEY_MANIFEST_MISMATCH,
-// ATTACHMENT_INCONSISTENT_VERSION, KEY_VERSION_MISMATCH, ENTRY_COUNT_MISMATCH
-// are mapped from errors thrown inside the transaction, which roll it back.
+// ATTACHMENT_INCONSISTENT_VERSION, ENTRY_COUNT_MISMATCH are mapped from errors
+// thrown inside the transaction, which roll it back.
 // Deliberately absent: INTERNAL_ERROR. rotate-key also returns it for two
 // in-transaction errors, but a 500 does not tell the client the write rolled
 // back, and treating it as unknown costs only one unlock.
-const CHANGE_PASSPHRASE_REFUSALS: ReadonlySet<string> = new Set([
-  ...PRE_ROUTE_AND_PRE_TX_REFUSALS,
-  API_ERROR.VERIFIER_NOT_SET,
-  API_ERROR.VAULT_WRAP_CONFLICT,
-]);
-
+// Also absent: each route's compare-and-swap refusal (WRAP_MOVED_ELSEWHERE_*
+// below), which is pre-commit too but leaves the local state stale.
 const ROTATE_KEY_REFUSALS: ReadonlySet<string> = new Set([
   ...PRE_ROUTE_AND_PRE_TX_REFUSALS,
   API_ERROR.ATTACHMENT_MIGRATION_INCOMPLETE,
   API_ERROR.ATTACHMENT_KEY_MANIFEST_MISMATCH,
   API_ERROR.ATTACHMENT_INCONSISTENT_VERSION,
-  API_ERROR.KEY_VERSION_MISMATCH,
   API_ERROR.ENTRY_COUNT_MISMATCH,
 ]);
+
+// The compare-and-swap refusal of each route: the CAS matched no row, so
+// nothing was written, but only because another writer moved the wrap first.
+// rotate-key maps its RotationCasConflictError to KEY_VERSION_MISMATCH.
+const WRAP_MOVED_ELSEWHERE_CHANGE_PASSPHRASE = API_ERROR.VAULT_WRAP_CONFLICT;
+const WRAP_MOVED_ELSEWHERE_ROTATE_KEY = API_ERROR.KEY_VERSION_MISMATCH;
 
 /**
  * Parse a non-OK response from /api/vault/unlock/data and throw
@@ -179,6 +195,22 @@ export interface RotationEffects {
 export const ROTATION_EFFECTS_UNAVAILABLE = "ROTATION_EFFECTS_UNAVAILABLE";
 
 /**
+ * `rotateKey`'s result when the server committed the rotation but the vault
+ * was locked (auto-lock, the user) while the request was in flight. The new
+ * key material was not installed into the locked vault; the next unlock reads
+ * the committed wrap. The caller must not report the vault as usable.
+ */
+export const ROTATION_COMMITTED_VAULT_LOCKED = "ROTATION_COMMITTED_VAULT_LOCKED";
+
+/**
+ * `rotateKey`'s result when the vault was locked while the rotation was being
+ * prepared (re-encrypting entries, before the rotate POST). Nothing was sent:
+ * the server still holds the old key and wrap, and the rotation must be started
+ * again after unlocking.
+ */
+export const ROTATION_NOT_STARTED_VAULT_LOCKED = "ROTATION_NOT_STARTED_VAULT_LOCKED";
+
+/**
  * `invalidationFailed`: the server committed the new wrap but could not sign
  * out the account's other sessions (SESSION_INVALIDATE_FAILED).
  */
@@ -210,7 +242,13 @@ interface VaultContextValue {
   rotateKey: (
     passphrase: string,
     onProgress?: (progress: { phase: "migrating" | "rewrapping" | "committing" | "entries" | "history", current: number, total: number }) => void,
-  ) => Promise<RotationEffects | typeof ROTATION_EFFECTS_UNAVAILABLE | null>;
+  ) => Promise<
+    | RotationEffects
+    | typeof ROTATION_EFFECTS_UNAVAILABLE
+    | typeof ROTATION_COMMITTED_VAULT_LOCKED
+    | typeof ROTATION_NOT_STARTED_VAULT_LOCKED
+    | null
+  >;
   verifyPassphrase: (passphrase: string) => Promise<boolean>;
   getSecretKey: () => Uint8Array | null;
   getAccountSalt: () => Uint8Array | null;
@@ -278,6 +316,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // ECDH key pair for team E2E encryption
   const ecdhPrivateKeyBytesRef = useRef<Uint8Array | null>(null);
   const ecdhPublicKeyJwkRef = useRef<string | null>(null);
+  // Bumped whenever the key material is dropped (lock, page hide). A key change
+  // whose request was in flight across a bump must not install its result.
+  // Every path that drops key material must bump it (lock() and the
+  // zeroSensitiveKeys effect today).
+  const lockEpochRef = useRef(0);
 
   // ─── Fetch vault status on session load ───────────────────────
 
@@ -361,6 +404,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   const lock = useCallback(() => {
     // Revoke all delegation sessions (best-effort, survives page unload)
     fetchApi(API_PATH.VAULT_DELEGATION, { method: "DELETE", keepalive: true }).catch(() => {});
+    lockEpochRef.current += 1;
     if (secretKeyRef.current) {
       secretKeyRef.current.fill(0);
       secretKeyRef.current = null;
@@ -381,6 +425,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     const zeroSensitiveKeys = () => {
+      lockEpochRef.current += 1;
       if (secretKeyRef.current) {
         // Vault is unlocked — revoke delegations before zeroing keys
         fetchApi(API_PATH.VAULT_DELEGATION, { method: "DELETE", keepalive: true }).catch(() => {});
@@ -424,6 +469,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     // 1. Generate secret key and account salt
     const secretKey = generateSecretKey();
     let ecdhPrivBytes: Uint8Array | null = null;
+    let authKeyBytes: Uint8Array | null = null;
     try {
       const accountSalt = generateAccountSalt();
 
@@ -435,7 +481,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       // 4. Derive encryption key and auth key
       const encKey = await deriveEncryptionKey(secretKey);
-      const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+      authKeyBytes = await deriveAuthKeyBytes(secretKey);
 
       // 5. Compute auth hash for server verification
       const authHash = await computeAuthHash(authKeyBytes);
@@ -497,12 +543,18 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // a throw while deriving, must not leave them in memory.
       secretKey.fill(0);
       ecdhPrivBytes?.fill(0);
+      authKeyBytes?.fill(0);
     }
   }, [commitKeyVersion]);
 
   // ─── Unlock ───────────────────────────────────────────────────
 
   const unlock = useCallback(async (passphrase: string): Promise<boolean> => {
+    // One finally zeroes the unwrapped key and the auth key bytes on every
+    // exit — a refused or rejected unlock POST included; the success path
+    // copied the secret key into secretKeyRef.
+    let secretKey: Uint8Array | null = null;
+    let authKeyBytes: Uint8Array | null = null;
     try {
       // 1. Fetch encrypted secret key + verification artifact (session-protected)
       const dataRes = await fetchApi(API_PATH.VAULT_UNLOCK_DATA);
@@ -522,9 +574,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const wrappingKey = await deriveWrappingKey(passphrase, accountSalt);
 
       // 3. Try to unwrap (decrypt) the secret key — fails if wrong passphrase
-      let secretKey: Uint8Array;
+      let unwrapped: Uint8Array;
       try {
-        secretKey = await unwrapSecretKey(
+        unwrapped = await unwrapSecretKey(
           {
             ciphertext: vaultData.encryptedSecretKey,
             iv: vaultData.secretKeyIv,
@@ -538,20 +590,20 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         try { await notifyUnlockFailure(); } catch (e) { if (e instanceof VaultUnlockError) throw e; }
         return false;
       }
+      secretKey = unwrapped;
 
       // 4. Derive encryption key and verify with artifact
       const encKey = await deriveEncryptionKey(secretKey);
       if (vaultData.verificationArtifact) {
         const valid = await verifyKey(encKey, vaultData.verificationArtifact);
         if (!valid) {
-          secretKey.fill(0);
           try { await notifyUnlockFailure(); } catch (e) { if (e instanceof VaultUnlockError) throw e; }
           return false;
         }
       }
 
       // 5. Compute auth hash and verify with server (for logging/rate-limiting)
-      const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+      authKeyBytes = await deriveAuthKeyBytes(secretKey);
       const authHash = await computeAuthHash(authKeyBytes);
 
       // 5b. Compute verifier for backfill if server doesn't have one yet
@@ -606,8 +658,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      secretKey.fill(0);
-
       // 7. Auto-confirm pending emergency access grants (async nonblocking)
       const userId = sessionUserId;
       if (userId && secretKeyRef.current) {
@@ -625,12 +675,21 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       if (err instanceof VaultUnlockError) throw err;
       return false;
+    } finally {
+      secretKey?.fill(0);
+      authKeyBytes?.fill(0);
     }
   }, [sessionUserId, commitKeyVersion]);
 
   // ─── Unlock with Passkey (PRF) ───────────────────────────────
 
   const unlockWithPasskey = useCallback(async (): Promise<boolean> => {
+    // One finally zeroes the PRF output, the unwrapped key and the auth key
+    // bytes on every exit (a refused or rejected verify or unlock POST
+    // included); the success path copied the secret key into secretKeyRef.
+    let prfOutput: Uint8Array | null = null;
+    let secretKey: Uint8Array | null = null;
+    let authKeyBytes: Uint8Array | null = null;
     try {
       // 1. Fetch vault data and WebAuthn options in parallel
       const [dataRes, optionsRes] = await Promise.all([
@@ -647,7 +706,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       const vaultData = await dataRes.json();
-      const { options, challengeId, prfSalt } = await optionsRes.json();
+      // An unreadable or malformed options body offers no ceremony: the
+      // unlock fails like any other unusable options response.
+      const passkeyOptions = readPasskeyOptions(await parseJsonBodyOnce(optionsRes));
+      if (!passkeyOptions) return false;
+      const { options, challengeId, prfSalt } = passkeyOptions;
 
       // A02-8 F1: post-A02-8 the server may return `prfSalt: null` when every
       // PRF-capable credential is v2 (per-credential salts are carried inside
@@ -655,17 +718,18 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // `if (!prfSalt) return false;` short-circuited those users — silently
       // breaking PRF auto-unlock. Accept the path when EITHER the top-level
       // v1 salt OR the server-built extensions are present.
+      const extensions = options.extensions;
       const serverBuiltPrf =
-        typeof options?.extensions?.prf === "object" && options.extensions.prf !== null;
+        typeof extensions === "object" && extensions !== null &&
+        "prf" in extensions && typeof extensions.prf === "object" && extensions.prf !== null;
       if ((!prfSalt && !serverBuiltPrf) || !vaultData.accountSalt) return false;
 
       // 2. Perform WebAuthn authentication with PRF extension. The browser
       // client prefers `options.extensions.prf` when present and falls back
       // to the `prfSalt` param otherwise.
-      const { responseJSON, prfOutput } = await startPasskeyAuthentication(
-        options,
-        prfSalt ?? undefined,
-      );
+      const ceremony = await startPasskeyAuthentication(options, prfSalt);
+      const { responseJSON } = ceremony;
+      prfOutput = ceremony.prfOutput;
 
       if (!prfOutput) {
         // PRF not supported by this credential/browser
@@ -688,13 +752,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         typeof verifyData === "object" && verifyData !== null &&
         "verified" in verifyData && verifyData.verified === true;
       const prfData = readPrfData(verifyData);
-      if (!verified || !prfData) {
-        prfOutput.fill(0);
-        return false;
-      }
+      if (!verified || !prfData) return false;
 
       // 4. Unwrap secretKey using PRF output
-      let secretKey: Uint8Array;
       try {
         secretKey = await unwrapSecretKeyWithPrf(
           {
@@ -712,14 +772,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const encKey = await deriveEncryptionKey(secretKey);
       if (vaultData.verificationArtifact) {
         const valid = await verifyKey(encKey, vaultData.verificationArtifact);
-        if (!valid) {
-          secretKey.fill(0);
-          return false;
-        }
+        if (!valid) return false;
       }
 
       // 6. Compute auth hash and verify with server
-      const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+      authKeyBytes = await deriveAuthKeyBytes(secretKey);
       const authHash = await computeAuthHash(authKeyBytes);
 
       const unlockRes = await fetchApi(API_PATH.VAULT_UNLOCK, {
@@ -733,7 +790,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         if (body) {
           throw new VaultUnlockError(body.error, body.lockedUntil);
         }
-        secretKey.fill(0);
         return false;
       }
 
@@ -767,8 +823,6 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      secretKey.fill(0);
-
       // 8. Auto-confirm pending emergency access grants
       const userId = sessionUserId;
       if (userId && secretKeyRef.current) {
@@ -790,6 +844,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         return false;
       }
       return false;
+    } finally {
+      prfOutput?.fill(0);
+      secretKey?.fill(0);
+      authKeyBytes?.fill(0);
     }
   }, [sessionUserId, commitKeyVersion]);
 
@@ -812,6 +870,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     // here so the finally covers the post-derivation throw paths too.
     const prfOutput = handoff.prfOutput;
     let secretKey: Uint8Array | null = null;
+    let authKeyBytes: Uint8Array | null = null;
     try {
       const prfData = handoff.prfData;
 
@@ -847,7 +906,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
 
       // Compute auth hash and verify with server
-      const authKeyBytes = await deriveAuthKeyBytes(secretKey);
+      authKeyBytes = await deriveAuthKeyBytes(secretKey);
       const authHash = await computeAuthHash(authKeyBytes);
 
       const unlockRes = await fetchApi(API_PATH.VAULT_UNLOCK, {
@@ -914,8 +973,21 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     } finally {
       prfOutput.fill(0);
       secretKey?.fill(0);
+      authKeyBytes?.fill(0);
     }
   }, [sessionUserId, commitKeyVersion]);
+
+  const verifyPassphrase = useCallback(async (passphrase: string): Promise<boolean> => {
+    if (!accountSaltRef.current || !wrappedKeyRef.current) return false;
+    try {
+      const wrappingKey = await deriveWrappingKey(passphrase, accountSaltRef.current);
+      const sk = await unwrapSecretKey(wrappedKeyRef.current, wrappingKey);
+      sk.fill(0);
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
 
   // ─── Change Passphrase ────────────────────────────────────────
 
@@ -945,6 +1017,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       );
 
       // 5. Send to server
+      const lockEpoch = lockEpochRef.current;
       let res: Response;
       try {
         res = await fetchApi(API_PATH.VAULT_CHANGE_PASSPHRASE, {
@@ -969,8 +1042,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       let invalidationFailed = false;
       if (!res.ok) {
         const err = await readApiErrorBody(res);
+        if (err?.error === WRAP_MOVED_ELSEWHERE_CHANGE_PASSPHRASE) {
+          lock();
+          throw new VaultChangedElsewhereError(err.error);
+        }
         if (err?.error !== API_ERROR.SESSION_INVALIDATE_FAILED) {
-          if (!err || !CHANGE_PASSPHRASE_REFUSALS.has(err.error)) {
+          if (!err || !PRE_ROUTE_AND_PRE_TX_REFUSALS.has(err.error)) {
             lock();
             throw new VaultChangeOutcomeUnknownError();
           }
@@ -979,7 +1056,10 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         invalidationFailed = true;
       }
 
-      // 6. Update local accountSalt and wrappedKey (secretKey unchanged)
+      // 6. Update local accountSalt and wrappedKey (secretKey unchanged) —
+      // unless the vault was locked while the request was in flight: the next
+      // unlock reads the committed wrap, and a locked vault holds no wrap.
+      if (lockEpochRef.current !== lockEpoch) return { invalidationFailed };
       accountSaltRef.current = newAccountSalt;
       wrappedKeyRef.current = {
         ciphertext: rewrapped.ciphertext,
@@ -1004,10 +1084,29 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       const oldEncryptionKey = encryptionKey;
       const oldKeyVersion = keyVersionRef.current;
+      // A lock at any point from here on drops the key material this rotation
+      // started from; see the checks before and after the rotate POST.
+      const lockEpoch = lockEpochRef.current;
 
-      // 1. Compute currentAuthHash for server-side identity verification
+      // The new wrap and verifier are derived from the typed passphrase, so a
+      // typo would become the new passphrase. Refuse it here before
+      // re-encrypting anything; the server's verifier check is the authority
+      // (a tab whose state predates a change elsewhere still passes this one).
+      if (!(await verifyPassphrase(passphrase))) {
+        throw { error: API_ERROR.INVALID_PASSPHRASE };
+      }
+
+      // 1. Compute currentAuthHash (proof of the current secret key) and
+      // currentVerifierHash (proof of the typed passphrase, under the current
+      // salt) for server-side verification
       const currentAuthKeyBytes = await deriveAuthKeyBytes(secretKeyRef.current);
-      const currentAuthHash = await computeAuthHash(currentAuthKeyBytes);
+      let currentAuthHash: string;
+      try {
+        currentAuthHash = await computeAuthHash(currentAuthKeyBytes);
+      } finally {
+        currentAuthKeyBytes.fill(0);
+      }
+      const currentVerifierHash = await computePassphraseVerifier(passphrase, accountSaltRef.current);
 
       // 2. Fetch rotation data (entries, history, attachment CEK data, mode-0 IDs)
       const dataRes = await fetchApi(API_PATH.VAULT_ROTATE_KEY_DATA);
@@ -1309,6 +1408,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           onProgress?.({ phase: "rewrapping", current: i + 1, total: currentRotationData.mode2Attachments.length });
         }
 
+        // Locked while re-encrypting: lock() also dropped the ECDH key, and a
+        // rotation for a vault the user has already left must not be sent.
+        // Nothing was sent; the finally drops the new key.
+        if (lockEpochRef.current !== lockEpoch) return ROTATION_NOT_STARTED_VAULT_LOCKED;
+
         // 8. Re-wrap ECDH private key with new secret key
         const ecdhWrapKey = await deriveEcdhWrappingKey(newSecretKey);
         if (!ecdhPrivateKeyBytesRef.current) {
@@ -1330,12 +1434,21 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
         // 10. Compute new auth credentials, verifier, and verification artifact
         const newAuthKeyBytes = await deriveAuthKeyBytes(newSecretKey);
-        const newAuthHash = await computeAuthHash(newAuthKeyBytes);
+        let newAuthHash: string;
+        try {
+          newAuthHash = await computeAuthHash(newAuthKeyBytes);
+        } finally {
+          newAuthKeyBytes.fill(0);
+        }
         const newVerifierHash = await computePassphraseVerifier(passphrase, newAccountSalt);
         const verificationArtifact = await createVerificationArtifact(newEncKey);
 
         // 11. POST to /api/vault/rotate-key
         onProgress?.({ phase: "committing", current: 0, total: 1 });
+        // The same, for a lock while the new wrap was being derived: checked
+        // immediately before the POST.
+        if (lockEpochRef.current !== lockEpoch) return ROTATION_NOT_STARTED_VAULT_LOCKED;
+
         let res: Response;
         try {
           res = await fetchApi(API_PATH.VAULT_ROTATE_KEY, {
@@ -1343,6 +1456,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               currentAuthHash,
+              currentVerifierHash,
               encryptedSecretKey: newWrappedKey.ciphertext,
               secretKeyIv: newWrappedKey.iv,
               secretKeyAuthTag: newWrappedKey.authTag,
@@ -1366,12 +1480,21 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
         if (!res.ok) {
           const err = await readApiErrorBody(res);
+          if (err?.error === WRAP_MOVED_ELSEWHERE_ROTATE_KEY) {
+            lock();
+            throw new VaultChangedElsewhereError(err.error);
+          }
           if (!err || !ROTATE_KEY_REFUSALS.has(err.error)) {
             lock();
             throw new VaultChangeOutcomeUnknownError();
           }
           throw err;
         }
+
+        // Committed, but the vault was locked while the request was in flight:
+        // installing the new key would refill a locked vault. The finally drops
+        // it, and the next unlock reads the committed wrap.
+        if (lockEpochRef.current !== lockEpoch) return ROTATION_COMMITTED_VAULT_LOCKED;
 
         // The rotation has committed: the server now holds only the new wrapping
         // and every row is under the new key. An unreadable body must not keep
@@ -1383,7 +1506,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             ? (parsed as { keyVersion?: unknown; rotationEffects?: RotationEffects })
             : null;
 
-        // 12. Update in-memory state
+        // 12. Update in-memory state. The retired key is zeroed first: every
+        // reader got a copy of it (getSecretKey), never this buffer.
+        secretKeyRef.current?.fill(0);
         secretKeyRef.current = new Uint8Array(newSecretKey);
         commitKeyVersion(typeof result?.keyVersion === "number" ? result.keyVersion : newKeyVersion);
         accountSaltRef.current = newAccountSalt;
@@ -1407,20 +1532,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         newSecretKey.fill(0);
       }
     },
-    [encryptionKey, sessionUserId, commitKeyVersion, lock],
+    [encryptionKey, sessionUserId, commitKeyVersion, lock, verifyPassphrase],
   );
-
-  const verifyPassphrase = useCallback(async (passphrase: string): Promise<boolean> => {
-    if (!accountSaltRef.current || !wrappedKeyRef.current) return false;
-    try {
-      const wrappingKey = await deriveWrappingKey(passphrase, accountSaltRef.current);
-      const sk = await unwrapSecretKey(wrappedKeyRef.current, wrappingKey);
-      sk.fill(0);
-      return true;
-    } catch {
-      return false;
-    }
-  }, []);
 
   const getSecretKey = useCallback(() => {
     return secretKeyRef.current ? new Uint8Array(secretKeyRef.current) : null;

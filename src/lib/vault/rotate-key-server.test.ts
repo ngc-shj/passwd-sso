@@ -257,6 +257,7 @@ function payload(overrides: Partial<RotationPayload> = {}): RotationPayload {
     secretKeyAuthTag: "sktag",
     accountSalt: "salt-new",
     newAuthHash: "auth",
+    newVerifierHash: "ab".repeat(32),
     verificationArtifact: { ciphertext: "vct", iv: "viv", authTag: "vtag" },
     entries: [
       { id: "e1", encryptedBlob: blob, encryptedOverview: blob, aadVersion: 1 },
@@ -356,11 +357,10 @@ describe("applyVaultRotation — success", () => {
       recoveryVerifierHmac: null,
       recoveryKeySetAt: null,
     });
-    expect(userUpdate?.data).not.toHaveProperty("passphraseVerifierHmac");
   });
 
-  it("stores an HMAC of the new verifier hash when one is supplied", async () => {
-    const verifier = "ab".repeat(32);
+  it("stores an HMAC of the new verifier hash under the current pepper version", async () => {
+    const verifier = "cd".repeat(32);
     const { promise, writes } = rotate(baseState(), payload({ newVerifierHash: verifier }));
     await promise;
 

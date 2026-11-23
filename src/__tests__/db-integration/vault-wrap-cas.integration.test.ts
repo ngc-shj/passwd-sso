@@ -1,6 +1,7 @@
 /**
  * Integration test (real DB): the vault-wrap compare-and-swap on accountSalt
- * in change-passphrase and recovery-key/recover.
+ * in change-passphrase and recovery-key/recover, and on accountSalt +
+ * keyVersion in recovery-key/generate.
  *
  * Both routes check the old secret against a snapshot read in one
  * transaction and write the new wrap in another, as
@@ -44,9 +45,11 @@ vi.mock("@/lib/security/rate-limit", () => ({
 
 import { POST as changePassphrase } from "@/app/api/vault/change-passphrase/route";
 import { POST as recoverVault } from "@/app/api/vault/recovery-key/recover/route";
+import { POST as generateRecoveryKey } from "@/app/api/vault/recovery-key/generate/route";
 
 const CHANGE_URL = "http://localhost/api/vault/change-passphrase";
 const RECOVER_URL = "http://localhost/api/vault/recovery-key/recover";
+const GENERATE_URL = "http://localhost/api/vault/recovery-key/generate";
 
 function hex(nBytes: number): string {
   return randomBytes(nBytes).toString("hex");
@@ -85,6 +88,18 @@ function resetBody(recoveryVerifierHash: string) {
   };
 }
 
+/** A recovery-key generate body proving `currentVerifierHash`. */
+function generateBody(currentVerifierHash: string) {
+  return {
+    currentVerifierHash,
+    encryptedSecretKey: hex(48),
+    secretKeyIv: hex(12),
+    secretKeyAuthTag: hex(16),
+    hkdfSalt: hex(32),
+    verifierHash: hex(32),
+  };
+}
+
 type Wrap = { accountSalt: string; encryptedSecretKey: string };
 
 /**
@@ -92,7 +107,7 @@ type Wrap = { accountSalt: string; encryptedSecretKey: string };
  * HMACs of the returned hashes, as the routes check them.
  */
 async function seedUserWithVerifiers(ctx: TestContext, tenantId: string) {
-  const { userId, accountSalt } = await seedVaultUser(ctx, tenantId);
+  const { userId, accountSalt, keyVersion } = await seedVaultUser(ctx, tenantId);
   const passphraseVerifierHash = hex(32);
   const recoveryVerifierHash = hex(32);
   await ctx.su.prisma.$transaction(async (tx) => {
@@ -119,7 +134,7 @@ async function seedUserWithVerifiers(ctx: TestContext, tenantId: string) {
       hmacVerifier(recoveryVerifierHash),
     );
   });
-  return { userId, accountSalt, passphraseVerifierHash, recoveryVerifierHash };
+  return { userId, accountSalt, keyVersion, passphraseVerifierHash, recoveryVerifierHash };
 }
 
 async function storedWrap(ctx: TestContext, userId: string): Promise<Wrap> {
@@ -214,6 +229,9 @@ describe("vault wrap compare-and-swap on accountSalt (real DB)", () => {
       }
     } finally {
       await blocker.release();
+      // On a failed setup the requests are still running; let them finish
+      // before afterEach deletes the rows they write to.
+      await Promise.allSettled(requests);
     }
     return Promise.all(requests.map(async (r) => outcome(await r)));
   }
@@ -263,6 +281,105 @@ describe("vault wrap compare-and-swap on accountSalt (real DB)", () => {
       ]);
       expect((await storedWrap(ctx, seed.userId)).accountSalt).toBe(wraps[0].accountSalt);
       expect(await auditCount(ctx, tenantId, seed.userId, "VAULT_PASSPHRASE_CHANGE", "committed")).toBe(1);
+    });
+  });
+
+  describe("POST /api/vault/recovery-key/generate", () => {
+    // generate does not move the wrap it checks, so two generates do not
+    // conflict, and the passphrase-checked writers it races (rotate-key,
+    // change-passphrase) replace the verifier: a generate sent after one
+    // commits is refused by the verifier check (401), never the CAS. The race
+    // the CAS closes is a writer committing between generate's snapshot and
+    // its write, so the blocker itself is that writer: it holds the row while
+    // generate parks on its UPDATE, applies a rotation's (or a passphrase
+    // change's) columns, and commits. Driving rotate-key itself would add
+    // nothing the CAS reads: it sees only accountSalt and keyVersion.
+
+    type Move = { accountSalt?: string; keyVersion?: number };
+
+    async function generateBehindWriter(
+      seed: Awaited<ReturnType<typeof seedUserWithVerifiers>>,
+      move: Move,
+    ): Promise<Outcome> {
+      const race = createRaceHelpers(ctx.su.pool);
+      const res = await race.parkBehind(
+        `SELECT id FROM users WHERE id = $1::uuid FOR UPDATE`,
+        [seed.userId],
+        () => generateRecoveryKey(jsonRequest(GENERATE_URL, generateBody(seed.passphraseVerifierHash))),
+        async (blocker, parkedPid) => {
+          expect(await race.waitingQueryOf(parkedPid)).toMatch(/^UPDATE "public"\."users"/);
+          if (move.accountSalt === undefined && move.keyVersion === undefined) return;
+          // What rotate-key commits on the users row: a new wrap and key
+          // version, the recovery wrap cleared and marked invalidated.
+          await blocker.query(
+            `UPDATE users SET
+               account_salt = COALESCE($2, account_salt),
+               key_version = COALESCE($3, key_version),
+               recovery_encrypted_secret_key = NULL,
+               recovery_secret_key_iv = NULL,
+               recovery_secret_key_auth_tag = NULL,
+               recovery_hkdf_salt = NULL,
+               recovery_verifier_hmac = NULL,
+               recovery_key_set_at = NULL,
+               recovery_key_invalidated_at = now()
+             WHERE id = $1::uuid`,
+            [seed.userId, move.accountSalt ?? null, move.keyVersion ?? null],
+          );
+        },
+      );
+      return outcome(res);
+    }
+
+    async function recoveryState(userId: string) {
+      const r = await ctx.su.pool.query<{ wrap: string | null; invalidated: boolean }>(
+        `SELECT recovery_encrypted_secret_key AS wrap,
+                recovery_key_invalidated_at IS NOT NULL AS invalidated
+           FROM users WHERE id = $1::uuid`,
+        [userId],
+      );
+      return r.rows[0];
+    }
+
+    it("parked behind a writer that changes nothing it reads: stores the recovery wrap with its audit row", async () => {
+      const seed = await seedUserWithVerifiers(ctx, tenantId);
+      mockAuth.mockResolvedValue({ user: { id: seed.userId } });
+
+      const result = await generateBehindWriter(seed, {});
+
+      expect(result).toEqual({ status: 200, body: { success: true } });
+      expect(await recoveryState(seed.userId)).toMatchObject({ invalidated: false });
+      expect(await auditCount(ctx, tenantId, seed.userId, "RECOVERY_KEY_REGENERATED")).toBe(1);
+    });
+
+    it("a rotation committing between its snapshot and its write: 409, the rotation's state kept, no audit row", async () => {
+      const seed = await seedUserWithVerifiers(ctx, tenantId);
+      mockAuth.mockResolvedValue({ user: { id: seed.userId } });
+
+      const result = await generateBehindWriter(seed, { accountSalt: hex(32), keyVersion: seed.keyVersion + 1 });
+
+      expect(result).toEqual({ status: 409, body: { error: "VAULT_WRAP_CONFLICT" } });
+      // The retired key's recovery wrap was not written and the invalidation
+      // marker survives, so a later recover cannot restore the old key.
+      expect(await recoveryState(seed.userId)).toEqual({ wrap: null, invalidated: true });
+      expect(await auditCount(ctx, tenantId, seed.userId, "RECOVERY_KEY_REGENERATED")).toBe(0);
+    });
+
+    it("a writer moving only keyVersion is enough to refuse it", async () => {
+      const seed = await seedUserWithVerifiers(ctx, tenantId);
+      mockAuth.mockResolvedValue({ user: { id: seed.userId } });
+
+      const result = await generateBehindWriter(seed, { keyVersion: seed.keyVersion + 1 });
+
+      expect(result).toEqual({ status: 409, body: { error: "VAULT_WRAP_CONFLICT" } });
+    });
+
+    it("a writer moving only accountSalt is enough to refuse it", async () => {
+      const seed = await seedUserWithVerifiers(ctx, tenantId);
+      mockAuth.mockResolvedValue({ user: { id: seed.userId } });
+
+      const result = await generateBehindWriter(seed, { accountSalt: hex(32) });
+
+      expect(result).toEqual({ status: 409, body: { error: "VAULT_WRAP_CONFLICT" } });
     });
   });
 

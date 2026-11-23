@@ -15,6 +15,9 @@
  * M1–M10 — per selector kind (class, id, data-testid, aria-label, data-slot),
  *      a selector that only moved is not flagged and one really removed is
  *      flagged
+ *
+ * R1–R2 — section 1: a `git mv` of a route page whose old route a spec still
+ *      visits is flagged; one no spec visits is not
  */
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { spawnSync } from "node:child_process";
@@ -354,6 +357,39 @@ describe("check-e2e-selectors — selectors dropped while a file is renamed", ()
     git("commit", "-q", "-m", "rename");
     const r = runGate();
     expect(r.stdout).not.toContain("removed from source");
+    expect(r.status).toBe(0);
+  });
+});
+
+// Section 1 listed deleted pages with `--diff-filter=D` while rename detection
+// was on, so a `git mv` of a page was an R and a moved route still visited by a
+// spec passed silently.
+describe("check-e2e-selectors — route pages that were moved", () => {
+  const OLD_PAGE = "src/app/[locale]/dashboard/old-route/page.tsx";
+  const NEW_PAGE = "src/app/[locale]/dashboard/new-route/page.tsx";
+
+  function movePage(spec) {
+    writeSpec(spec);
+    writeFile(OLD_PAGE, `export default function Page() {\n  return <main>page</main>;\n}\n`);
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    git("checkout", "-q", "-b", "feature");
+    mkdirSync(dirname(join(root, NEW_PAGE)), { recursive: true });
+    git("mv", OLD_PAGE, NEW_PAGE);
+    git("commit", "-q", "-m", "move");
+  }
+
+  it("R1: a moved page whose old route a spec still visits is flagged", () => {
+    movePage(`await page.goto("/ja/dashboard/old-route");\n`);
+    const r = runGate();
+    expect(r.stdout).toContain("Deleted route '/dashboard/old-route' is still referenced in: e2e/tests/sample.spec.ts");
+    expect(r.status).toBe(1);
+  });
+
+  it("R2: a moved page no spec visits is not flagged", () => {
+    movePage(`await page.goto("/ja/dashboard/other");\n`);
+    const r = runGate();
+    expect(r.stdout).not.toContain("Deleted route");
     expect(r.status).toBe(0);
   });
 });

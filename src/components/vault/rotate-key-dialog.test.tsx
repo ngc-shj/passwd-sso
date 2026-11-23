@@ -20,18 +20,24 @@ vi.mock("next-intl", () => ({
     values ? `${key}:${JSON.stringify(values)}` : key,
 }));
 
-vi.mock("@/lib/vault/vault-context", async (importOriginal) => ({
-  useVault: () => ({ rotateKey: mockRotateKey }),
-  ROTATION_EFFECTS_UNAVAILABLE: "ROTATION_EFFECTS_UNAVAILABLE",
-  // The real class: the dialog branches on `instanceof`.
-  VaultChangeOutcomeUnknownError: (await importOriginal<typeof import("@/lib/vault/vault-context")>())
-    .VaultChangeOutcomeUnknownError,
-}));
+vi.mock("@/lib/vault/vault-context", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/vault/vault-context")>();
+  return {
+    useVault: () => ({ rotateKey: mockRotateKey }),
+    ROTATION_EFFECTS_UNAVAILABLE: actual.ROTATION_EFFECTS_UNAVAILABLE,
+    ROTATION_COMMITTED_VAULT_LOCKED: actual.ROTATION_COMMITTED_VAULT_LOCKED,
+    ROTATION_NOT_STARTED_VAULT_LOCKED: actual.ROTATION_NOT_STARTED_VAULT_LOCKED,
+    // The real classes: the dialog branches on `instanceof`.
+    VaultChangeOutcomeUnknownError: actual.VaultChangeOutcomeUnknownError,
+    VaultChangedElsewhereError: actual.VaultChangedElsewhereError,
+  };
+});
 
 vi.mock("@/lib/http/api-error-codes", () => ({
   apiErrorToI18nKey: (code: string) => `apiErr:${code}`,
   API_ERROR: {
     INVALID_PASSPHRASE: "INVALID_PASSPHRASE",
+    VERIFIER_NOT_SET: "VERIFIER_NOT_SET",
     ENTRY_COUNT_MISMATCH: "ENTRY_COUNT_MISMATCH",
   },
 }));
@@ -75,7 +81,7 @@ vi.mock("@/components/ui/label", () => ({
 }));
 
 import { RotateKeyDialog } from "./rotate-key-dialog";
-import { VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
+import { VaultChangedElsewhereError, VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
 
 describe("RotateKeyDialog", () => {
   let onOpenChange: ReturnType<typeof vi.fn<(open: boolean) => void>>;
@@ -139,7 +145,10 @@ describe("RotateKeyDialog", () => {
     });
   });
 
-  it("renders mapped INVALID_PASSPHRASE error", async () => {
+  it("keeps the dialog open with the mapped error when the typed passphrase is wrong (INVALID_PASSPHRASE)", async () => {
+    // rotateKey refuses a mistyped passphrase (its local check, or the route's
+    // verifier check) before anything is written; the vault stays unlocked, so
+    // the user corrects the passphrase in the same dialog.
     mockRotateKey.mockRejectedValue({ error: "INVALID_PASSPHRASE" });
     render(<RotateKeyDialog open={true} onOpenChange={onOpenChange} />);
     fireEvent.change(screen.getByLabelText("rotateKeyPassphrase"), {
@@ -150,6 +159,37 @@ describe("RotateKeyDialog", () => {
     await waitFor(() => {
       expect(screen.getByText("invalidPassphrase")).toBeInTheDocument();
     });
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("rotateKeyPassphrase")).toHaveValue("mypass");
+  });
+
+  it("asks to lock and unlock once when the server has no passphrase verifier (VERIFIER_NOT_SET)", async () => {
+    mockRotateKey.mockRejectedValue({ error: "VERIFIER_NOT_SET" });
+    render(<RotateKeyDialog open={true} onOpenChange={onOpenChange} />);
+    fireEvent.change(screen.getByLabelText("rotateKeyPassphrase"), {
+      target: { value: "mypass" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "rotateKeyButton" }));
+
+    await waitFor(() => {
+      expect(screen.getByText("verifierNotSetHint")).toBeInTheDocument();
+    });
+  });
+
+  it("closes with a persistent changed-elsewhere notice when another writer moved the wrap", async () => {
+    mockRotateKey.mockRejectedValue(new VaultChangedElsewhereError("KEY_VERSION_MISMATCH"));
+    render(<RotateKeyDialog open={true} onOpenChange={onOpenChange} />);
+    fireEvent.change(screen.getByLabelText("rotateKeyPassphrase"), {
+      target: { value: "mypass" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "rotateKeyButton" }));
+
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+    expect(mockToast.error).toHaveBeenCalledWith("vaultChangedElsewhere", { duration: Infinity });
+    expect(mockToast.success).not.toHaveBeenCalled();
   });
 
   it("renders mapped ENTRY_COUNT_MISMATCH error", async () => {
@@ -225,6 +265,25 @@ describe("RotateKeyDialog", () => {
 
     expect(mockToast.success).toHaveBeenCalledWith("rotateKeySuccess");
     expect(mockToast.warning).toHaveBeenCalledWith("rotateKeyEffectsUnavailableBanner", { duration: Infinity });
+  });
+
+  it("says the vault must be unlocked, not that it is ready, when it locked while the rotation committed", async () => {
+    mockRotateKey.mockResolvedValue("ROTATION_COMMITTED_VAULT_LOCKED");
+
+    await submitRotation();
+
+    expect(mockToast.warning).toHaveBeenCalledWith("rotateKeyCommittedVaultLocked", { duration: Infinity });
+    expect(mockToast.success).not.toHaveBeenCalled();
+  });
+
+  it("says the rotation was not started when the vault locked before it was sent", async () => {
+    mockRotateKey.mockResolvedValue("ROTATION_NOT_STARTED_VAULT_LOCKED");
+
+    await submitRotation();
+
+    expect(mockToast.warning).toHaveBeenCalledWith("rotateKeyNotStartedVaultLocked", { duration: Infinity });
+    expect(mockToast.warning).not.toHaveBeenCalledWith("rotateKeyCommittedVaultLocked", expect.anything());
+    expect(mockToast.success).not.toHaveBeenCalled();
   });
 
   it("does not show the unavailable-effects warning when the effects were reported", async () => {

@@ -211,6 +211,18 @@ describe("generateRecoveryKeyFlow", () => {
     expect(result).toEqual({ ok: false, errorCode: "VERIFIER_NOT_SET" });
   });
 
+  it("returns VAULT_WRAP_CONFLICT as a refusal: the compare-and-swap lost and nothing was stored", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: () => Promise.resolve({ error: "VAULT_WRAP_CONFLICT" }),
+    });
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt);
+
+    expect(result).toEqual({ ok: false, errorCode: "VAULT_WRAP_CONFLICT" });
+  });
+
   it("treats a 2xx whose body is unreadable as stored and returns the key", async () => {
     mockFetch.mockResolvedValue({
       ok: true,

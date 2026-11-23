@@ -22,11 +22,20 @@ import {
   VaultUnlockError,
   throwIfUnlockDataLocked,
   ROTATION_EFFECTS_UNAVAILABLE,
+  ROTATION_COMMITTED_VAULT_LOCKED,
+  ROTATION_NOT_STARTED_VAULT_LOCKED,
   VaultChangeOutcomeUnknownError,
+  VaultChangedElsewhereError,
 } from "./vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
 import { stashPrf, clearPrf } from "@/lib/auth/prf-handoff";
-import { encryptData, decryptData, verifyKey } from "@/lib/crypto/crypto-client";
+import {
+  encryptData,
+  decryptData,
+  verifyKey,
+  deriveEncryptionKey,
+  computePassphraseVerifier,
+} from "@/lib/crypto/crypto-client";
 // Namespace import used ONLY for a pass-through spy on generateSecretKey that
 // captures the rotation's new key for a zeroization assertion.
 import * as cryptoClient from "@/lib/crypto/crypto-client";
@@ -514,7 +523,7 @@ describe("VaultProvider — changePassphrase response handling", () => {
    */
   async function setUpWithChangeResponse(
     response: MockFetchResponse | Error,
-    { commit = false }: { commit?: boolean } = {},
+    { commit = false, onPost }: { commit?: boolean; onPost?: { run?: () => void } } = {},
   ) {
     const { fetchMock, store } = makeFetchEnv(null);
     const sent: { accountSalt?: string } = {};
@@ -533,6 +542,7 @@ describe("VaultProvider — changePassphrase response handling", () => {
             verifierHash: body.newVerifierHash,
           };
         }
+        onPost?.run?.();
         if (response instanceof Error) throw response;
         return response;
       }
@@ -685,19 +695,42 @@ describe("VaultProvider — changePassphrase response handling", () => {
     expectLocked(result);
   }, 60_000);
 
-  it("stays unlocked on the old wrap when the compare-and-swap refuses the change (VAULT_WRAP_CONFLICT)", async () => {
+  it("locks the vault and throws VaultChangedElsewhereError when the compare-and-swap refuses the change (VAULT_WRAP_CONFLICT)", async () => {
+    // Another writer moved the wrap: the local one is stale, and kept it
+    // would let the old passphrase keep verifying.
     const { result } = await setUpWithChangeResponse({
       ok: false,
       status: 409,
       json: async () => ({ error: "VAULT_WRAP_CONFLICT" }),
     });
-    const saltBefore = hex(result.current.getAccountSalt());
 
     const caught = await changeCatching(result);
+    let oldOk = true;
+    await act(async () => {
+      oldOk = await result.current.verifyPassphrase(PASSPHRASE);
+    });
 
-    expect(caught).toEqual({ error: "VAULT_WRAP_CONFLICT" });
-    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
-    expect(hex(result.current.getAccountSalt())).toBe(saltBefore);
+    expect(caught).toBeInstanceOf(VaultChangedElsewhereError);
+    expect((caught as VaultChangedElsewhereError).code).toBe("VAULT_WRAP_CONFLICT");
+    expectLocked(result);
+    expect(oldOk).toBe(false);
+  }, 60_000);
+
+  it("does not install the new wrap into a vault that was locked while the committed change was in flight", async () => {
+    const onPost: { run?: () => void } = {};
+    const { result, sent } = await setUpWithChangeResponse({ ok: true, json: async () => ({ success: true }) }, { onPost });
+    onPost.run = () => result.current.lock();
+
+    const caught = await changeCatching(result);
+    let newOk = true;
+    await act(async () => {
+      newOk = await result.current.verifyPassphrase(NEW_PASSPHRASE);
+    });
+
+    expect(caught).toBeUndefined();
+    expectLocked(result);
+    expect(hex(result.current.getAccountSalt())).not.toBe(sent.accountSalt);
+    expect(newOk).toBe(false);
   }, 60_000);
 });
 
@@ -1338,18 +1371,24 @@ function toHex(bytes: Uint8Array | null): string | undefined {
 describe("VaultProvider — rotateKey response handling (C11)", () => {
   interface RotatePost {
     accountSalt: string;
+    currentVerifierHash?: string;
     verificationArtifact: { ciphertext: string; iv: string; authTag: string };
   }
 
   /**
    * Set up an unlocked vault whose rotate-key POST gets `response`; an Error
    * makes the POST reject, as fetch does when the connection drops.
+   * `onPost.run`, when set, runs while the POST is in flight.
    */
-  async function setUpWithRotateResponse(response: MockFetchResponse | Error) {
+  async function setUpWithRotateResponse(
+    response: MockFetchResponse | Error,
+    onPost: { run?: () => void } = {},
+  ) {
     const { fetchMock } = makeFetchEnv(null);
-    const sent: { body: RotatePost | null } = { body: null };
+    const sent: { body: RotatePost | null; dataFetches: number } = { body: null, dataFetches: 0 };
     globalThis.fetch = (async (url: string, init?: RequestInit) => {
       if (url === "/api/vault/rotate-key/data") {
+        sent.dataFetches += 1;
         return {
           ok: true,
           json: async () => ({
@@ -1363,6 +1402,7 @@ describe("VaultProvider — rotateKey response handling (C11)", () => {
       }
       if (url === "/api/vault/rotate-key" && init?.method === "POST") {
         sent.body = JSON.parse(init.body as string) as RotatePost;
+        onPost.run?.();
         if (response instanceof Error) throw response;
         return response;
       }
@@ -1376,12 +1416,12 @@ describe("VaultProvider — rotateKey response handling (C11)", () => {
     return { result: hook.result, sent, oldKey: hook.result.current.encryptionKey };
   }
 
-  async function rotate(result: { current: ReturnType<typeof useVault> }) {
+  async function rotate(result: { current: ReturnType<typeof useVault> }, passphrase = PASSPHRASE) {
     let outcome: unknown;
     let caught: unknown;
     await act(async () => {
       try {
-        outcome = await result.current.rotateKey(PASSPHRASE);
+        outcome = await result.current.rotateKey(passphrase);
       } catch (e) {
         caught = e;
       }
@@ -1403,6 +1443,7 @@ describe("VaultProvider — rotateKey response handling (C11)", () => {
     expect(await verifyKey(newKey, sent.body.verificationArtifact)).toBe(true);
     expect(toHex(result.current.getAccountSalt())).toBe(sent.body.accountSalt);
     expect(result.current.getKeyVersion()).toBe(2);
+    await expectOwnCopyOfNewSecretKey(result, sent.body.verificationArtifact);
   }, 60_000);
 
   it("reports the rotation's effects as unavailable when the committed body is unreadable", async () => {
@@ -1438,7 +1479,24 @@ describe("VaultProvider — rotateKey response handling (C11)", () => {
     expect(outcome).toEqual({ ...effects, legacyAttachmentsMigrated: 0 });
     expect(result.current.getKeyVersion()).toBe(2);
     expect(toHex(result.current.getAccountSalt())).toBe(sent.body?.accountSalt);
+    if (!sent.body) throw new Error("rotation sent nothing");
+    await expectOwnCopyOfNewSecretKey(result, sent.body.verificationArtifact);
   }, 60_000);
+
+  /**
+   * The provider holds a non-zero secret key of its own (not the rotation's
+   * local, which the finally zeroes) and it is the key whose verification
+   * artifact the server stored.
+   */
+  async function expectOwnCopyOfNewSecretKey(
+    result: { current: ReturnType<typeof useVault> },
+    artifact: RotatePost["verificationArtifact"],
+  ) {
+    const secretKey = result.current.getSecretKey();
+    if (!secretKey) throw new Error("rotation left no secret key");
+    expect(secretKey.some((b) => b !== 0)).toBe(true);
+    expect(await verifyKey(await deriveEncryptionKey(secretKey), artifact)).toBe(true);
+  }
 
   /** The vault is locked and no key material from before the rotation remains. */
   function expectLocked(result: { current: ReturnType<typeof useVault> }) {
@@ -1501,22 +1559,199 @@ describe("VaultProvider — rotateKey response handling (C11)", () => {
     expectLocked(result);
   }, 60_000);
 
-  it("stays unlocked on the old key when the server refuses before committing (KEY_VERSION_MISMATCH)", async () => {
-    const { result, sent, oldKey } = await setUpWithRotateResponse({
+  it("locks the vault and throws VaultChangedElsewhereError when another writer moved the wrap first (KEY_VERSION_MISMATCH)", async () => {
+    const { result } = await setUpWithRotateResponse({
       ok: false,
       status: 409,
       json: async () => ({ error: "KEY_VERSION_MISMATCH" }),
     });
-    const saltBefore = toHex(result.current.getAccountSalt());
 
     const { caught } = await rotate(result);
+    let oldOk = true;
+    await act(async () => {
+      oldOk = await result.current.verifyPassphrase(PASSPHRASE);
+    });
 
-    expect(caught).toEqual({ error: "KEY_VERSION_MISMATCH" });
+    expect(caught).toBeInstanceOf(VaultChangedElsewhereError);
+    expect((caught as VaultChangedElsewhereError).code).toBe("KEY_VERSION_MISMATCH");
+    expectLocked(result);
+    expect(oldOk).toBe(false);
+  }, 60_000);
+
+  it.each(["INVALID_PASSPHRASE", "VERIFIER_NOT_SET"])(
+    "stays unlocked on the old key when the server refuses with %s before committing",
+    async (code) => {
+      const { result, sent, oldKey } = await setUpWithRotateResponse({
+        ok: false,
+        status: code === "INVALID_PASSPHRASE" ? 401 : 409,
+        json: async () => ({ error: code }),
+      });
+      const saltBefore = toHex(result.current.getAccountSalt());
+
+      const { caught } = await rotate(result);
+      let oldOk = false;
+      await act(async () => {
+        oldOk = await result.current.verifyPassphrase(PASSPHRASE);
+      });
+
+      expect(caught).toEqual({ error: code });
+      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+      expect(result.current.encryptionKey).toBe(oldKey);
+      expect(sent.body?.accountSalt).not.toBe(saltBefore);
+      expect(toHex(result.current.getAccountSalt())).toBe(saltBefore);
+      expect(result.current.getKeyVersion()).toBe(1);
+      expect(result.current.getSecretKey()?.some((b) => b !== 0)).toBe(true);
+      expect(oldOk).toBe(true);
+    },
+    60_000,
+  );
+
+  it("sends a verifier of the typed passphrase under the current salt", async () => {
+    const { result, sent } = await setUpWithRotateResponse({
+      ok: true,
+      json: async () => ({ success: true, keyVersion: 2, rotationEffects: null }),
+    });
+    const saltBefore = result.current.getAccountSalt();
+    if (!saltBefore) throw new Error("setup left no salt");
+
+    await rotate(result);
+
+    expect(sent.body?.currentVerifierHash).toBe(await computePassphraseVerifier(PASSPHRASE, saltBefore));
+  }, 60_000);
+
+  it("refuses a mistyped passphrase with INVALID_PASSPHRASE before re-encrypting or sending anything", async () => {
+    const { result, sent, oldKey } = await setUpWithRotateResponse({
+      ok: true,
+      json: async () => ({ success: true, keyVersion: 2, rotationEffects: null }),
+    });
+
+    const { caught } = await rotate(result, "not the passphrase");
+
+    expect(caught).toEqual({ error: "INVALID_PASSPHRASE" });
+    expect(sent.dataFetches).toBe(0);
+    expect(sent.body).toBeNull();
     expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
     expect(result.current.encryptionKey).toBe(oldKey);
-    expect(sent.body?.accountSalt).not.toBe(saltBefore);
-    expect(toHex(result.current.getAccountSalt())).toBe(saltBefore);
-    expect(result.current.getKeyVersion()).toBe(1);
+  }, 60_000);
+
+  it("does not install the new key into a vault that was locked while the committed rotation was in flight", async () => {
+    const onPost: { run?: () => void } = {};
+    const { result } = await setUpWithRotateResponse(
+      { ok: true, json: async () => ({ success: true, keyVersion: 2, rotationEffects: null }) },
+      onPost,
+    );
+    onPost.run = () => result.current.lock();
+    const { captured, restore } = captureNewSecretKey();
+
+    const { outcome, caught } = await rotate(result);
+    restore();
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toBe(ROTATION_COMMITTED_VAULT_LOCKED);
+    expectLocked(result);
+    expect(captured.key?.every((b) => b === 0)).toBe(true);
+  }, 60_000);
+
+  /** Rotate with an onProgress callback that runs `onPhase` once, at `phase`. */
+  async function rotateWithProgress(
+    result: { current: ReturnType<typeof useVault> },
+    phase: "entries" | "committing",
+    onPhase: () => void,
+  ) {
+    let outcome: unknown;
+    let caught: unknown;
+    let ran = false;
+    await act(async () => {
+      try {
+        outcome = await result.current.rotateKey(PASSPHRASE, (progress) => {
+          if (progress.phase === phase && !ran) {
+            ran = true;
+            onPhase();
+          }
+        });
+      } catch (e) {
+        caught = e;
+      }
+    });
+    return { outcome, caught };
+  }
+
+  it.each(["entries", "committing"] as const)(
+    "does not send the rotation when the vault is locked while it is being prepared (at %s)",
+    async (phase) => {
+      const { result, sent } = await setUpWithRotateResponse({
+        ok: true,
+        json: async () => ({ success: true, keyVersion: 2, rotationEffects: null }),
+      });
+      const { captured, restore } = captureNewSecretKey();
+
+      const { outcome, caught } = await rotateWithProgress(result, phase, () => result.current.lock());
+      restore();
+
+      expect(caught).toBeUndefined();
+      expect(outcome).toBe(ROTATION_NOT_STARTED_VAULT_LOCKED);
+      expect(sent.body).toBeNull();
+      expectLocked(result);
+      expect(captured.key).not.toBeNull();
+      expect(captured.key?.every((b) => b === 0)).toBe(true);
+    },
+    60_000,
+  );
+
+  it("sends the rotation when the vault stays unlocked while it is being prepared", async () => {
+    const { result, sent } = await setUpWithRotateResponse({
+      ok: true,
+      json: async () => ({ success: true, keyVersion: 2, rotationEffects: null }),
+    });
+
+    const { outcome, caught } = await rotateWithProgress(result, "committing", () => {});
+
+    expect(caught).toBeUndefined();
+    expect(outcome).toBeNull();
+    expect(sent.body).not.toBeNull();
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expect(result.current.getKeyVersion()).toBe(2);
+  }, 60_000);
+
+  it("zeroes the retired secret key when a committed rotation installs the new one", async () => {
+    const { result } = await setUpWithRotateResponse({
+      ok: true,
+      json: async () => ({ success: true, keyVersion: 2, rotationEffects: null }),
+    });
+    // rotateKey's first auth-key derivation reads the provider's own buffer.
+    const actualDerive = cryptoClient.deriveAuthKeyBytes;
+    const inputs: Uint8Array[] = [];
+    const spy = vi.spyOn(cryptoClient, "deriveAuthKeyBytes").mockImplementation(async (key) => {
+      inputs.push(key);
+      return actualDerive(key);
+    });
+
+    await rotate(result);
+    spy.mockRestore();
+
+    const retired = inputs[0];
+    expect(retired).toBeDefined();
+    expect(retired.every((b) => b === 0)).toBe(true);
+    expect(result.current.getSecretKey()?.some((b) => b !== 0)).toBe(true);
+  }, 60_000);
+
+  it("keeps the current secret key intact when the rotation is refused", async () => {
+    const { result } = await setUpWithRotateResponse({
+      ok: false,
+      status: 401,
+      json: async () => ({ error: "INVALID_PASSPHRASE" }),
+    });
+    const actualDerive = cryptoClient.deriveAuthKeyBytes;
+    const inputs: Uint8Array[] = [];
+    const spy = vi.spyOn(cryptoClient, "deriveAuthKeyBytes").mockImplementation(async (key) => {
+      inputs.push(key);
+      return actualDerive(key);
+    });
+
+    await rotate(result);
+    spy.mockRestore();
+
+    expect(inputs[0]?.some((b) => b !== 0)).toBe(true);
   }, 60_000);
 });
 
@@ -1606,16 +1841,32 @@ describe("VaultProvider — unlockWithPasskey verify body (C11)", () => {
    * `prfOutput`; the WebAuthn ceremony (the browser boundary) is stubbed to
    * return a copy of it, and the verify POST answers with `verifyJson`.
    */
-  async function setUpPasskeyUnlock(verifyJson: (prf: object) => () => Promise<unknown>) {
+  async function setUpPasskeyUnlock(
+    verifyJson: (prf: object) => () => Promise<unknown>,
+    overrides: {
+      optionsJson?: () => Promise<unknown>;
+      verify?: MockFetchResponse | Error;
+      unlock?: MockFetchResponse | Error;
+    } = {},
+  ) {
     const { fetchMock } = makeFetchEnv(null);
     const baseHandler = fetchMock.getMockImplementation();
-    const state: { prf: object } = { prf: {} };
+    const state: { prf: object; locked: boolean } = { prf: {}, locked: false };
     globalThis.fetch = (async (url: string, init?: RequestInit) => {
       if (url === "/api/webauthn/authenticate/options") {
-        return { ok: true, json: async () => ({ options: {}, challengeId: "c1", prfSalt: "aa".repeat(32) }) };
+        return {
+          ok: true,
+          json: overrides.optionsJson ?? (async () => ({ options: {}, challengeId: "c1", prfSalt: "aa".repeat(32) })),
+        };
       }
       if (url === "/api/webauthn/authenticate/verify") {
-        return { ok: true, json: verifyJson(state.prf) };
+        if (overrides.verify instanceof Error) throw overrides.verify;
+        return overrides.verify ?? { ok: true, json: verifyJson(state.prf) };
+      }
+      // Only the unlock after the lock below is overridden; setup needs none.
+      if (url === "/api/vault/unlock" && state.locked && overrides.unlock) {
+        if (overrides.unlock instanceof Error) throw overrides.unlock;
+        return overrides.unlock;
       }
       if (!baseHandler) throw new Error("fetch env has no base handler");
       return baseHandler(url, init);
@@ -1642,6 +1893,7 @@ describe("VaultProvider — unlockWithPasskey verify body (C11)", () => {
     act(() => {
       hook.result.current.lock();
     });
+    state.locked = true;
     return { result: hook.result, ceremonyOutput };
   }
 
@@ -1696,5 +1948,361 @@ describe("VaultProvider — unlockWithPasskey verify body (C11)", () => {
     expect(result.current.encryptionKey).toBeNull();
     expect(ceremonyOutput.every((b) => b === 0)).toBe(true);
     expect(unwrapSpy).not.toHaveBeenCalled();
+  }, 60_000);
+
+  it("stays locked and zeroizes the PRF output when the verify POST is refused", async () => {
+    const { result, ceremonyOutput } = await setUpPasskeyUnlock(() => async () => ({}), {
+      verify: { ok: false, status: 400, json: async () => ({ error: "VALIDATION_ERROR" }) },
+    });
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.unlockWithPasskey();
+    });
+
+    expect(ok).toBe(false);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(ceremonyOutput.every((b) => b === 0)).toBe(true);
+  }, 60_000);
+
+  it("stays locked and zeroizes the PRF output when the verify POST rejects in transit", async () => {
+    const { result, ceremonyOutput } = await setUpPasskeyUnlock(() => async () => ({}), {
+      verify: new TypeError("Failed to fetch"),
+    });
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.unlockWithPasskey();
+    });
+
+    expect(ok).toBe(false);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(ceremonyOutput.every((b) => b === 0)).toBe(true);
+  }, 60_000);
+
+  /** Pass-through spy (crypto stays real) on the PRF unwrap, capturing the key. */
+  function captureUnwrappedPrfKey() {
+    const captured: { key: Uint8Array | null } = { key: null };
+    const actualUnwrap = webauthnClient.unwrapSecretKeyWithPrf;
+    vi.spyOn(webauthnClient, "unwrapSecretKeyWithPrf").mockImplementation(async (wrapped, prf) => {
+      const key = await actualUnwrap(wrapped, prf);
+      captured.key = key;
+      return key;
+    });
+    return captured;
+  }
+
+  it("zeroizes the unwrapped secret key when the unlock POST refuses with an error code", async () => {
+    const { result } = await setUpPasskeyUnlock((prf) => async () => ({ verified: true, prf }), {
+      unlock: { ok: false, status: 403, json: async () => ({ error: "ACCOUNT_LOCKED", lockedUntil: null }) },
+    });
+    const captured = captureUnwrappedPrfKey();
+
+    let caught: unknown;
+    await act(async () => {
+      try {
+        await result.current.unlockWithPasskey();
+      } catch (e) {
+        caught = e;
+      }
+    });
+
+    expect(caught).toBeInstanceOf(VaultUnlockError);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(captured.key).not.toBeNull();
+    expect(captured.key?.every((b) => b === 0)).toBe(true);
+  }, 60_000);
+
+  it("keeps a working copy of the secret key after a successful passkey unlock", async () => {
+    const { result } = await setUpPasskeyUnlock((prf) => async () => ({ verified: true, prf }));
+    const captured = captureUnwrappedPrfKey();
+
+    await act(async () => {
+      await result.current.unlockWithPasskey();
+    });
+
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expect(captured.key?.every((b) => b === 0)).toBe(true);
+    expect(result.current.getSecretKey()?.some((b) => b !== 0)).toBe(true);
+    let verified = false;
+    await act(async () => {
+      verified = await result.current.verifyPassphrase(PASSPHRASE);
+    });
+    expect(verified).toBe(true);
+  }, 60_000);
+
+  it("zeroizes the auth key bytes after a successful passkey unlock", async () => {
+    const { result } = await setUpPasskeyUnlock((prf) => async () => ({ verified: true, prf }));
+    const derived: Uint8Array[] = [];
+    const actualDerive = cryptoClient.deriveAuthKeyBytes;
+    vi.spyOn(cryptoClient, "deriveAuthKeyBytes").mockImplementation(async (key) => {
+      const bytes = await actualDerive(key);
+      derived.push(bytes);
+      return bytes;
+    });
+
+    await act(async () => {
+      await result.current.unlockWithPasskey();
+    });
+
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expect(derived).toHaveLength(1);
+    expect(derived[0].every((b) => b === 0)).toBe(true);
+  }, 60_000);
+
+  it("refuses an options body without a challenge before starting the ceremony", async () => {
+    const { result } = await setUpPasskeyUnlock((prf) => async () => ({ verified: true, prf }), {
+      optionsJson: async () => ({ options: {}, prfSalt: "aa".repeat(32) }),
+    });
+    const ceremony = vi.mocked(webauthnClient.startPasskeyAuthentication);
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.unlockWithPasskey();
+    });
+
+    expect(ok).toBe(false);
+    expect(ceremony).not.toHaveBeenCalled();
+    expect(result.current.encryptionKey).toBeNull();
+  }, 60_000);
+
+  it("fails without starting the ceremony when the options body is unreadable", async () => {
+    const { result } = await setUpPasskeyUnlock((prf) => async () => ({ verified: true, prf }), {
+      optionsJson: unreadableBody,
+    });
+    const ceremony = vi.mocked(webauthnClient.startPasskeyAuthentication);
+
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.unlockWithPasskey();
+    });
+
+    expect(ok).toBe(false);
+    expect(ceremony).not.toHaveBeenCalled();
+    expect(result.current.encryptionKey).toBeNull();
+  }, 60_000);
+});
+
+// ── S3-1: unlock paths zero their key material on every exit ────────────────
+
+describe("VaultProvider — unlock() zeroizes the unwrapped key on failure", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /**
+   * A set-up-then-locked vault whose next /api/vault/unlock POST gets
+   * `response`; the passphrase unwrap is spied (crypto stays real) to capture
+   * the unwrapped secret key.
+   */
+  async function setUpLockedWithUnlockResponse(response?: MockFetchResponse | Error) {
+    const { fetchMock } = makeFetchEnv(null);
+    const baseHandler = fetchMock.getMockImplementation();
+    const state = { locked: false };
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/vault/unlock" && state.locked && response) {
+        if (response instanceof Error) throw response;
+        return response;
+      }
+      if (!baseHandler) throw new Error("fetch env has no base handler");
+      return baseHandler(url, init);
+    }) as unknown as typeof fetch;
+
+    const hook = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await hook.result.current.setup(PASSPHRASE);
+    });
+    act(() => {
+      hook.result.current.lock();
+    });
+    state.locked = true;
+
+    const captured: { key: Uint8Array | null } = { key: null };
+    const actualUnwrap = cryptoClient.unwrapSecretKey;
+    vi.spyOn(cryptoClient, "unwrapSecretKey").mockImplementation(async (wrapped, wrappingKey) => {
+      const key = await actualUnwrap(wrapped, wrappingKey);
+      captured.key = key;
+      return key;
+    });
+    return { result: hook.result, captured };
+  }
+
+  async function unlockCatching(result: { current: ReturnType<typeof useVault> }) {
+    let ok: boolean | undefined;
+    let caught: unknown;
+    await act(async () => {
+      try {
+        ok = await result.current.unlock(PASSPHRASE);
+      } catch (e) {
+        caught = e;
+      }
+    });
+    return { ok, caught };
+  }
+
+  it("zeroizes the unwrapped key when the unlock POST refuses with an error code", async () => {
+    const { result, captured } = await setUpLockedWithUnlockResponse({
+      ok: false,
+      status: 403,
+      json: async () => ({ error: "ACCOUNT_LOCKED", lockedUntil: null }),
+    });
+
+    const { caught } = await unlockCatching(result);
+
+    expect(caught).toBeInstanceOf(VaultUnlockError);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(captured.key).not.toBeNull();
+    expect(captured.key?.every((b) => b === 0)).toBe(true);
+  }, 60_000);
+
+  it("zeroizes the unwrapped key when the unlock POST rejects in transit", async () => {
+    const { result, captured } = await setUpLockedWithUnlockResponse(new TypeError("Failed to fetch"));
+
+    const { ok, caught } = await unlockCatching(result);
+
+    expect(caught).toBeUndefined();
+    expect(ok).toBe(false);
+    expect(result.current.encryptionKey).toBeNull();
+    expect(captured.key).not.toBeNull();
+    expect(captured.key?.every((b) => b === 0)).toBe(true);
+  }, 60_000);
+
+  it("keeps a working copy of the secret key after a successful unlock", async () => {
+    const { result, captured } = await setUpLockedWithUnlockResponse();
+
+    const { ok } = await unlockCatching(result);
+
+    expect(ok).toBe(true);
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expect(captured.key?.every((b) => b === 0)).toBe(true);
+    expect(result.current.getSecretKey()?.some((b) => b !== 0)).toBe(true);
+    let verified = false;
+    await act(async () => {
+      verified = await result.current.verifyPassphrase(PASSPHRASE);
+    });
+    expect(verified).toBe(true);
+  }, 60_000);
+});
+
+describe("VaultProvider — auth key bytes are zeroized after use", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  /** Pass-through spy (crypto stays real) collecting every derived auth key. */
+  function captureAuthKeyBytes() {
+    const derived: Uint8Array[] = [];
+    const actualDerive = cryptoClient.deriveAuthKeyBytes;
+    vi.spyOn(cryptoClient, "deriveAuthKeyBytes").mockImplementation(async (key) => {
+      const bytes = await actualDerive(key);
+      derived.push(bytes);
+      return bytes;
+    });
+    return derived;
+  }
+
+  function expectAllZeroized(derived: Uint8Array[], count: number) {
+    expect(derived).toHaveLength(count);
+    for (const bytes of derived) expect(bytes.every((b) => b === 0)).toBe(true);
+  }
+
+  it("setup", async () => {
+    const { fetchMock } = makeFetchEnv(null);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const { result } = renderHook(() => useVault(), { wrapper });
+    const derived = captureAuthKeyBytes();
+
+    await act(async () => {
+      await result.current.setup(PASSPHRASE);
+    });
+
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expectAllZeroized(derived, 1);
+  }, 60_000);
+
+  it("unlock", async () => {
+    const { fetchMock } = makeFetchEnv(null);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await result.current.setup(PASSPHRASE);
+    });
+    act(() => {
+      result.current.lock();
+    });
+    const derived = captureAuthKeyBytes();
+
+    await act(async () => {
+      await result.current.unlock(PASSPHRASE);
+    });
+
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expectAllZeroized(derived, 1);
+  }, 60_000);
+
+  it("unlockWithStoredPrf", async () => {
+    const { fetchMock } = makeFetchEnv(null);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await result.current.setup(PASSPHRASE);
+    });
+    const secretKey = result.current.getSecretKey();
+    if (!secretKey) throw new Error("setup left no secret key");
+    const prfOutput = new Uint8Array(32).fill(0x5a);
+    const wrapped = await wrapSecretKeyWithPrf(secretKey, prfOutput);
+    stashPrf({
+      prfOutput,
+      prfData: {
+        prfEncryptedSecretKey: wrapped.ciphertext,
+        prfSecretKeyIv: wrapped.iv,
+        prfSecretKeyAuthTag: wrapped.authTag,
+      },
+    });
+    act(() => {
+      result.current.lock();
+    });
+    const derived = captureAuthKeyBytes();
+
+    await act(async () => {
+      await result.current.unlockWithStoredPrf();
+    });
+
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expectAllZeroized(derived, 1);
+  }, 60_000);
+
+  it("rotateKey (the current and the new auth key)", async () => {
+    const { fetchMock } = makeFetchEnv(null);
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/vault/rotate-key/data") {
+        return {
+          ok: true,
+          json: async () => ({
+            entries: [],
+            historyEntries: [],
+            mode2Attachments: [],
+            mode0Attachments: [],
+            mode0AttachmentsOverflow: false,
+          }),
+        };
+      }
+      if (url === "/api/vault/rotate-key" && init?.method === "POST") {
+        return { ok: true, json: async () => ({ success: true, keyVersion: 2, rotationEffects: null }) };
+      }
+      return fetchMock(url, init);
+    }) as unknown as typeof fetch;
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await result.current.setup(PASSPHRASE);
+    });
+    const derived = captureAuthKeyBytes();
+
+    await act(async () => {
+      await result.current.rotateKey(PASSPHRASE);
+    });
+
+    expect(result.current.getKeyVersion()).toBe(2);
+    expectAllZeroized(derived, 2);
   }, 60_000);
 });

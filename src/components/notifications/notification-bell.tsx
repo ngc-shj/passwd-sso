@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -52,11 +52,6 @@ export function NotificationBell() {
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
-  const notificationsRef = useRef<NotificationItem[]>([]);
-
-  useEffect(() => {
-    notificationsRef.current = notifications;
-  }, [notifications]);
 
   const fetchNotifications = useCallback(async () => {
     setLoading(true);
@@ -146,17 +141,18 @@ export function NotificationBell() {
     }
   }, []);
 
-  const deleteNotification = useCallback(async (id: string) => {
+  const deleteNotification = useCallback(async (removed: NotificationItem) => {
     try {
-      const res = await fetchApi(apiPath.notificationById(id), {
+      const res = await fetchApi(apiPath.notificationById(removed.id), {
         method: "DELETE",
       });
       if (res.ok) {
-        // Read the removed item from the last committed list: a setter called
-        // inside the list updater would run twice under StrictMode.
-        const removed = notificationsRef.current.find((n) => n.id === id);
-        setNotifications((prev) => prev.filter((n) => n.id !== id));
-        if (removed && !removed.isRead) {
+        // The caller passes the item it rendered, so the badge decision never
+        // depends on a ref synced after commit (a click can land before that
+        // effect runs) nor on a setter inside the list updater, which would
+        // run twice under StrictMode.
+        setNotifications((prev) => prev.filter((n) => n.id !== removed.id));
+        if (!removed.isRead) {
           setUnreadCount((c) => Math.max(0, c - 1));
         }
       }
@@ -231,7 +227,7 @@ export function NotificationBell() {
                     type="button"
                     onClick={(e) => {
                       e.stopPropagation();
-                      deleteNotification(n.id);
+                      deleteNotification(n);
                     }}
                     className="shrink-0 text-xs text-muted-foreground hover:text-destructive"
                   >

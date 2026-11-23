@@ -3,8 +3,8 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { AUDIT_ACTION } from "@/lib/constants";
-import { logAuditAsync, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
-import { verifyPassphraseVerifier } from "@/lib/crypto/crypto-server";
+import { logAuditAsync, personalAuditBase } from "@/lib/audit/audit";
+import { checkStoredVerifier } from "@/lib/vault/stored-verifier-server";
 import { checkLockout, recordFailure } from "@/lib/auth/policy/account-lockout";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -59,25 +59,18 @@ async function handlePOST(request: NextRequest) {
   }
 
   // Verify passphrase
-  if (!user.passphraseVerifierHmac) {
+  const verifier = await checkStoredVerifier(request, {
+    userId: session.user.id,
+    tenantId: user.tenantId,
+    clientVerifierHash: result.data.verifierHash,
+    storedHmac: user.passphraseVerifierHmac,
+    storedVersion: user.passphraseVerifierVersion,
+  });
+  if (verifier === "not-set") {
     return errorResponse(API_ERROR.VAULT_NOT_SETUP);
   }
 
-  const verifyResult = verifyPassphraseVerifier(
-    result.data.verifierHash,
-    user.passphraseVerifierHmac,
-    user.passphraseVerifierVersion,
-  );
-
-  if (!verifyResult.ok) {
-    if (verifyResult.reason === "MISSING_PEPPER_VERSION") {
-      await logAuditAsync({
-        ...tenantAuditBase(request, session.user.id, user.tenantId),
-        action: AUDIT_ACTION.VERIFIER_PEPPER_MISSING,
-        metadata: { storedVersion: user.passphraseVerifierVersion },
-      });
-    }
-
+  if (verifier === "wrong") {
     await recordFailure(session.user.id, request);
 
     await logAuditAsync({

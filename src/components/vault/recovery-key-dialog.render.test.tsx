@@ -275,6 +275,18 @@ describe("RecoveryKeyDialog generate flow", () => {
     expect(screen.queryByText("recoveryKeyOutcomeUnknown")).toBeNull();
   });
 
+  it("shows the wrap-conflict message, not the outcome-unknown one, when the vault changed under the request", async () => {
+    mockFetchApi.mockResolvedValue({ ok: false, status: 409 });
+    mockReadApiErrorBody.mockResolvedValue({ error: "VAULT_WRAP_CONFLICT" });
+    render(<RecoveryKeyDialog open={true} onOpenChange={vi.fn()} />);
+
+    submitPassphrase();
+
+    expect(await screen.findByText("apiErr:VAULT_WRAP_CONFLICT")).toBeInTheDocument();
+    expect(screen.queryByText("recoveryKeyOutcomeUnknown")).toBeNull();
+    expect(screen.queryByText(FORMATTED_KEY)).toBeNull();
+  });
+
   it("tells the user to generate a new key, without showing one, when a 502 carries no app error envelope", async () => {
     mockFetchApi.mockResolvedValue({ ok: false, status: 502 });
     mockReadApiErrorBody.mockResolvedValue(null);

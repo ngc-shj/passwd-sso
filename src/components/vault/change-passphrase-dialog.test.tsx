@@ -24,12 +24,15 @@ vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("@/lib/vault/vault-context", async (importOriginal) => ({
-  useVault: () => ({ changePassphrase: mockChangePassphrase }),
-  // The real class: the dialog branches on `instanceof`.
-  VaultChangeOutcomeUnknownError: (await importOriginal<typeof import("@/lib/vault/vault-context")>())
-    .VaultChangeOutcomeUnknownError,
-}));
+vi.mock("@/lib/vault/vault-context", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/vault/vault-context")>();
+  return {
+    useVault: () => ({ changePassphrase: mockChangePassphrase }),
+    // The real classes: the dialog branches on `instanceof`.
+    VaultChangeOutcomeUnknownError: actual.VaultChangeOutcomeUnknownError,
+    VaultChangedElsewhereError: actual.VaultChangedElsewhereError,
+  };
+});
 
 vi.mock("@/lib/http/api-error-codes", () => ({
   apiErrorToI18nKey: (code: string) => `apiErr:${code}`,
@@ -79,7 +82,7 @@ vi.mock("@/components/ui/label", () => ({
 }));
 
 import { ChangePassphraseDialog } from "./change-passphrase-dialog";
-import { VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
+import { VaultChangedElsewhereError, VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
 
 describe("ChangePassphraseDialog", () => {
   let onOpenChange: ReturnType<typeof vi.fn<(open: boolean) => void>>;
@@ -206,6 +209,20 @@ describe("ChangePassphraseDialog", () => {
     expect(mockToast.error).toHaveBeenCalledWith("changePassphraseOutcomeUnknown", { duration: Infinity });
     expect(mockToast.success).not.toHaveBeenCalled();
     expect(screen.queryByText("changePassphraseFailed")).toBeNull();
+  });
+
+  it("closes with a persistent changed-elsewhere notice when another writer moved the wrap", async () => {
+    mockChangePassphrase.mockRejectedValue(new VaultChangedElsewhereError("VAULT_WRAP_CONFLICT"));
+
+    render(<ChangePassphraseDialog open={true} onOpenChange={onOpenChange} />);
+    fillForm("oldpass", "longenoughpass", "longenoughpass");
+    fireEvent.click(screen.getByRole("button", { name: "changePassphraseButton" }));
+
+    await waitFor(() => {
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+    expect(mockToast.error).toHaveBeenCalledWith("vaultChangedElsewhere", { duration: Infinity });
+    expect(mockToast.success).not.toHaveBeenCalled();
   });
 
   it("falls back to generic failure when error has no error code", async () => {

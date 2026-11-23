@@ -11,6 +11,7 @@
   "rotateKeyProgressEncrypting": "Encrypting {progress}...",
   "rotateKeySuccess": "Team key rotated successfully",
   "rotateKeyFailed": "Key rotation failed. Please try again.",
+  "rotateKeyOutcomeUnknown": "We couldn't confirm whether the team key was rotated. Check this page, and try again if needed.",
   "rotateKeyFetchFailed": "Failed to load team data for rotation.",
   "rotateKeyRateLimited": "Too many rotation attempts. Please wait and try again.",
   "rotateKeyVersionConflict": "Key version conflict. Another rotation may be in progress.",

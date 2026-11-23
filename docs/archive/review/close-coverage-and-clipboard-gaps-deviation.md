@@ -242,3 +242,20 @@ The branch diff was reviewed by Codex in three partitions (clipboard and share; 
     - the `overunknown` mutant (allow-list emptied): red on 4;
     - the `overallow` mutant (any code treated as a refusal): red on 1.
 - **Side-fix:** `attachment-section.test.tsx` was intermittently flaky. It compared the length of random ciphertext after decoding it as UTF-8, and decoding can merge bytes into one character. It now compares bytes.
+
+## D25 — Round-3 simplify: one stored-verifier check, refusal lists corrected
+
+- **One verifier check.** The stored-passphrase-verifier check is now `checkStoredVerifier` (`src/lib/vault/stored-verifier-server.ts`).
+  - Before, it was copied in five places: change-passphrase, rotate-key, recovery-key/generate, recovery-key/recover (verify and reset) and travel-mode/disable. The pepper-missing audit (`VERIFIER_PEPPER_MISSING`) is now written in one place.
+  - The copies were byte-identical apart from each route's own not-set mapping, which every route keeps.
+  - Red-proof: dropping the audit call fails the helper's test.
+- **Proxy list corrected.** `PROXY_PRE_ROUTE_REFUSALS` is the codes the proxy actually emits: UNAUTHORIZED, ACCESS_DENIED, SERVICE_UNAVAILABLE, PASSKEY_REQUIRED (`api-route.ts`) and INVALID_ORIGIN (`csrf.ts`).
+  - The earlier list also claimed FORBIDDEN. Neither the proxy nor the three vault routes emit it; this was checked by grep.
+  - So the vault refusal sets lose FORBIDDEN. That is the safe direction, because an unlisted code is treated as an unknown outcome and locks the vault.
+  - The team rotate list keeps FORBIDDEN explicitly, because `requireTeamPermission` emits it.
+  - A set-equality script confirms there are no other changes.
+- **Cleanup.** `CHANGE_PASSPHRASE_REFUSALS` was removed: it had become an empty copy of the shared set.
+- **Side-fix (`notification-bell.tsx`).** The full suite under pre-pr load failed "deletes an unread notification… decrements the badge" once.
+  - **Cause:** a real race, not a test defect. `deleteNotification` looked the deleted item up through a ref that a passive `useEffect` syncs after commit, so a click landing before that effect ran found no item, and the badge was never decremented.
+  - **Fix:** the caller now passes the rendered item it clicked, and the ref and its effect are removed.
+  - **Test:** the existing StrictMode double-decrement pin stays green. No deterministic red-proof was possible, because testing-library's `act` flushes passive effects before the click; the fix removes the timing window rather than narrowing it.

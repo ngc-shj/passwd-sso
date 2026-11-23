@@ -359,6 +359,7 @@ function buildRotationPayload(opts: {
     secretKeyAuthTag: hex32,
     accountSalt: hex64,
     newAuthHash: hex64,
+    newVerifierHash: hex64,
     verificationArtifact: {
       ciphertext: hex64,
       iv: hex24,

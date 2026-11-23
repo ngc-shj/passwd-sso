@@ -111,7 +111,7 @@ export interface RotationPayload {
   secretKeyAuthTag: string;
   accountSalt: string;
   newAuthHash: string;
-  newVerifierHash?: string;
+  newVerifierHash: string;
   verificationArtifact: { ciphertext: string; iv: string; authTag: string };
   entries: Array<{
     id: string;
@@ -402,12 +402,8 @@ export async function applyVaultRotation(
       masterPasswordServerHash: newServerHash,
       masterPasswordServerSalt: newServerSalt,
       keyVersion: newKeyVersion,
-      ...(payload.newVerifierHash
-        ? {
-            passphraseVerifierHmac: hmacVerifier(payload.newVerifierHash),
-            passphraseVerifierVersion: VERIFIER_VERSION,
-          }
-        : {}),
+      passphraseVerifierHmac: hmacVerifier(payload.newVerifierHash),
+      passphraseVerifierVersion: VERIFIER_VERSION,
       encryptedEcdhPrivateKey,
       ecdhPrivateKeyIv,
       ecdhPrivateKeyAuthTag,

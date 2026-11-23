@@ -5,9 +5,14 @@
  * tracked repo files.
  *
  * Deny: a literal POST, an unresolvable method, the `.then(r => r.json())`
- * form, and the other tracked shapes, in src/components, src/hooks, src/app
- * pages and src/lib client modules. Allow: a GET, `parseJsonBodyOnce`, a
- * src/lib server module, a route handler.
+ * form, every body reader (`text`, `blob`, `arrayBuffer`, `formData`, `bytes`)
+ * and `res.clone().json()`, and the other tracked shapes (`.catch`/`.finally`, `.then` chains,
+ * `["json"]`, destructured `json`, aliases, `Promise.all`/`allSettled`
+ * elements, and the unresolvable combinator shapes that fail closed), in
+ * src/components, src/hooks, src/app pages and src/lib client modules, and in a
+ * component or page that imports a server marker. Allow: a GET,
+ * `parseJsonBodyOnce`, a src/lib server module (each marker form, including a
+ * mixed type/value import and a namespace import), a route handler.
  * Refuse: an empty file set and a parse error.
  */
 import { describe, it, expect, afterEach } from "vitest";
@@ -135,6 +140,86 @@ describe("check-mutation-response-read", () => {
     expect(r.stderr).toContain(site);
   });
 
+  // S3-4: each shape below exited 0 before the response was followed through
+  // promise combinators, `.then` returns, aliases, element access and
+  // destructuring.
+  const POST = 'fetchApi("/x", { method: "POST" })';
+  it.each([
+    ["a .catch(() => null) promise, then res?.json()", `  const res = await ${POST}.catch(() => null);\n  return res?.json();`, 5],
+    ["a .finally(...) promise", `  const res = await ${POST}.finally(() => undefined);\n  return res.json();`, 5],
+    ["a .then((r) => r).then((r) => r.json()) chain", `  return ${POST}.then((r) => r).then((r) => r.json());`, 4],
+    ['an element access res["json"]()', `  const res = await ${POST};\n  return res["json"]();`, 5],
+    ["a computed member res[key]()", `  const res = await ${POST};\n  return res[m as "json"]();`, 5],
+    ["json destructured from the awaited response", `  const { json } = await ${POST};\n  return json();`, 4],
+    ["json destructured in a .then callback parameter", `  return ${POST}.then(({ json }) => json());`, 4],
+    ["an alias const r2 = res", `  const res = await ${POST};\n  const r2 = res;\n  return r2.json();`, 6],
+    [
+      "an array-destructured Promise.all element",
+      `  const [a, b] = await Promise.all([fetchApi("/a"), ${POST}]);\n  await a.json();\n  return b.json();`,
+      6,
+    ],
+    [
+      "an index-accessed Promise.all element",
+      `  const all = await Promise.all([fetchApi("/a"), ${POST}]);\n  await all[0].json();\n  return all[1].json();`,
+      6,
+    ],
+    [
+      "a Promise.allSettled record's .value",
+      `  const [, s] = await Promise.allSettled([fetchApi("/a"), ${POST}]);\n  return s.status === "fulfilled" ? s.value.json() : null;`,
+      5,
+    ],
+    ["a Promise.all .then(([r]) => r.json())", `  return Promise.all([${POST}]).then(([r]) => r.json());`, 4],
+    ["a Promise.race result", `  const r = await Promise.race([${POST}]);\n  return r.json();`, 5],
+    ["a Promise.all request after a spread (position unresolvable)", `  const [a] = await Promise.all([...[], ${POST}]);\n  return a;`, 4],
+    ["a Promise.all result used other than element-wise", `  const all = await Promise.all([${POST}]);\n  return all.map((r) => r.json());`, 5],
+  ])("denies %s", (_label, body, line) => {
+    const r = run({ "src/components/a.tsx": component(body) });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("MUTATION_RESPONSE_JSON_READ: 1 read(s)");
+    expect(r.stderr).toContain(`src/components/a.tsx:${line} `);
+  });
+
+  // Every body reader consumes the body and rejects the same way `.json()`
+  // does; `clone()` is the same response.
+  it.each([
+    ["a .text() read", `  const res = await ${POST};\n  return res.text();`, 5],
+    ["a .blob() read", `  const res = await ${POST};\n  return res.blob();`, 5],
+    ["an .arrayBuffer() read", `  const res = await ${POST};\n  return res.arrayBuffer();`, 5],
+    ["a .formData() read", `  const res = await ${POST};\n  return res.formData();`, 5],
+    ["a .bytes() read", `  const res = await ${POST};\n  return res.bytes();`, 5],
+    ['an element access res["text"]()', `  const res = await ${POST};\n  return res["text"]();`, 5],
+    ["text destructured from the awaited response", `  const { text } = await ${POST};\n  return text();`, 4],
+    ["a res.clone().json() read", `  const res = await ${POST};\n  return res.clone().json();`, 5],
+  ])("denies %s", (_label, body, line) => {
+    const r = run({ "src/components/a.tsx": component(body) });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("MUTATION_RESPONSE_JSON_READ: 1 read(s)");
+    expect(r.stderr).toContain(`src/components/a.tsx:${line}  body read on the response of`);
+  });
+
+  it.each([
+    [
+      "the GET element of a Promise.all that also POSTs",
+      `  const [a, b] = await Promise.all([fetchApi("/a"), ${POST}]);\n  if (!b.ok) return null;\n  return a.json();`,
+    ],
+    [
+      "parseJsonBodyOnce on a Promise.all POST element",
+      `  const [, b] = await Promise.all([fetchApi("/a"), ${POST}]);\n  return parseJsonBodyOnce(b);`,
+    ],
+    ["parseJsonBodyOnce after .catch(() => null)", `  const res = await ${POST}.catch(() => null);\n  return res ? parseJsonBodyOnce(res) : null;`],
+    ["destructuring other members of a POST response", `  const { ok, status } = await ${POST};\n  return ok ? status : 0;`],
+    ['an element access res["status"]', `  const res = await ${POST};\n  return res["status"];`],
+    ["a GET .text() read", '  const res = await fetchApi("/x");\n  return res.text();'],
+    [
+      "readApiErrorBody(res.clone()) on a POST",
+      `  const res = await ${POST};\n  if (!res.ok) return readApiErrorBody(res.clone());\n  return parseJsonBodyOnce(res);`,
+    ],
+  ])("allows %s", (_label, body) => {
+    const r = run({ "src/components/a.tsx": component(body) });
+    expect(r.code).toBe(0);
+    expect(r.stdout).toContain("check-mutation-response-read: OK (1 files");
+  });
+
   it("denies in src/hooks and src/app pages too", () => {
     const body = '  const res = await fetchApi("/x", { method: "POST" });\n  return res.json();';
     const r = run({ "src/hooks/use-a.ts": component(body), "src/app/[locale]/p/page.tsx": component(body) });
@@ -153,7 +238,7 @@ describe("check-mutation-response-read", () => {
         "  return res.json();\n}\n",
     });
     expect(r.code).toBe(1);
-    expect(r.stderr).toContain("src/components/a.ts:5  .json() on the response of fetcher(…)");
+    expect(r.stderr).toContain("src/components/a.ts:5  body read on the response of fetcher(…)");
   });
 
   it("denies an injected x.fetchApi", () => {
@@ -177,7 +262,7 @@ describe("check-mutation-response-read", () => {
         "export async function f() {\n  const res = await save(\"b\");\n  return res.json();\n}\n",
     });
     expect(r.code).toBe(1);
-    expect(r.stderr).toContain("src/components/a.tsx:4  .json() on the response of save(…)");
+    expect(r.stderr).toContain("src/components/a.tsx:4  body read on the response of save(…)");
   });
 
   it("denies the response of a helper that forwards its init, called with a mutating method", () => {
@@ -205,7 +290,7 @@ describe("check-mutation-response-read", () => {
         "  return async () => {\n    const res = await create();\n    return res.json();\n  };\n}\n",
     });
     expect(r.code).toBe(1);
-    expect(r.stderr).toContain(".json() on the response of create(…)");
+    expect(r.stderr).toContain("body read on the response of create(…)");
   });
 
   it.each([
@@ -270,6 +355,8 @@ describe("check-mutation-response-read", () => {
     ["next/headers", 'import { headers } from "next/headers";\n'],
     ["the Prisma singleton", 'import { prisma } from "@/lib/prisma";\n'],
     ["the Prisma singleton by a relative path", 'import { prisma } from "../prisma";\n'],
+    ["the Prisma singleton beside a type-only binding", 'import { type PrismaClient, prisma } from "@/lib/prisma";\n'],
+    ["next/headers as a namespace", 'import * as h from "next/headers";\n'],
   ])("allows a mutation read in a src/lib server module importing %s", (_label, header) => {
     const r = run({
       "src/components/ok.tsx": "export const ok = 1;\n",
@@ -277,6 +364,20 @@ describe("check-mutation-response-read", () => {
     });
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("OK (1 files");
+  });
+
+  // The server-module exemption is a src/lib rule only: a component or page
+  // that imports a server marker is still client code to this gate.
+  it("denies a mutation read outside src/lib even when the module imports a server marker", () => {
+    const r = run({
+      "src/components/ok.tsx": "export const ok = 1;\n",
+      "src/components/a.tsx": libModule('import "server-only";\n', POST_READ),
+      "src/app/[locale]/p/page.tsx": libModule('import { headers } from "next/headers";\n', POST_READ),
+    });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("MUTATION_RESPONSE_JSON_READ: 2 read(s)");
+    expect(r.stderr).toContain("src/components/a.tsx:6");
+    expect(r.stderr).toContain("src/app/[locale]/p/page.tsx:6");
   });
 
   it("allows a GET read in a src/lib client module", () => {

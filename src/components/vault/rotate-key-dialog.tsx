@@ -3,7 +3,14 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { ROTATION_EFFECTS_UNAVAILABLE, useVault, VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
+import {
+  ROTATION_COMMITTED_VAULT_LOCKED,
+  ROTATION_EFFECTS_UNAVAILABLE,
+  ROTATION_NOT_STARTED_VAULT_LOCKED,
+  useVault,
+  VaultChangedElsewhereError,
+  VaultChangeOutcomeUnknownError,
+} from "@/lib/vault/vault-context";
 import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
@@ -64,6 +71,20 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
           setProgressTotal(total);
         },
       );
+      if (effects === ROTATION_NOT_STARTED_VAULT_LOCKED) {
+        // The vault locked before anything was sent (this dialog unmounts with
+        // it): the key was not rotated, and the user has to start again.
+        toast.warning(t("rotateKeyNotStartedVaultLocked"), { duration: Infinity });
+        handleOpenChange(false);
+        return;
+      }
+      if (effects === ROTATION_COMMITTED_VAULT_LOCKED) {
+        // The vault locked while the rotation was committing, which unmounts
+        // this dialog: say the rotation happened but the vault needs unlocking.
+        toast.warning(t("rotateKeyCommittedVaultLocked"), { duration: Infinity });
+        handleOpenChange(false);
+        return;
+      }
       toast.success(t("rotateKeySuccess"));
       if (effects === ROTATION_EFFECTS_UNAVAILABLE) {
         // The rotation committed, but whether the other sessions and tokens
@@ -98,10 +119,19 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
         handleOpenChange(false);
         return;
       }
+      if (err instanceof VaultChangedElsewhereError) {
+        // Locked for the same reason: the vault changed in another tab or on
+        // another device, so this one's state is stale.
+        toast.error(t("vaultChangedElsewhere"), { duration: Infinity });
+        handleOpenChange(false);
+        return;
+      }
       const apiErr = err as { error?: string } | undefined;
       const errorCode = apiErr?.error;
 
-      if (errorCode === API_ERROR.INVALID_PASSPHRASE) {
+      if (errorCode === API_ERROR.VERIFIER_NOT_SET) {
+        setError(t("verifierNotSetHint"));
+      } else if (errorCode === API_ERROR.INVALID_PASSPHRASE) {
         setError(tApi("invalidPassphrase"));
       } else if (errorCode === "RATE_LIMIT_EXCEEDED") {
         setError(tApi("rateLimitExceeded"));

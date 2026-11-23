@@ -172,6 +172,7 @@ function buildMinimalRotationPayload(entryIds: string[]): RotationPayload {
     secretKeyAuthTag: hex32,
     accountSalt: hex64,
     newAuthHash: hex64,
+    newVerifierHash: hex64,
     verificationArtifact: { ciphertext: hex64, iv: hex24, authTag: hex32 },
     encryptedEcdhPrivateKey: "new-ecdh-placeholder",
     ecdhPrivateKeyIv: hex24,

@@ -102,6 +102,8 @@ async function setupRotateFetch(opts: {
   actorKeyVersions: number[];
   rotateStatus?: number;
   rotateBody?: Record<string, unknown>;
+  /** Replaces the rotate POST's response (a reject, a non-JSON page). */
+  rotateResponse?: () => Promise<Response>;
   versionHolders?: Record<string, unknown>;
 }) {
   const member = await generateECDHKeyPair();
@@ -127,6 +129,7 @@ async function setupRotateFetch(opts: {
       }), { status: 200 }));
     }
     if (init?.method === "POST") {
+      if (opts.rotateResponse) return opts.rotateResponse();
       return Promise.resolve(new Response(JSON.stringify(opts.rotateBody ?? { success: true }), {
         status: opts.rotateStatus ?? 200,
       }));
@@ -270,6 +273,73 @@ describe("TeamRotateKeyButton", () => {
 
     await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith(message));
     expect(mockToast.success).not.toHaveBeenCalled();
+  });
+
+  it("keeps the refusal toast and the cached team key on an allow-listed refusal", async () => {
+    const keys = await makeTeamKeys([2]);
+    vault.resolve = makeResolver(keys);
+    await setupRotateFetch({
+      entries: [await v1("e", keys.get(2)!, 2)],
+      actorKeyVersions: [2],
+      rotateStatus: 409,
+      rotateBody: { error: "TEAM_KEY_RECIPIENT_CHANGED" },
+    });
+    const onSuccess = vi.fn();
+    render(<TeamRotateKeyButton teamId={TEAM_ID} onSuccess={onSuccess} />);
+
+    await openAndConfirm();
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("teamKeyRecipientChanged"));
+    expect(mockToast.error).not.toHaveBeenCalledWith("rotateKeyOutcomeUnknown");
+    expect(vault.invalidateTeamKey).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  describe("when the POST's outcome is unknown", () => {
+    it.each([
+      ["the POST rejects in transit", () => Promise.reject(new TypeError("Failed to fetch"))],
+      [
+        "a proxy answers 502 with an HTML page",
+        () => Promise.resolve(new Response("<html>Bad Gateway</html>", { status: 502, headers: { "Content-Type": "text/html" } })),
+      ],
+      [
+        "a 500 carries INTERNAL_ERROR, which does not prove nothing committed",
+        () => Promise.resolve(new Response(JSON.stringify({ error: "INTERNAL_ERROR" }), { status: 500 })),
+      ],
+    ])("%s: drops the cached team key, refreshes the page and says it is unknown", async (_label, rotateResponse) => {
+      const keys = await makeTeamKeys([2]);
+      vault.resolve = makeResolver(keys);
+      await setupRotateFetch({ entries: [await v1("e", keys.get(2)!, 2)], actorKeyVersions: [2], rotateResponse });
+      const onSuccess = vi.fn();
+      render(<TeamRotateKeyButton teamId={TEAM_ID} onSuccess={onSuccess} />);
+
+      await openAndConfirm();
+
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("rotateKeyOutcomeUnknown"));
+      expect(mockToast.error).not.toHaveBeenCalledWith("rotateKeyFailed");
+      expect(mockToast.success).not.toHaveBeenCalled();
+      expect(vault.invalidateTeamKey).toHaveBeenCalledWith(TEAM_ID);
+      expect(onSuccess).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("treats a 2xx whose body is unreadable as a committed rotation", async () => {
+    const keys = await makeTeamKeys([2]);
+    vault.resolve = makeResolver(keys);
+    await setupRotateFetch({
+      entries: [await v1("e", keys.get(2)!, 2)],
+      actorKeyVersions: [2],
+      rotateResponse: () => Promise.resolve(new Response("not json", { status: 200 })),
+    });
+    const onSuccess = vi.fn();
+    render(<TeamRotateKeyButton teamId={TEAM_ID} onSuccess={onSuccess} />);
+
+    await openAndConfirm();
+
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("rotateKeySuccess"));
+    expect(vault.invalidateTeamKey).toHaveBeenCalledWith(TEAM_ID);
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 
   it("opens the recent-session dialog on a SESSION_STEP_UP_REQUIRED rotate (RT8)", async () => {

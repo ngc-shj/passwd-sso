@@ -128,10 +128,19 @@ vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: vi.fn(),
   extractRequestMeta: vi.fn(() => ({})),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
+  tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
+}));
+// The verifier HMAC needs a configured pepper; as in the change-passphrase
+// route test, the stored HMAC is modelled as the verifier itself.
+vi.mock("@/lib/crypto/crypto-server", () => ({
+  verifyPassphraseVerifier: vi.fn((client: string, stored: string, _v: number) =>
+    client === stored ? ({ ok: true } as const) : ({ ok: false, reason: "WRONG_PASSPHRASE" } as const)),
 }));
 
 import { createHash } from "crypto";
 import { POST } from "./route";
+import { logAuditAsync } from "@/lib/audit/audit";
+import { verifyPassphraseVerifier } from "@/lib/crypto/crypto-server";
 import { VAULT_ROTATE_TX_TIMEOUT_MS } from "@/lib/constants/vault/rotate-key";
 
 // Module-level `rotateLimiter = createRateLimiter(...)` runs at import time,
@@ -149,6 +158,7 @@ const currentAuthHash = "b".repeat(64);
 const serverHash = createHash("sha256")
   .update(currentAuthHash + serverSalt)
   .digest("hex");
+const currentVerifierHash = "9".repeat(64);
 
 const makeEncryptedField = () => ({
   ciphertext: "c".repeat(10),
@@ -158,11 +168,13 @@ const makeEncryptedField = () => ({
 
 const validBody = {
   currentAuthHash,
+  currentVerifierHash,
   encryptedSecretKey: "new-encrypted-key",
   secretKeyIv: "c".repeat(24),
   secretKeyAuthTag: "d".repeat(32),
   accountSalt: "e".repeat(64),
   newAuthHash: "f".repeat(64),
+  newVerifierHash: "6".repeat(64),
   verificationArtifact: {
     ciphertext: "verify-cipher",
     iv: "a".repeat(24),
@@ -187,6 +199,8 @@ describe("POST /api/vault/rotate-key", () => {
       masterPasswordServerSalt: serverSalt,
       keyVersion: 1,
       accountSalt: "e".repeat(64),
+      passphraseVerifierHmac: currentVerifierHash,
+      passphraseVerifierVersion: 1,
     });
     // applyVaultRotation returns the RotationEffects object on success
     mockApplyVaultRotation.mockResolvedValue(defaultRotationEffects);
@@ -239,7 +253,7 @@ describe("POST /api/vault/rotate-key", () => {
     expect(res.status).toBe(404);
   });
 
-  it("returns 401 for wrong current passphrase", async () => {
+  it("returns 401 when the client does not hold the current secret key (currentAuthHash)", async () => {
     const res = await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", {
         body: { ...validBody, currentAuthHash: "0".repeat(64) },
@@ -248,6 +262,138 @@ describe("POST /api/vault/rotate-key", () => {
     expect(res.status).toBe(401);
     const json = await res.json();
     expect(json.error).toBe("INVALID_PASSPHRASE");
+  });
+
+  describe("current passphrase verifier", () => {
+    it("refuses a mistyped current passphrase with 401 INVALID_PASSPHRASE before any transaction", async () => {
+      // The auth hash still matches: an unlocked client always holds the key.
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/vault/rotate-key", {
+          body: { ...validBody, currentVerifierHash: "1".repeat(64) },
+        })
+      );
+
+      expect(res.status).toBe(401);
+      expect((await res.json()).error).toBe("INVALID_PASSPHRASE");
+      expect(mockWithUserTenantRls).toHaveBeenCalledTimes(1); // the snapshot read only
+      expect(txMock.$executeRaw).not.toHaveBeenCalled();
+      expect(mockApplyVaultRotation).not.toHaveBeenCalled();
+      expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+    });
+
+    it("refuses a tab holding pre-change state after the passphrase was changed elsewhere", async () => {
+      // The stored verifier is the one the other tab's change wrote; this tab
+      // still derives its verifier from the old salt, and still holds the
+      // unchanged secret key, so only the verifier tells them apart.
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        vaultSetupAt: new Date(),
+        masterPasswordServerHash: serverHash,
+        masterPasswordServerSalt: serverSalt,
+        keyVersion: 1,
+        accountSalt: "7".repeat(64),
+        passphraseVerifierHmac: "8".repeat(64),
+        passphraseVerifierVersion: 1,
+      });
+
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+      );
+
+      expect(res.status).toBe(401);
+      expect((await res.json()).error).toBe("INVALID_PASSPHRASE");
+      expect(mockApplyVaultRotation).not.toHaveBeenCalled();
+    });
+
+    it("checks the verifier against the stored HMAC and its stored pepper version", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        vaultSetupAt: new Date(),
+        masterPasswordServerHash: serverHash,
+        masterPasswordServerSalt: serverSalt,
+        keyVersion: 1,
+        accountSalt: "e".repeat(64),
+        passphraseVerifierHmac: currentVerifierHash,
+        passphraseVerifierVersion: 3,
+      });
+
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+      );
+
+      expect(res.status).toBe(200);
+      expect(vi.mocked(verifyPassphraseVerifier)).toHaveBeenCalledWith(currentVerifierHash, currentVerifierHash, 3);
+      expect(mockApplyVaultRotation).toHaveBeenCalledTimes(1);
+    });
+
+    it("returns 409 VERIFIER_NOT_SET, before any transaction, when no verifier is stored", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({
+        tenantId: "tenant-1",
+        vaultSetupAt: new Date(),
+        masterPasswordServerHash: serverHash,
+        masterPasswordServerSalt: serverSalt,
+        keyVersion: 1,
+        accountSalt: "e".repeat(64),
+        passphraseVerifierHmac: null,
+        passphraseVerifierVersion: 1,
+      });
+
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+      );
+
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("VERIFIER_NOT_SET");
+      expect(mockApplyVaultRotation).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 VALIDATION_ERROR, with no write, when newVerifierHash is missing", async () => {
+      const { newVerifierHash: _omitted, ...body } = validBody;
+
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/vault/rotate-key", { body })
+      );
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("VALIDATION_ERROR");
+      expect(mockWithUserTenantRls).not.toHaveBeenCalled();
+      expect(mockApplyVaultRotation).not.toHaveBeenCalled();
+    });
+
+    it("returns 400 when currentVerifierHash is missing", async () => {
+      const { currentVerifierHash: _omitted, ...body } = validBody;
+
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/vault/rotate-key", { body })
+      );
+
+      expect(res.status).toBe(400);
+      expect(mockApplyVaultRotation).not.toHaveBeenCalled();
+    });
+
+    it("audits a missing pepper version and refuses with 401", async () => {
+      vi.mocked(verifyPassphraseVerifier).mockReturnValueOnce({ ok: false, reason: "MISSING_PEPPER_VERSION" });
+
+      const res = await POST(
+        createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })
+      );
+
+      expect(res.status).toBe(401);
+      expect(vi.mocked(logAuditAsync)).toHaveBeenCalledWith(
+        expect.objectContaining({ action: "VERIFIER_PEPPER_MISSING", metadata: { storedVersion: 1 } }),
+      );
+      expect(mockApplyVaultRotation).not.toHaveBeenCalled();
+    });
+
+    it("does not audit a pepper problem for a plain wrong passphrase", async () => {
+      await POST(
+        createRequest("POST", "http://localhost/api/vault/rotate-key", {
+          body: { ...validBody, currentVerifierHash: "1".repeat(64) },
+        })
+      );
+
+      expect(vi.mocked(logAuditAsync)).not.toHaveBeenCalled();
+    });
   });
 
   it("returns 400 on malformed JSON", async () => {
@@ -374,6 +520,8 @@ describe("POST /api/vault/rotate-key", () => {
       masterPasswordServerSalt: serverSalt,
       keyVersion: 5,
       accountSalt: "e".repeat(64),
+      passphraseVerifierHmac: currentVerifierHash,
+      passphraseVerifierVersion: 1,
     });
     const res = await POST(
       createRequest("POST", "http://localhost/api/vault/rotate-key", { body: validBody })

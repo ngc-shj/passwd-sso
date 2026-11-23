@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { useVault, VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
+import { useVault, VaultChangedElsewhereError, VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
 import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { Button } from "@/components/ui/button";
@@ -82,6 +82,13 @@ export function ChangePassphraseDialog({
         // The vault is now locked, which unmounts this dialog: a persistent
         // toast is the only place the user still sees what happened.
         toast.error(t("changePassphraseOutcomeUnknown"), { duration: Infinity });
+        handleOpenChange(false);
+        return;
+      }
+      if (err instanceof VaultChangedElsewhereError) {
+        // Locked for the same reason: the vault changed in another tab or on
+        // another device, so this one's state is stale.
+        toast.error(t("vaultChangedElsewhere"), { duration: Infinity });
         handleOpenChange(false);
         return;
       }

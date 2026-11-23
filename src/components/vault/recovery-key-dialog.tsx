@@ -48,13 +48,14 @@ type FlowOutcomeUnknown = { ok: false; outcomeUnknown: true };
 export type GenerateFlowResult = FlowSuccess | FlowError | FlowOutcomeUnknown;
 
 // Codes that prove the generate POST was refused before its write: the shared
-// PRE_ROUTE_AND_PRE_TX_REFUSALS plus VERIFIER_NOT_SET, which
-// recovery-key/generate also returns before its single user.update. After the
-// update it only returns 200 (the audit write never throws); a failing update
-// throws, which is not an envelope.
+// PRE_ROUTE_AND_PRE_TX_REFUSALS plus VAULT_WRAP_CONFLICT, which
+// recovery-key/generate returns when the compare-and-swap matched no
+// row — that transaction wrote nothing and committed no audit row. After a
+// committed write it only returns 200; a throw inside or after the
+// transaction is not an envelope.
 const GENERATE_REFUSALS: ReadonlySet<string> = new Set([
   ...PRE_ROUTE_AND_PRE_TX_REFUSALS,
-  API_ERROR.VERIFIER_NOT_SET,
+  API_ERROR.VAULT_WRAP_CONFLICT,
 ]);
 
 /**

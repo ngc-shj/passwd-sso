@@ -3,14 +3,15 @@ import type { NextRequest } from "next/server";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { createRateLimiter } from "@/lib/security/rate-limit";
-import { hmacVerifier, verifyPassphraseVerifier as verifyHmac } from "@/lib/crypto/crypto-server";
+import { hmacVerifier } from "@/lib/crypto/crypto-server";
+import { checkStoredVerifier } from "@/lib/vault/stored-verifier-server";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { VERIFIER_VERSION } from "@/lib/crypto/verifier-version";
 import { withRequestLog } from "@/lib/http/with-request-log";
 import { errorResponse, unauthorized } from "@/lib/http/api-response";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { parseBody } from "@/lib/http/parse-body";
-import { logAuditAsync, logAuditInTx, personalAuditBase, tenantAuditBase } from "@/lib/audit/audit";
+import { logAuditInTx, personalAuditBase } from "@/lib/audit/audit";
 import { withTenantRls } from "@/lib/tenant-rls";
 import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { withUserTenantRls } from "@/lib/tenant-context";
@@ -121,20 +122,22 @@ async function handleVerify(data: z.infer<typeof verifySchema>, userId: string, 
     }),
   );
 
-  if (!user?.recoveryVerifierHmac) {
+  if (!user) {
     return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET);
   }
 
-  // Verify recovery key via HMAC comparison (dual-version: verifies against stored pepper version)
-  const verifyResult = verifyHmac(data.verifierHash, user.recoveryVerifierHmac, user.recoveryVerifierVersion);
-  if (!verifyResult.ok) {
-    if (verifyResult.reason === "MISSING_PEPPER_VERSION") {
-      await logAuditAsync({
-        ...tenantAuditBase(request, userId, user.tenantId),
-        action: AUDIT_ACTION.VERIFIER_PEPPER_MISSING,
-        metadata: { storedVersion: user.recoveryVerifierVersion },
-      });
-    }
+  // Verify recovery key (dual-version: verifies against stored pepper version)
+  const verifier = await checkStoredVerifier(request, {
+    userId,
+    tenantId: user.tenantId,
+    clientVerifierHash: data.verifierHash,
+    storedHmac: user.recoveryVerifierHmac,
+    storedVersion: user.recoveryVerifierVersion,
+  });
+  if (verifier === "not-set") {
+    return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET);
+  }
+  if (verifier === "wrong") {
     return errorResponse(API_ERROR.INVALID_RECOVERY_KEY);
   }
 
@@ -165,20 +168,22 @@ async function handleReset(data: z.infer<typeof resetSchema>, userId: string, re
     }),
   );
 
-  if (!user?.recoveryVerifierHmac) {
+  if (!user) {
     return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET);
   }
 
   // Verify recovery key (dual-version: verifies against stored pepper version)
-  const verifyResult = verifyHmac(data.verifierHash, user.recoveryVerifierHmac, user.recoveryVerifierVersion);
-  if (!verifyResult.ok) {
-    if (verifyResult.reason === "MISSING_PEPPER_VERSION") {
-      await logAuditAsync({
-        ...tenantAuditBase(request, userId, user.tenantId),
-        action: AUDIT_ACTION.VERIFIER_PEPPER_MISSING,
-        metadata: { storedVersion: user.recoveryVerifierVersion },
-      });
-    }
+  const verifier = await checkStoredVerifier(request, {
+    userId,
+    tenantId: user.tenantId,
+    clientVerifierHash: data.verifierHash,
+    storedHmac: user.recoveryVerifierHmac,
+    storedVersion: user.recoveryVerifierVersion,
+  });
+  if (verifier === "not-set") {
+    return errorResponse(API_ERROR.RECOVERY_KEY_NOT_SET);
+  }
+  if (verifier === "wrong") {
     return errorResponse(API_ERROR.INVALID_RECOVERY_KEY);
   }
 

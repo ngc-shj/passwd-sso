@@ -26,6 +26,7 @@ import { apiPath } from "@/lib/constants";
 import { useTeamVault } from "@/lib/team/team-vault-core";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { PROXY_PRE_ROUTE_REFUSALS } from "@/lib/vault/pre-commit-refusals";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
@@ -109,6 +110,43 @@ function carryReport(
   });
 }
 
+// Codes that prove the rotate-key POST was refused before its transaction
+// committed (src/app/api/teams/[teamId]/rotate-key/route.ts). Anything else —
+// a rejected fetch, a body that is not the app envelope (a proxy's 502/504
+// page, the 500 Next renders for an uncaught throw, including a throw from the
+// limiter clear() that runs after a committed rotation), or an unlisted code —
+// leaves the outcome unknown.
+//
+// Emitted before the route runs: PROXY_PRE_ROUTE_REFUSALS.
+// Emitted by the route before its transaction: UNAUTHORIZED, NOT_FOUND and
+// FORBIDDEN (requireTeamPermission), SESSION_STEP_UP_REQUIRED (handled before
+// this list), RATE_LIMIT_EXCEEDED, TEAM_NOT_FOUND, PAYLOAD_TOO_LARGE,
+// INVALID_JSON, VALIDATION_ERROR, TEAM_KEY_VERSION_MISMATCH.
+// Emitted from the transaction's catch, so rolled back: TEAM_KEY_VERSION_MISMATCH
+// (version CAS, P2002), ACTOR_NOT_PERMITTED, TEAM_ROTATE_CARRY_INVALID,
+// TEAM_ROTATE_KEY_UNAVAILABLE, ENTRY_COUNT_MISMATCH, TEAM_KEY_RECIPIENT_CHANGED,
+// VALIDATION_ERROR (member-key set), TEAM_BUSY and CONFLICT (tenant-row lock
+// timeout).
+// After the commit the route returns only 200.
+const ROTATE_REFUSALS: ReadonlySet<string> = new Set([
+  ...PROXY_PRE_ROUTE_REFUSALS,
+  API_ERROR.FORBIDDEN,
+  API_ERROR.NOT_FOUND,
+  API_ERROR.RATE_LIMIT_EXCEEDED,
+  API_ERROR.TEAM_NOT_FOUND,
+  API_ERROR.PAYLOAD_TOO_LARGE,
+  API_ERROR.INVALID_JSON,
+  API_ERROR.VALIDATION_ERROR,
+  API_ERROR.TEAM_KEY_VERSION_MISMATCH,
+  API_ERROR.ACTOR_NOT_PERMITTED,
+  API_ERROR.TEAM_ROTATE_CARRY_INVALID,
+  API_ERROR.TEAM_ROTATE_KEY_UNAVAILABLE,
+  API_ERROR.ENTRY_COUNT_MISMATCH,
+  API_ERROR.TEAM_KEY_RECIPIENT_CHANGED,
+  API_ERROR.TEAM_BUSY,
+  API_ERROR.CONFLICT,
+]);
+
 // ─── Component ───────────────────────────────────────────────
 
 export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: TeamRotateKeyButtonProps) {
@@ -128,7 +166,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: Tea
   const rotateRetryRef = useRef<() => Promise<void>>(async () => {});
   const inlineReauth = useInlineReauth(() => rotateRetryRef.current());
 
-  const rotationErrorMessage = (status: number, code: string | undefined): string => {
+  const rotationErrorMessage = (status: number, code: string): string => {
     if (status === 429) return t("rotateKeyRateLimited");
     switch (code) {
       case API_ERROR.TEAM_KEY_VERSION_MISMATCH:
@@ -137,8 +175,6 @@ export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: Tea
         return t("rotateKeyEntryMismatch");
       case API_ERROR.VALIDATION_ERROR:
         return t("rotateKeyMembersChanged");
-      case undefined:
-        return t("rotateKeyFailed");
       default: {
         const key = apiErrorToI18nKey(code);
         return key === "unknownError" ? t("rotateKeyFailed") : tApi(key);
@@ -163,6 +199,16 @@ export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: Tea
     } catch {
       return {};
     }
+  };
+
+  // The POST may have rotated the team: drop the cached key and refresh the
+  // page as a commit would (the re-key status reloads), and say it is unknown.
+  const onOutcomeUnknown = () => {
+    invalidateTeamKey(teamId);
+    toast.error(t("rotateKeyOutcomeUnknown"));
+    setOpen(false);
+    setConfirmInput("");
+    onSuccess?.();
   };
 
   const handleRotate = async () => {
@@ -253,27 +299,38 @@ export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: Tea
       // 5. POST rotation to server
       setPhase("submitting");
 
-      // @stepup id:team-rotate-key-post
-      const res = await fetchApi(apiPath.teamRotateKey(teamId), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          newTeamKeyVersion,
-          entries: payload.entries,
-          carry: payload.carry,
-          memberKeys,
-        }),
-      });
+      let res: Response;
+      try {
+        // @stepup id:team-rotate-key-post
+        res = await fetchApi(apiPath.teamRotateKey(teamId), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            newTeamKeyVersion,
+            entries: payload.entries,
+            carry: payload.carry,
+            memberKeys,
+          }),
+        });
+      } catch {
+        onOutcomeUnknown();
+        return;
+      }
 
       if (!res.ok) {
         const body = await readApiErrorBody(res);
         if (body?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
           await inlineReauth.triggerOnStaleError();
+        } else if (body && ROTATE_REFUSALS.has(body.error)) {
+          toast.error(rotationErrorMessage(res.status, body.error));
         } else {
-          toast.error(rotationErrorMessage(res.status, body?.error));
+          onOutcomeUnknown();
         }
         return;
       }
+
+      // Committed: the route answers 2xx only after its transaction, and its
+      // body is never read here, so an unreadable 2xx body is still a commit.
 
       // 6. Invalidate cached team key so next access fetches the new one
       invalidateTeamKey(teamId);

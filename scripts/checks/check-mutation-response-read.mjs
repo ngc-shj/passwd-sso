@@ -15,14 +15,30 @@
  *
  * ## What is denied
  *
- * A `.json()` call on a Response that comes from a MUTATING source call, in
- * client code (src/components, src/hooks, src/app outside src/app/api, and
- * src/lib except server modules — see "Client code under src/lib"):
- *   - `const res = await src(...)` / `res = await src(...)`, then `res.json()`
- *     anywhere the name still means that binding (scope-aware, lib/scope-bindings);
- *   - `(await src(...)).json()`;
- *   - `const p = src(...)`, then `(await p).json()` or `p.then((r) => r.json())`;
- *   - `src(...).then((r) => r.json())`, arrow or function, expression or block body.
+ * A body read on a Response that comes from a MUTATING source call, in client
+ * code (src/components, src/hooks, src/app outside src/app/api, and src/lib
+ * except server modules — see "Client code under src/lib"). The body readers
+ * are `json`, `text`, `blob`, `arrayBuffer`, `formData` and `bytes`; a read is
+ * `res.json`, `res?.json`, `res["json"]` (likewise for each reader), `res[key]`
+ * with a computed key, or destructuring a reader out of it (`const { json } =
+ * res`, a `{ text }` callback parameter). The Response is followed through:
+ *   - `const res = await src(...)` / `res = await src(...)`, and any `const`
+ *     or assignment that copies it (`const r2 = res`), wherever the name still
+ *     means that binding (scope-aware, lib/scope-bindings);
+ *   - `(await src(...)).json()`, `cond ? await a : await b`, `a ?? b`, `a || b`,
+ *     and `res.clone()`, which is the same response (`res.clone().json()` is a
+ *     read; `parseJsonBodyOnce(res.clone())` passes it on and is not);
+ *   - a promise held in a `const`, `.catch(...)` / `.finally(...)` (they pass
+ *     the response through) and `.then(cb)` — `cb`'s parameter is the
+ *     response, and what `cb` returns is what the `.then` call resolves to, so
+ *     `.then((r) => r).then((r) => r.json())` is followed;
+ *   - `Promise.all` / `allSettled` element-wise: the request's position in the
+ *     literal array argument picks the element of an array-destructured or
+ *     index-accessed result (`.value` of a settled record); `race` / `any`
+ *     resolve to the response itself. Where the element cannot be resolved —
+ *     a spread before the request, a computed index, the result array used any
+ *     other way, a destructuring assignment — the site is reported (fails
+ *     closed).
  *
  * A SOURCE is a call to `fetchApi` (bare, a property `x.fetchApi` for an
  * injected one, or a local name holding it — a parameter defaulting to it, a
@@ -37,7 +53,7 @@
  * imported name resolves to an exported helper of that name (by name, so two
  * exported helpers sharing a name can only over-report).
  *
- * The error path is covered too: every `.json()` on such a response is denied,
+ * The error path is covered too: every body read of such a response is denied,
  * since `readApiErrorBody` reads through `parseJsonBodyOnce` as well.
  *
  * ## When a call is mutating
@@ -54,15 +70,14 @@
  *
  * A fail-closed verification gate adjudicated by the TypeScript AST, with
  * name-based helper discovery. Known bypasses:
- *   - the Response crosses a function boundary (passed as an argument, returned
- *     from a function that is not a derived helper — an object or class
- *     method, a `useMemo`-built function, a returned `let`), or is aliased
- *     (`const r2 = res`, destructured from `Promise.all`);
+ *   - the request or its Response crosses a function or container boundary:
+ *     passed as an argument (including a named `.then(handler)`), returned from
+ *     a function that is not a derived helper (an object or class method, a
+ *     `useMemo`-built function, a returned `let`), or placed in an array or
+ *     object other than the literal argument of a `Promise` combinator;
  *   - a fetcher injected under another name with no `= fetchApi` default
  *     (`deps.fetch`, `fetchImpl`), and raw `fetch` (banned in client code by
- *     eslint `CallExpression[callee.name='fetch']`);
- *   - body readers other than `.json()` (`.text()`, `.blob()`, `.arrayBuffer()`)
- *     and `res.clone().json()`.
+ *     eslint `CallExpression[callee.name='fetch']`).
  *
  * ## Client code under src/lib
  *
@@ -128,9 +143,13 @@ const FUNCTION_LIKE = new Set([...FN_KINDS, SyntaxKind.FunctionDeclaration]);
 function isServerModule(sf, rel) {
   return sf.getImportDeclarations().some((decl) => {
     if (decl.isTypeOnly()) return false;
-    const named = decl.getNamedImports();
+    // A side-effect import (`import "server-only"`) binds nothing and still runs
+    // the module; otherwise one value binding is enough.
     const valueBinding =
-      named.length === 0 || decl.getDefaultImport() || decl.getNamespaceImport() || named.some((n) => !n.isTypeOnly());
+      !decl.getImportClause() ||
+      decl.getDefaultImport() ||
+      decl.getNamespaceImport() ||
+      decl.getNamedImports().some((n) => !n.isTypeOnly());
     if (!valueBinding) return false;
     const spec = decl.getModuleSpecifierValue();
     if (SERVER_MARKER_MODULES.has(spec)) return true;
@@ -411,18 +430,38 @@ for (let changed = true; changed; ) {
 }
 
 // ── Response tracking ────────────────────────────────────────────────────────
+//
+// A tracked value has a KIND: a promise of a Response, a Response, a
+// `Promise.all`/`allSettled` result (a list, awaited or not, whose element
+// `index` is the response — or, settled, a `{ status, value }` record holding
+// it), or such a record. Each flow below moves a value to the expression that
+// now holds it, until it is read, stored, or leaves the function.
 
 const sites = [];
 
-function isJsonCallOn(node) {
-  const access = node.getParent();
-  if (access?.getKind() !== SyntaxKind.PropertyAccessExpression || access.getExpression() !== node) return false;
-  if (access.getName() !== "json") return false;
-  const call = access.getParent();
-  return call?.getKind() === SyntaxKind.CallExpression && call.getExpression() === access;
+const PROMISE = { t: "promise" };
+const RESPONSE = { t: "response" };
+const RECORD = { t: "record" };
+const THEN_TRANSPARENT = new Set(["catch", "finally"]);
+const BODY_READERS = new Set(["json", "text", "blob", "arrayBuffer", "formData", "bytes"]);
+const PROMISE_COMBINATORS = new Set(["all", "allSettled", "race", "any"]);
+
+const isPromiseLike = (k) => k.t === "promise" || (k.t === "list" && !k.awaited);
+const awaitOf = (k) => (k.t === "promise" ? RESPONSE : k.t === "list" ? { ...k, awaited: true } : k);
+const elementOf = (list) => (list.settled ? RECORD : RESPONSE);
+const kindKey = (k) => (k.t === "list" ? `list:${k.awaited}:${k.settled}:${k.index}` : k.t);
+
+/** What a `.then`/`.catch` call resolves to when its callback returns a value of kind `k`. */
+function promiseOf(k) {
+  if (k.t === "response" || k.t === "promise") return PROMISE;
+  if (k.t === "list") return { ...k, awaited: false };
+  return null;
 }
 
-/** Climb from `expr` past parentheses, type wrappers and conditional branches to the expression a parent sees. */
+const isStringLiteral = (e) =>
+  e?.getKind() === SyntaxKind.StringLiteral || e?.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral;
+
+/** Climb from `expr` past parentheses, type wrappers and value-forwarding operators to the expression a parent sees. */
 function outermost(expr) {
   let e = expr;
   for (let p = e.getParent(); p; p = e.getParent()) {
@@ -436,89 +475,265 @@ function outermost(expr) {
       e = p;
       continue;
     }
+    // `a ?? b`, `a || b`: either side; `a && b`: the right side.
+    if (k === SyntaxKind.BinaryExpression) {
+      const op = p.getOperatorToken().getKind();
+      if (op === SyntaxKind.QuestionQuestionToken || op === SyntaxKind.BarBarToken || (op === SyntaxKind.AmpersandAmpersandToken && p.getRight() === e)) {
+        e = p;
+        continue;
+      }
+    }
     break;
   }
   return e;
 }
 
-/** The declaration an expression's value is stored in (`const x = e`, `x = e`), or null. */
-function storedIn(expr, sf) {
-  const outer = outermost(expr);
+/**
+ * The member of `outer` its parent reads: a name for `.x`, `?.x` and `["x"]`,
+ * COMPUTED for any other key that may name one, or null when there is none.
+ */
+const COMPUTED = Symbol("computed");
+function memberRead(outer) {
   const parent = outer.getParent();
-  if (parent?.getKind() === SyntaxKind.VariableDeclaration && parent.getInitializer() === outer) {
-    return parent.getNameNode().getKind() === SyntaxKind.Identifier ? parent : null;
+  if (parent?.getKind() === SyntaxKind.PropertyAccessExpression && parent.getExpression() === outer) {
+    return parent.getName();
   }
-  if (
-    parent?.getKind() === SyntaxKind.BinaryExpression &&
-    parent.getOperatorToken().getKind() === SyntaxKind.EqualsToken &&
-    parent.getRight() === outer
-  ) {
-    const left = unwrapExpression(parent.getLeft());
-    if (left.getKind() === SyntaxKind.Identifier) return visibleBinding(left.getText(), left, bindingsOf(sf));
+  if (parent?.getKind() === SyntaxKind.ElementAccessExpression && parent.getExpression() === outer) {
+    const key = unwrapExpression(parent.getArgumentExpression());
+    if (isStringLiteral(key)) return key.getLiteralText();
+    return key?.getKind() === SyntaxKind.NumericLiteral ? null : COMPUTED;
   }
   return null;
 }
 
-/** Identifiers that refer to `decl` (scope-aware). */
-function referencesTo(decl, sf) {
-  const name = decl.getName();
-  const scope = decl.getFirstAncestor((a) => a.getKind() === SyntaxKind.SourceFile || a.getKind() === SyntaxKind.Block || FUNCTION_LIKE.has(a.getKind())) ?? sf;
-  return scope
-    .getDescendantsOfKind(SyntaxKind.Identifier)
-    .filter((id) => id.getText() === name && id !== decl.getNameNode() && visibleBinding(name, id, bindingsOf(sf)) === decl);
-}
-
-/** Report each `.json()` read of a response held in `decl` (or of a promise of one). */
-function trackBinding(decl, holdsPromise, origin, sf, rel) {
-  for (const id of referencesTo(decl, sf)) {
-    if (!holdsPromise) {
-      if (isJsonCallOn(outermost(id))) report(rel, id, origin);
-      continue;
-    }
-    trackPromise(id, origin, sf, rel);
-  }
-}
-
-/** `p` is an expression whose value is a Promise<Response>. */
-function trackPromise(p, origin, sf, rel) {
-  const outer = outermost(p);
+/** The `.then`/`.catch` call whose callback returns `outer`, or null. */
+function thenCallReturning(outer) {
   const parent = outer.getParent();
-  if (parent?.getKind() === SyntaxKind.AwaitExpression) {
-    trackResponse(parent, origin, sf, rel);
-    return;
-  }
-  if (parent?.getKind() === SyntaxKind.PropertyAccessExpression && parent.getExpression() === outer && parent.getName() === "then") {
-    const call = parent.getParent();
-    if (call?.getKind() !== SyntaxKind.CallExpression) return;
-    const cb = unwrapExpression(call.getArguments()[0]);
-    if (!cb || !FN_KINDS.has(cb.getKind())) return;
-    const param = cb.getParameters()[0];
-    if (param && param.getNameNode().getKind() === SyntaxKind.Identifier) trackBinding(param, false, origin, sf, rel);
-    return;
-  }
-  const decl = storedIn(p, sf);
-  if (decl) trackBinding(decl, true, origin, sf, rel);
+  let fn = null;
+  if (parent?.getKind() === SyntaxKind.ArrowFunction && parent.getBody() === outer) fn = parent;
+  else if (parent?.getKind() === SyntaxKind.ReturnStatement) fn = enclosingFunction(parent);
+  if (!fn || !FN_KINDS.has(fn.getKind())) return null;
+  const call = outermost(fn).getParent();
+  if (call?.getKind() !== SyntaxKind.CallExpression || !call.getArguments().includes(outermost(fn))) return null;
+  const callee = call.getExpression();
+  if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return null;
+  return callee.getName() === "then" || callee.getName() === "catch" ? call : null;
 }
 
-/** `r` is an expression whose value is a Response. */
-function trackResponse(r, origin, sf, rel) {
-  if (isJsonCallOn(outermost(r))) {
-    report(rel, r, origin);
-    return;
-  }
-  const decl = storedIn(r, sf);
-  if (decl) trackBinding(decl, false, origin, sf, rel);
+/** `Promise.<combinator>(...)`'s combinator name, or null. */
+function combinatorOf(call) {
+  if (call?.getKind() !== SyntaxKind.CallExpression) return null;
+  const callee = call.getExpression();
+  if (callee.getKind() !== SyntaxKind.PropertyAccessExpression) return null;
+  if (callee.getExpression().getText() !== "Promise" || !PROMISE_COMBINATORS.has(callee.getName())) return null;
+  return callee.getName();
 }
 
-function report(rel, at, origin) {
-  sites.push({ rel, line: at.getStartLineNumber(), origin: `${origin.getExpression().getText()}(…) line ${origin.getStartLineNumber()}` });
+/** Identifiers that refer to the binding `name` declared by `decl` (scope-aware). */
+function referencesTo(name, decl, nameNode, sf) {
+  const scope = decl.getFirstAncestor((a) => a.getKind() === SyntaxKind.SourceFile || a.getKind() === SyntaxKind.Block || FUNCTION_LIKE.has(a.getKind())) ?? sf;
+  return scope.getDescendantsOfKind(SyntaxKind.Identifier).filter((id) => {
+    if (id.getText() !== name || id === nameNode) return false;
+    const parent = id.getParent();
+    // `x.name` and `{ name: v }` spell the name without referring to the binding.
+    if (parent?.getKind() === SyntaxKind.PropertyAccessExpression && parent.getNameNode() === id) return false;
+    if (parent?.getKind() === SyntaxKind.PropertyAssignment && parent.getNameNode() === id) return false;
+    return visibleBinding(name, id, bindingsOf(sf)) === decl;
+  });
+}
+
+function createTracker(origin, sf, rel) {
+  const visited = new Set();
+
+  function trackBinding(name, decl, nameNode, k) {
+    const key = `${decl.getStart()}:${name}:${kindKey(k)}`;
+    if (visited.has(key)) return;
+    visited.add(key);
+    for (const id of referencesTo(name, decl, nameNode, sf)) track(id, k);
+  }
+
+  function bindName(nameNode, decl, k) {
+    switch (nameNode.getKind()) {
+      case SyntaxKind.Identifier:
+        trackBinding(nameNode.getText(), decl, nameNode, k);
+        return;
+      case SyntaxKind.ObjectBindingPattern:
+        destructureObject(nameNode, decl, k);
+        return;
+      case SyntaxKind.ArrayBindingPattern:
+        destructureArray(nameNode, decl, k);
+        return;
+    }
+  }
+
+  function destructureObject(pattern, decl, k) {
+    if (k.t !== "response" && k.t !== "record") return;
+    const wanted = k.t === "response" ? BODY_READERS : new Set(["value"]);
+    for (const el of pattern.getElements()) {
+      // A rest element copies own properties only; the body readers live on the prototype.
+      if (el.getDotDotDotToken()) {
+        if (k.t === "record") bindName(el.getNameNode(), decl, k);
+        continue;
+      }
+      const prop = el.getPropertyNameNode();
+      if (prop?.getKind() === SyntaxKind.ComputedPropertyName) {
+        const key = unwrapExpression(prop.getExpression());
+        if (!isStringLiteral(key)) {
+          report(el, "unresolvable destructuring of");
+          continue;
+        }
+        if (!wanted.has(key.getLiteralText())) continue;
+      } else if (!wanted.has(prop ? prop.getText().replace(/^["']|["']$/g, "") : el.getName())) {
+        continue;
+      }
+      if (k.t === "response") report(el);
+      else bindName(el.getNameNode(), decl, RESPONSE);
+    }
+  }
+
+  function destructureArray(pattern, decl, k) {
+    if (k.t !== "list" || !k.awaited) return;
+    const elements = pattern.getElements();
+    for (let j = 0; j < elements.length && j <= k.index; j++) {
+      const el = elements[j];
+      if (el.getKind() !== SyntaxKind.BindingElement) continue; // a hole
+      if (el.getDotDotDotToken()) {
+        bindName(el.getNameNode(), decl, { ...k, index: k.index - j });
+        return;
+      }
+      if (j === k.index) bindName(el.getNameNode(), decl, elementOf(k));
+    }
+  }
+
+  /** `outer` is stored: `const x = e`, `const { a } = e`, `x = e`. True when handled. */
+  function store(outer, k) {
+    const parent = outer.getParent();
+    if (parent?.getKind() === SyntaxKind.VariableDeclaration && parent.getInitializer() === outer) {
+      bindName(parent.getNameNode(), parent, k);
+      return true;
+    }
+    if (parent?.getKind() === SyntaxKind.BinaryExpression && parent.getOperatorToken().getKind() === SyntaxKind.EqualsToken && parent.getRight() === outer) {
+      const left = unwrapExpression(parent.getLeft());
+      if (left.getKind() === SyntaxKind.Identifier) {
+        const decl = visibleBinding(left.getText(), left, bindingsOf(sf));
+        if (decl) {
+          const nameNode = decl.getNameNode().getKind() === SyntaxKind.Identifier
+            ? decl.getNameNode()
+            : decl.getNameNode().getDescendantsOfKind(SyntaxKind.BindingElement).find((el) => el.getName() === left.getText())?.getNameNode();
+          trackBinding(left.getText(), decl, nameNode, k);
+        }
+      } else {
+        report(parent, "unresolvable destructuring of"); // `({ json } = res)`, `[a, b] = await Promise.all(...)`
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /** `e` is an expression whose value has kind `k`. */
+  function track(e, k) {
+    const outer = outermost(e);
+    const parent = outer.getParent();
+
+    if (k.t === "response") {
+      const member = memberRead(outer);
+      if (member === COMPUTED || BODY_READERS.has(member)) {
+        report(e);
+        return;
+      }
+      // `res.clone()` is the same response: reading the copy consumes nothing
+      // else, and a committed mutation fails the same way.
+      const call = member === "clone" ? parent.getParent() : null;
+      if (call?.getKind() === SyntaxKind.CallExpression && call.getExpression() === parent) {
+        track(call, RESPONSE);
+        return;
+      }
+    }
+
+    if (parent?.getKind() === SyntaxKind.AwaitExpression) {
+      track(parent, awaitOf(k));
+      return;
+    }
+
+    if (isPromiseLike(k) && parent?.getKind() === SyntaxKind.PropertyAccessExpression && parent.getExpression() === outer) {
+      const call = parent.getParent();
+      if (call?.getKind() !== SyntaxKind.CallExpression || call.getExpression() !== parent) return;
+      if (THEN_TRANSPARENT.has(parent.getName())) {
+        track(call, k); // `.catch`/`.finally` pass the response through
+        return;
+      }
+      if (parent.getName() !== "then") return;
+      const cb = unwrapExpression(call.getArguments()[0]);
+      if (!cb || cb.getText() === "undefined" || cb.getKind() === SyntaxKind.NullKeyword) {
+        track(call, k);
+        return;
+      }
+      if (!FN_KINDS.has(cb.getKind())) return; // a named handler: crosses a function boundary
+      const param = cb.getParameters()[0];
+      if (param) bindName(param.getNameNode(), param, awaitOf(k));
+      return; // what the callback returns is followed from the returned expression
+    }
+
+    if (k.t === "record" && parent?.getKind() === SyntaxKind.PropertyAccessExpression && parent.getExpression() === outer && parent.getName() === "value") {
+      track(parent, RESPONSE);
+      return;
+    }
+
+    if (k.t === "list" && k.awaited && parent?.getKind() === SyntaxKind.ElementAccessExpression && parent.getExpression() === outer) {
+      const index = unwrapExpression(parent.getArgumentExpression());
+      if (index?.getKind() !== SyntaxKind.NumericLiteral) report(parent, "unresolvable element of");
+      else if (Number(index.getLiteralText()) === k.index) track(parent, elementOf(k));
+      return;
+    }
+
+    const thenCall = thenCallReturning(outer);
+    if (thenCall) {
+      const next = promiseOf(k);
+      if (next) track(thenCall, next);
+      return;
+    }
+
+    if ((k.t === "promise" || k.t === "response") && parent?.getKind() === SyntaxKind.ArrayLiteralExpression) {
+      const list = outermost(parent);
+      const call = list.getParent();
+      const combinator = combinatorOf(call);
+      if (!combinator || call.getArguments()[0] !== list) return; // a container: crosses the boundary
+      if (combinator === "race" || combinator === "any") {
+        track(call, PROMISE);
+        return;
+      }
+      const elements = parent.getElements();
+      const index = elements.indexOf(outer);
+      if (elements.slice(0, index).some((el) => el.getKind() === SyntaxKind.SpreadElement)) {
+        report(outer, "unresolvable position in Promise." + combinator + " of");
+        return;
+      }
+      track(call, { t: "list", awaited: false, settled: combinator === "allSettled", index });
+      return;
+    }
+
+    if (store(outer, k)) return;
+
+    // An awaited Promise.all result used any other way (`.map`, a spread, an
+    // argument) cannot be followed element-wise.
+    if (k.t === "list" && k.awaited) {
+      const access = parent?.getKind() === SyntaxKind.PropertyAccessExpression && parent.getExpression() === outer;
+      if (!(access && parent.getName() === "length")) report(outer, "unresolvable use of");
+    }
+  }
+
+  function report(at, what = "body read on") {
+    sites.push({ rel, line: at.getStartLineNumber(), what, origin: `${origin.getExpression().getText()}(…) line ${origin.getStartLineNumber()}` });
+  }
+
+  return track;
 }
 
 for (const { rel, sf, deny } of files) {
   if (!deny) continue;
   for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
     if (!callMutates(call, sf)) continue;
-    trackPromise(call, call, sf, rel);
+    createTracker(call, sf, rel)(call, PROMISE);
   }
 }
 
@@ -526,7 +741,7 @@ for (const { rel, sf, deny } of files) {
 const reads = new Map();
 for (const s of sites) {
   const key = `${s.rel}:${s.line}`;
-  const row = reads.get(key) ?? { rel: s.rel, line: s.line, origins: [] };
+  const row = reads.get(key) ?? { rel: s.rel, line: s.line, what: s.what, origins: [] };
   if (!row.origins.includes(s.origin)) row.origins.push(s.origin);
   reads.set(key, row);
 }
@@ -534,7 +749,7 @@ const unique = [...reads.values()].sort((a, b) => a.rel.localeCompare(b.rel) || 
 
 if (unique.length > 0) {
   console.error(`MUTATION_RESPONSE_JSON_READ: ${unique.length} read(s) of a mutation response body outside parseJsonBodyOnce:`);
-  for (const s of unique) console.error(`  ${s.rel}:${s.line}  .json() on the response of ${s.origins.join(" / ")}`);
+  for (const s of unique) console.error(`  ${s.rel}:${s.line}  ${s.what} the response of ${s.origins.join(" / ")}`);
   console.error(
     "\nA mutation that committed must not be reported as failed because its body could not be read. " +
       "Run the completion (refresh, onSuccess, reset) right after res.ok, then read the body with " +

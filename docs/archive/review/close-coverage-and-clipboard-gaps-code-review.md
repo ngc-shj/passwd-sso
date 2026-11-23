@@ -220,3 +220,126 @@ Scope: the round-1 fixes, `git diff 82290f40a..5dc2f7d16`. Round 2 also measured
 | Testing | RT1/RT7 → T2-1; RT7 → T2-2, T2-3; R29 → T2-4 |
 
 All other rules in range were OK or N/A.
+
+---
+
+# Review round 3
+
+Scope: the round-2 fixes and C11, `git diff 5dc2f7d16..cdc3f1fb4`. All round-2 findings were verified as resolved.
+
+On R43, every allow-listed refusal code was checked against the route source, including proxy-level responses and the `withRequestLog` rethrow path. None of them can be emitted after commit, and every predicate narrows relative to 5dc2f7d16.
+
+## New findings
+
+**F-R3-1 [Critical, escalated] `rotateKey` never checks the typed current passphrase**
+- **Where:** `src/lib/vault/vault-context.tsx` and `src/app/api/vault/rotate-key/route.ts`. The bug pre-dates the branch and is already on main.
+- **Why the server check is vacuous:** `currentAuthHash` is derived from the in-memory secret key, so the server's check always passes for an unlocked client.
+- **Effect:** the typed passphrase becomes the new wrapping passphrase and the new verifier. A typo locks the user out permanently, because the same rotation also invalidates the recovery key, the PRF wraps and the EA grants.
+- **Hidden by the dialog test:** it mocks an INVALID_PASSPHRASE that the real flow cannot produce.
+
+**S3-1 [Major]** Unlock paths leave key material un-zeroed on failure.
+- `unlock`: `secretKey`.
+- `unlockWithPasskey`: `prfOutput` and `secretKey`.
+- Everywhere: `authKeyBytes`.
+
+**T3-1 [Major]** The C11 gate self-test does not pin the server-module exemption. Three one-step mutants stay green:
+- scope widened to every deny root;
+- `some` → `every`;
+- the namespace-import clause dropped.
+
+**T3-2 [Major]** No test proves that a successful rotation keeps a *copy* of the new key. The alias mutant stays green while the `finally` zeroes the live key.
+
+**T3-3 [Major]** `check-e2e-selectors.sh` section 1 uses `--diff-filter=D` with rename detection on, so a moved route page is never flagged. This is the same class as S-R2-1. `added_pages` is unused.
+
+**F-R3-2 / S3-5 [Minor]** VAULT_WRAP_CONFLICT and KEY_VERSION_MISMATCH prove that another writer moved the wrap, yet the vault stays unlocked on the stale material.
+
+**F-R3-3 [Minor]** A lock that fires while the rotate POST is in flight is undone: the 2xx writes the new key material into the locked provider.
+
+**S3-2 [Minor]** The retired secret key is not zeroed when a rotation succeeds.
+
+**S3-3 [Minor]** `recovery-key/generate` is a vault-wrapping writer, but it has no CAS and its audit is not in the transaction. A concurrent rotation can leave a recovery wrap of the retired key.
+
+**S3-4 [Minor]** The C11 gate has undeclared bypasses, and one live member is still unmigrated.
+- **Bypasses:** `.catch`, chained `.then`, `["json"]` element access, destructuring.
+- **Unmigrated member:** the `Promise.all` passkey-options read in vault-context.
+
+**S3-6 / F-R3-4 [Minor]** Team key rotation is a missed D24 member. An unknown outcome is reported as failed, and the cached old team key is kept.
+
+**T3-4 [Minor]** `vault-wrap-cas` does not await the in-flight requests when the race setup fails.
+
+## Resolution Status (round 3)
+
+Red-proof ledgers are in the scratchpad: `r3-fix-a/`, `r3-fix-b/` and `r3-fix-c/`, each with a `ledger.md`.
+- **Every new test** fails against the pre-fix copy or a named mutant.
+- **Every deny pin** has an allow pin, red on an over-broad mutant.
+
+### F-R3-1 [Critical] Rotation did not verify the typed passphrase — resolved
+- **Client:** `rotateKey` sends `currentVerifierHash`, computed from the typed passphrase and the current salt.
+- **Server:**
+  - It requires the field and verifies it against the stored verifier before any transaction, using the same helper and pepper handling as change-passphrase.
+  - A wrong verifier gives 401 `INVALID_PASSPHRASE`; a missing verifier gives `VERIFIER_NOT_SET`.
+  - The existing `currentAuthHash` check is kept.
+  - `newVerifierHash` is now required as well. Before, a payload without it rotated the salt but left a verifier that could never match again. Only the web client calls this route.
+- **Early refusal:** the client checks the passphrase locally first, so a wrong one is refused before any re-encryption.
+- **Tests:**
+  - route: a wrong verifier gives 401 with no transaction;
+  - route: a stale tab after a passphrase change elsewhere is refused;
+  - route: a missing field gives 400;
+  - allow pin: a correct passphrase rotates;
+  - the dialog's INVALID_PASSPHRASE case now follows a reachable flow.
+
+### F-R3-2 / S3-5 — resolved
+- VAULT_WRAP_CONFLICT and KEY_VERSION_MISMATCH now lock the vault and throw `VaultChangedElsewhereError`.
+- The dialogs show a persistent "changed in another tab or device; locked" notice.
+- INVALID_PASSPHRASE still keeps the vault unlocked. That side is pinned with a lock-on-every-refusal mutant.
+
+### F-R3-3 — resolved, with one extension
+- A lock counter is bumped by `lock()` and by the pagehide/unmount zeroing.
+- **Lock during the POST:** a 2xx does not install the key. `ROTATION_COMMITTED_VAULT_LOCKED` is returned and a warning is shown.
+- **Lock while the rotation is being prepared:** the POST is never sent and `ROTATION_NOT_STARTED_VAULT_LOCKED` is returned. The counter is checked before ECDH re-encryption and again just before the POST.
+- `changePassphrase` skips its ref update when a lock happened meanwhile.
+- **Residual:** mode-0 → mode-2 attachment migration PUTs that started before the lock may still finish. They are complete writes under the old key, so nothing is lost.
+
+### S3-1 / S3-2 — resolved
+- One `finally` per function zeroes `secretKey`, `prfOutput` and `authKeyBytes` on every path of `unlock`, `unlockWithPasskey`, `unlockWithStoredPrf`, `setup` and rotate.
+- The retired key is zeroed before the new one is installed.
+- Allow pins: successful unlocks keep a working copy, using an alias mutant at three sites.
+
+### S3-3 — resolved
+- `recovery-key/generate` writes with a CAS on `accountSalt` and `keyVersion`.
+- A lost CAS gives 409 VAULT_WRAP_CONFLICT with no audit row; a won CAS writes `logAuditInTx` in the same transaction.
+- `RECOVERY_KEY_CREATED` and `RECOVERY_KEY_REGENERATED` were added to `check-critical-audit-atomic`.
+- **Real-DB proof:** `vault-wrap-cas` gained four parked-race cells: an unchanged writer (allow), a rotation, keyVersion only, and salt only. They are red on the pre-fix route and on each predicate-drop mutant.
+- `VERIFIER_NOT_SET` moved into the shared pre-commit list. A set-equality check confirms the three resulting sets are unchanged.
+
+### S3-4 — resolved
+- **Value tracking:** the gate tracks promise and Response values through `.catch`/`.finally`, `.then` chains, aliasing and `??`/`||`/`&&`. It follows Promise.all/allSettled element by element and treats race/any as the response itself.
+- **Reads:** any body reader counts (`json`, `text`, `blob`, `arrayBuffer`, `formData`, `bytes`), whether reached through member or element access, destructuring, or `clone()`.
+- **Remaining declared bypasses:** a value that crosses a function or container boundary, and raw `fetch`, which eslint already bans.
+- **Self-test:** 23 new deny rows and 7 new allow rows, each red on the pre-change gate.
+- **Unmigrated member:** the Promise.all passkey-options read now goes through `readPasskeyOptions(parseJsonBodyOnce(…))`.
+
+### S3-6 / F-R3-4 — resolved
+- The team rotate button has a route-enumerated pre-commit refusal list. Any other outcome invalidates the cached team key, shows an "outcome unknown" toast and refreshes.
+- Pins:
+  - an allow pin;
+  - an over-broad mutant;
+  - a C11 pin that an unreadable 2xx counts as committed.
+
+### T3-1 — resolved
+- New deny rows: the exemption does not apply outside `src/lib`.
+- New allow rows: mixed type and value imports, and namespace imports.
+- Each row is red on its own mutant.
+- The namespace mutant turned out to be equivalent under the old predicate, so the predicate was rewritten until each clause is load-bearing. One consequence: an empty `import {}` no longer counts as a marker, which fails closed.
+
+### T3-2 — resolved
+- The success tests assert that `getSecretKey()` is non-zero and opens the sent verification artifact.
+- They are red on the alias mutant.
+
+### T3-3 — resolved
+- `deleted_pages` uses `--no-renames`, and the unused `added_pages` is removed.
+- Self-tests: R1, a moved referenced page, is flagged and red on the old gate; R2, a moved unreferenced page, is allowed.
+- No other `git diff` in the script relies on D/A filters with rename detection on.
+
+### T3-4 — resolved
+- `raceParkedOnUpdate` awaits `Promise.allSettled(requests)` after releasing the blocker.

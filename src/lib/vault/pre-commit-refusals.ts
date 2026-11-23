@@ -1,5 +1,16 @@
 import { API_ERROR } from "@/lib/http/api-error-codes";
 
+// Codes the proxy returns before any API route runs (src/lib/proxy/api-route.ts
+// session gate, src/lib/auth/session/csrf.ts), so they prove a POST wrote
+// nothing.
+export const PROXY_PRE_ROUTE_REFUSALS = [
+  API_ERROR.UNAUTHORIZED,
+  API_ERROR.ACCESS_DENIED,
+  API_ERROR.PASSKEY_REQUIRED,
+  API_ERROR.INVALID_ORIGIN,
+  API_ERROR.SERVICE_UNAVAILABLE,
+] as const;
+
 // Codes that every vault key-changing POST (change-passphrase, rotate-key,
 // recovery-key/generate) can only return before anything committed. Each
 // caller adds its route's own pre-commit refusals; anything else — a rejected
@@ -7,24 +18,19 @@ import { API_ERROR } from "@/lib/http/api-error-codes";
 // Next renders for an uncaught throw), or an unlisted code — leaves the
 // outcome unknown.
 //
-// Emitted before the route runs (src/lib/proxy/*, csrf.ts): UNAUTHORIZED,
-// ACCESS_DENIED, PASSKEY_REQUIRED, INVALID_ORIGIN, FORBIDDEN,
-// SERVICE_UNAVAILABLE.
+// Emitted before the route runs: PROXY_PRE_ROUTE_REFUSALS.
 // Emitted by each of those routes before its write: UNAUTHORIZED,
 // RATE_LIMIT_EXCEEDED, SERVICE_UNAVAILABLE (limiter fail-closed),
 // PAYLOAD_TOO_LARGE, INVALID_JSON, VALIDATION_ERROR, VAULT_NOT_SETUP,
-// INVALID_PASSPHRASE.
-export const PRE_ROUTE_AND_PRE_TX_REFUSALS = [
-  API_ERROR.UNAUTHORIZED,
-  API_ERROR.ACCESS_DENIED,
-  API_ERROR.PASSKEY_REQUIRED,
-  API_ERROR.INVALID_ORIGIN,
-  API_ERROR.FORBIDDEN,
-  API_ERROR.SERVICE_UNAVAILABLE,
+// VERIFIER_NOT_SET (no stored passphrase verifier, checked before the
+// transaction), INVALID_PASSPHRASE.
+export const PRE_ROUTE_AND_PRE_TX_REFUSALS: ReadonlySet<string> = new Set([
+  ...PROXY_PRE_ROUTE_REFUSALS,
   API_ERROR.RATE_LIMIT_EXCEEDED,
   API_ERROR.PAYLOAD_TOO_LARGE,
   API_ERROR.INVALID_JSON,
   API_ERROR.VALIDATION_ERROR,
   API_ERROR.VAULT_NOT_SETUP,
+  API_ERROR.VERIFIER_NOT_SET,
   API_ERROR.INVALID_PASSPHRASE,
-] as const;
+]);
