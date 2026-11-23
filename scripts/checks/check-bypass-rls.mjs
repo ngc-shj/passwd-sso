@@ -2851,6 +2851,7 @@ const POOL_FACTORY = "src/lib/db/pool-factory.ts";
 const POOL_RULE_ALLOWLIST = new Map([
   ["scripts/bootstrap-rds-roles.mjs", "operator DB-role tooling: connects as the superuser to create roles, runs no application code"],
   ["scripts/audit-db-grants.mjs", "operator DB-role tooling: reads the catalog as the superuser, runs no application code"],
+  ["scripts/run-integration-tests.mjs", "integration-test runner: connects as the superuser to the maintenance database to create, mark, prepare and drop a scratch database; runs no application code and sets no bypass"],
   ["scripts/rls-enforce-preflight.mjs", "deploy preflight: reads _prisma_migrations as the migration role before migrate deploy, runs no application code and sets no bypass"],
   ["src/__tests__/db-integration/setup.ts", "the suite's preflight probe: reads pg_stat_activity and role privileges before any pool exists"],
   ["src/__tests__/db-integration/bootstrap-rds-roles.integration.test.ts", "superuser clients that drive the role bootstrap under test"],

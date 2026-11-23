@@ -345,11 +345,23 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     }
   }
   // An ended session never renders an unlocked vault. Its key refs are dropped
-  // by the session-end effect below, which moves the lock epoch only when a
-  // key is held: a LOADING vault settling to LOCKED holds none.
+  // by the session-change effect below.
   if (sessionStatus === "unauthenticated" && vaultStatus === VAULT_STATUS.UNLOCKED) {
     setVaultStatus(VAULT_STATUS.LOCKED);
     setEncryptionKey(null);
+  }
+  // Nor does a switched user's: next-auth's setSession(B) goes authenticated →
+  // authenticated, and A's vault must not render unlocked under B's cookie.
+  // A switch is a change between two defined ids, so the last defined id is
+  // kept: undefined → id (the first id, or a refetch briefly carrying none) is
+  // not a switch, and a same-user refetch carries the same id.
+  const [prevSessionUserId, setPrevSessionUserId] = useState(sessionUserId);
+  if (sessionUserId !== undefined && sessionUserId !== prevSessionUserId) {
+    setPrevSessionUserId(sessionUserId);
+    if (prevSessionUserId !== undefined && vaultStatus === VAULT_STATUS.UNLOCKED) {
+      setVaultStatus(VAULT_STATUS.LOCKED);
+      setEncryptionKey(null);
+    }
   }
   // A passkey-gated session never fetches the vault status (see the status
   // effect), so LOADING settles to LOCKED here, during render, before the
@@ -386,8 +398,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // Bumped whenever the key material is dropped. Only dropKeyRefs writes it
   // and only dropKeyRefs drops key material, so the two cannot drift.
   const lockEpochRef = useRef(0);
-  // The session status as of the last commit, for installKeyMaterial.
+  // The session status and the last defined session user id as of the last
+  // commit, for the session-change effect and installKeyMaterial.
   const sessionStatusRef = useRef(sessionStatus);
+  const sessionUserIdRef = useRef(sessionUserId);
+  // Whether the last applied vault status said the server holds no vault. An
+  // unlock whose POST the server accepted before a reset must not install
+  // into it; only setup, which clears this once its POST commits, may.
+  const setupRequiredRef = useRef(false);
   // Counts unlocking installs (setup and the unlock paths), so a vault status
   // response can tell whether the vault was unlocked after its request started.
   // A change or rotation does not count: it re-keys a vault already unlocked,
@@ -431,10 +449,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
    * paths, changePassphrase and rotateKey. Synchronous: between its epoch check
    * and its writes nothing can run, so a lock since `epoch` (the flow's start)
    * either happened before the check — and nothing is installed — or happens
-   * after, and drops what was installed. It also refuses once the session has
-   * ended: the session-end effect has run (or is still to run and drops what
-   * this installs). Buffers are copied in; the caller zeroes its own. Returns
-   * false when it refused.
+   * after, and drops what was installed. A session end or user switch moves
+   * the epoch (the session-change effect), so a flow started before either is
+   * refused; one started after the session ended is refused by the status
+   * check. It also refuses while the server reports no vault (see
+   * setupRequiredRef). Buffers are copied in; the caller zeroes its own.
+   * Returns false when it refused.
    */
   const installKeyMaterial = useCallback(
     (
@@ -450,6 +470,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       },
     ): boolean => {
       if (lockEpochRef.current !== epoch || sessionStatusRef.current === "unauthenticated") return false;
+      if (setupRequiredRef.current) return false;
       if (material.markUnlocked) installCountRef.current += 1;
       if (material.secretKey) {
         // Every reader got a copy (getSecretKey), never this buffer.
@@ -487,17 +508,30 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  // A session that ends while a key is held drops the key refs and moves the
-  // epoch, so an in-flight change or rotation reports itself as not started or
-  // committed-while-locked; render has already left UNLOCKED. From here on
-  // installKeyMaterial refuses, so an unlock or setup in flight installs
-  // nothing. A layout effect, so the ref is current before any later task can
-  // resolve an unlock: a passive effect could still be pending when an install
-  // runs, letting it succeed for a session that has already ended.
+  // A session end or a user switch drops the key refs and moves the epoch —
+  // whether or not a key is held — so an in-flight change or rotation reports
+  // itself as not started or committed-while-locked, and an unlock or setup in
+  // flight installs nothing, even once another user's session has arrived;
+  // render has already left UNLOCKED. It also retires the outstanding vault
+  // status request: its answer is about the session that ended. A same-user
+  // refetch moves nothing, so a focus refetch never refuses an unlock. A layout
+  // effect, so the refs are current before any later task can resolve an
+  // unlock: a passive effect could still be pending when an install runs,
+  // letting it succeed for a session that has already ended.
   useLayoutEffect(() => {
+    const ended = sessionStatus === "unauthenticated" && sessionStatusRef.current !== "unauthenticated";
+    const switched =
+      sessionUserId !== undefined &&
+      sessionUserIdRef.current !== undefined &&
+      sessionUserId !== sessionUserIdRef.current;
     sessionStatusRef.current = sessionStatus;
-    if (sessionStatus === "unauthenticated" && secretKeyRef.current) dropKeyRefs();
-  }, [sessionStatus, dropKeyRefs]);
+    if (sessionUserId !== undefined) sessionUserIdRef.current = sessionUserId;
+    if (ended || switched) {
+      dropKeyRefs();
+      statusRequestRef.current += 1;
+      setupRequiredRef.current = false;
+    }
+  }, [sessionStatus, sessionUserId, dropKeyRefs]);
 
   // ─── Fetch vault status on session load ───────────────────────
 
@@ -512,10 +546,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     if (session.user.passkeyBlocked || session.user.passkeyStateDegraded) return;
 
     async function checkVaultStatus() {
-      // Only the latest request applies its response, and a setupRequired
-      // verdict is stale once the vault was unlocked (setup or an unlock
-      // installed) after the request started: it predates a setup that has
-      // since committed.
+      // Only the latest request applies its response. A setupRequired verdict
+      // may be stale once the vault was unlocked (setup or an unlock
+      // installed) after the request started — it may predate a setup that
+      // has since committed — or genuine (the vault was reset after that
+      // unlock), so it is asked again and the newest answer decides.
       const request = ++statusRequestRef.current;
       const installsAtStart = installCountRef.current;
       const isLatest = () => request === statusRequestRef.current;
@@ -548,15 +583,18 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           requireNumbers: data.tenantRequireNumbers ?? false,
           requireSymbols: data.tenantRequireSymbols ?? false,
         });
-        if (data.setupRequired && installCountRef.current === installsAtStart) {
+        if (data.setupRequired) {
+          if (installCountRef.current !== installsAtStart) return checkVaultStatus();
           // SETUP_REQUIRED always wins (the vault was reset while unlocked):
           // the key material of the reset vault is dropped first. Only when
           // some is held — a status re-check while setup is in flight must not
           // move the epoch, or the setup's install would be refused.
           if (secretKeyRef.current) dropKeyMaterial();
+          setupRequiredRef.current = true;
           setVaultStatus(VAULT_STATUS.SETUP_REQUIRED);
           return;
         }
+        setupRequiredRef.current = false;
         // Never overwrite "unlocked" — only the lock timer should do that
         setVaultStatus((prev) => (prev === VAULT_STATUS.UNLOCKED ? prev : VAULT_STATUS.LOCKED));
       } catch {
@@ -684,9 +722,19 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       });
 
       if (!res.ok) {
+        // A refused session needs a new sign-in, as for the unlock paths.
+        if (res.status === 401) throw new VaultUnlockError(API_ERROR.UNAUTHORIZED);
         const err = await readApiErrorBody(res);
+        // The vault exists (this setup's 201 was lost and it was retried, or
+        // another tab set it up): leave it LOCKED for an unlock.
+        if (err?.error === API_ERROR.VAULT_ALREADY_SETUP) {
+          setupRequiredRef.current = false;
+          setVaultStatus((prev) => (prev === VAULT_STATUS.UNLOCKED ? prev : VAULT_STATUS.LOCKED));
+          return;
+        }
         throw new Error(err?.error || "Setup failed");
       }
+      setupRequiredRef.current = false;
 
       // 10. Store secretKey, keyVersion, accountSalt, wrappedKey, ECDH keys, and
       // encryption key in memory — unless the page was hidden (or the provider

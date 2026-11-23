@@ -265,7 +265,7 @@ describe("personal keyVersion guard — real-DB integration (C6)", () => {
       const entryId = await seedPasswordEntry(ctx, userId, tenantId, v1);
       const v2 = v1 + 1;
 
-      const writerHoldsShare = new Deferred();
+      const writerHoldsShare = new Deferred<number>();
       const releaseWriter = new Deferred();
       const rotationBlocked = new Deferred<boolean>();
 
@@ -293,7 +293,8 @@ describe("personal keyVersion guard — real-DB integration (C6)", () => {
               `SELECT key_version FROM users WHERE id = $1::uuid FOR SHARE`,
               [userId],
             );
-            writerHoldsShare.resolve();
+            const { rows: [own] } = await client.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`);
+            writerHoldsShare.resolve(own.pid);
             await releaseWriter.promise;
             await client.query("COMMIT");
           } finally {
@@ -301,7 +302,7 @@ describe("personal keyVersion guard — real-DB integration (C6)", () => {
           }
         })();
 
-        await writerHoldsShare.promise;
+        const writerPid = await writerHoldsShare.promise;
 
         // Rotation: attempts its FOR UPDATE CAS — must block behind the
         // writer's FOR SHARE lock on the same users row.
@@ -313,24 +314,19 @@ describe("personal keyVersion guard — real-DB integration (C6)", () => {
           return rotResultPromise;
         })();
 
-        // Witness: poll pg_blocking_pids for the rotation backend. Because
-        // rotation runs through ctx.su.prisma's own pool (not a directly
-        // observable single connection), poll pg_locks for an ungranted
-        // transactionid wait originating from a backend blocked on the
-        // users row, using pg_blocking_pids as the PRIMARY witness.
+        // Witness: poll pg_blocking_pids for a backend the writer's lock
+        // blocks. Rotation runs through ctx.su.prisma's own pool (not a
+        // directly observable single connection), so the witness keys on the
+        // writer's pid: any other blocked session on the cluster, this one's
+        // or another database's, is not this test's contention.
         const witnessPromise = (async () => {
           const deadline = Date.now() + 3000;
           while (Date.now() < deadline) {
-            const r = await instanceWitness.pool.query<{
-              pid: number;
-              blocked_by: number[];
-            }>(
-              `SELECT pid, pg_blocking_pids(pid) AS blocked_by
-               FROM pg_stat_activity
-               WHERE state = 'active'
-                 AND (query ILIKE '%FOR UPDATE%users%' OR query ILIKE '%users%FOR UPDATE%')`,
+            const r = await instanceWitness.pool.query<{ pid: number }>(
+              `SELECT pid FROM pg_stat_activity WHERE $1::int = ANY(pg_blocking_pids(pid))`,
+              [writerPid],
             );
-            const blocked = r.rows.find((row) => row.blocked_by.length > 0);
+            const blocked = r.rows[0];
             if (blocked) {
               rotationBlocked.resolve(true);
               return;
@@ -373,7 +369,7 @@ describe("personal keyVersion guard — real-DB integration (C6)", () => {
       const entryId = await seedPasswordEntry(ctx, userId, tenantId, v1);
       const v2 = v1 + 1;
 
-      const rotationHoldsUpdate = new Deferred();
+      const rotationHoldsUpdate = new Deferred<number>();
       const releaseRotation = new Deferred();
       const writerBlocked = new Deferred<boolean>();
 
@@ -401,7 +397,8 @@ describe("personal keyVersion guard — real-DB integration (C6)", () => {
               `SELECT key_version, vault_setup_at, account_salt FROM users WHERE id = $1::uuid FOR UPDATE`,
               [userId],
             );
-            rotationHoldsUpdate.resolve();
+            const { rows: [own] } = await client.query<{ pid: number }>(`SELECT pg_backend_pid() AS pid`);
+            rotationHoldsUpdate.resolve(own.pid);
             await releaseRotation.promise;
             // Bump key_version to v2 before releasing, mirroring what
             // applyVaultRotation's user.update does inside the same tx.
@@ -415,7 +412,7 @@ describe("personal keyVersion guard — real-DB integration (C6)", () => {
           }
         })();
 
-        await rotationHoldsUpdate.promise;
+        const rotationPid = await rotationHoldsUpdate.promise;
 
         // Writer: PUT with the CURRENT (v1) keyVersion — its guard read
         // should block behind rotation's FOR UPDATE, then observe v2 → 409.
@@ -429,10 +426,12 @@ describe("personal keyVersion guard — real-DB integration (C6)", () => {
         const witnessPromise = (async () => {
           const deadline = Date.now() + 3000;
           while (Date.now() < deadline) {
+            // Blocked by the rotation's lock, not any ungranted wait on the cluster.
             const r = await instanceWitness.pool.query<{ count: string }>(
               `SELECT COUNT(*)::text AS count
-               FROM pg_locks
-               WHERE locktype = 'transactionid' AND NOT granted`,
+               FROM pg_stat_activity
+               WHERE $1::int = ANY(pg_blocking_pids(pid))`,
+              [rotationPid],
             );
             if (parseInt(r.rows[0].count, 10) > 0) {
               writerBlocked.resolve(true);

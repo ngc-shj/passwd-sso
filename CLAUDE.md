@@ -54,33 +54,28 @@ npm run worker:audit-outbox    # Run the outbox worker (requires OUTBOX_WORKER_D
 npm run worker:retention-gc    # Run the retention GC worker (requires RETENTION_GC_DATABASE_URL)
 npm run worker:audit-anchor-publisher  # Run the audit-anchor publisher (AUDIT_ANCHOR_PUBLISHER_ENABLED=true + DEPLOYMENT_ID, AUDIT_ANCHOR_SIGNING_KEY, AUDIT_ANCHOR_TAG_SECRET, a destination; production requires AUDIT_ANCHOR_PUBLISHER_DATABASE_URL)
 npm run worker:audit-chain-verify      # Run the audit-chain verify worker (AUDIT_CHAIN_VERIFY_DATABASE_URL — passwd_audit_chain_verifier; DATABASE_URL fallback outside production only)
-npm run test:integration       # Run real-DB integration tests (requires running Postgres)
+npm run test:integration       # Run real-DB integration tests on a scratch database created and dropped per run (requires running Postgres; `-- <vitest args>` filters)
 ```
 
-**Integration tests and the outbox worker cannot share a database.** These tests
-drive worker functions (`processWebhookDeliveryBatch`, the outbox drain, the
-reapers) against real rows, and those claims are `FOR UPDATE SKIP LOCKED` over
-the whole table — not tenant-scoped — while the retention sweep deletes delivery
-rows outright. A live worker on the same database therefore competes for the rows
-a test just inserted and wins some of the time, producing a ~50% flake that
-surfaces as an unrelated assertion failure. `npm run docker:up` starts
-`audit-outbox-worker` against the dev database, so the normal local state is the
-racing one. `src/__tests__/db-integration/setup.ts` detects this by
-`application_name` in `pg_stat_activity` and refuses to run, naming each
-detected worker and how to stop that one. The dev compose workers touch these
-tables, so stop both:
-
-```bash
-docker compose stop audit-outbox-worker retention-gc-worker
-npm run test:integration
-docker compose start audit-outbox-worker retention-gc-worker
-```
-
-The audit-anchor-publisher is a compose service only in `docker-compose.workers.yml`; if that overlay
-is running on this host, stop it with `docker compose -f docker-compose.yml -f docker-compose.workers.yml stop audit-anchor-publisher`,
-or stop the process if you started one by hand.
-
-CI runs no worker container alongside the integration job, so the check is silent there.
+**Integration tests run only on a scratch database.** These tests write and
+delete rows and drive worker functions (`processWebhookDeliveryBatch`, the outbox
+drain, the reapers) whose claims are `FOR UPDATE SKIP LOCKED` over the whole
+table, so on a shared database a live worker races them and rows a crashed run
+left behind break later runs. `npm run test:integration`
+(`scripts/run-integration-tests.mjs`) therefore creates an empty database
+(`passwd_it_<stamp>_<pid>_<hex>`) on the cluster `MIGRATION_DATABASE_URL` names,
+marks it with `COMMENT ON DATABASE`, applies the per-database half of
+`bootstrap-rds-roles.mjs`, `prisma migrate deploy`, `--denied-only` and
+`db:check-drift`, runs the suite with every `*_DATABASE_URL` pointed at it, and
+drops it however the run ends (a failed drop prints
+`INTEGRATION_CLEANUP_INCOMPLETE` and exits nonzero; a SIGKILLed run's leftover is
+dropped by the next run on the same host). `src/__tests__/db-integration/setup.ts`
+refuses any database without the name and the marker, so a bare
+`vitest --config vitest.integration.config.ts` against the dev database fails
+fast. The compose workers keep running: nothing points them at the scratch
+database. Roles are cluster-wide and must already exist (initdb locally); the
+runner never changes them and fails if a migration changed an existing role's
+cluster-wide state. CI uses the same runner on its per-job cluster.
 
 Docker (dev): `npm run docker:up` (wraps `docker compose -f docker-compose.yml -f docker-compose.override.yml up`). Stop with `npm run docker:down`.
 

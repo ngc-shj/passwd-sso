@@ -254,6 +254,20 @@ describe("TravelModeCard flows", () => {
     expect(screen.queryByText("passphraseIncorrect")).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["SERVICE_UNAVAILABLE", "retryLater"],
+    ["RATE_LIMIT_EXCEEDED", "rateLimited"],
+  ])("shows %s as %s, not as a generic failure or a wrong passphrase", async (error, expected) => {
+    renderActive(vi.fn().mockResolvedValue({ success: false, error }));
+    fireEvent.change(screen.getByLabelText("passphrasePlaceholder"), { target: { value: "pw" } });
+
+    submitDisable();
+
+    expect(await screen.findByText(expected)).toBeInTheDocument();
+    expect(screen.queryByText("disableFailed")).not.toBeInTheDocument();
+    expect(screen.queryByText("passphraseIncorrect")).not.toBeInTheDocument();
+  });
+
   it("shows the lockout with its remaining time on ACCOUNT_LOCKED", async () => {
     const lockedUntil = new Date(Date.now() + 29.5 * 60 * 1000).toISOString();
     renderActive(vi.fn().mockResolvedValue({ success: false, error: "ACCOUNT_LOCKED", lockedUntil }));

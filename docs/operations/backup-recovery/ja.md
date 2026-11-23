@@ -282,6 +282,10 @@ BACKUP_DIR=/var/backups/passwd-sso \
   パラメータ（`password`、`passfile`、`service`、`oauth_client_secret`、`host`、
   `hostaddr`、`gssencmode`、`dbname` ほか）は拒否し、パスワードはモード 0600 の
   パスファイル経由で渡すのでどのプロセスの argv にも現れません。
+  パスファイルは実行の終了時に削除します。削除できなかった場合はそのパスを警告し、
+  バックアップ自体が成功していれば `BACKUP_ERR:CLEANUP_INCOMPLETE` で終了コード 1
+  を返します。世代は公開済みですが、パスワードがディスクに残っています。ファイルを
+  削除してください（次回の実行でも掃除されます）。
 - **`BACKUP_DATABASES` は既定値であって探索結果ではありません。** マネージド
   インスタンスでは名前が Compose 構成と異なるのが普通です。スクリプトはテンプレート
   以外のすべてのデータベースを列挙し、一覧に無いものを警告して MANIFEST の

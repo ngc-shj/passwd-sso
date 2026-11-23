@@ -1,12 +1,12 @@
 /**
  * Setup file for real-DB integration tests.
- * Loads .env (canonical) then .env.local (per-developer override) — matches
- * the project convention documented in CLAUDE.md and src/lib/load-env.ts.
+ * Loads .env.local then .env without overriding what is already exported
+ * (src/lib/load-env.ts): scripts/run-integration-tests.mjs exports the scratch
+ * database's URLs, and a DATABASE_URL in .env.local must not replace them.
  * Does NOT set up mocks — integration tests run against a real database.
  */
-import { config } from "dotenv";
-config({ path: ".env" });
-config({ path: ".env.local", override: true });
+import { loadEnv } from "@/lib/load-env";
+loadEnv();
 
 // A fallback only, for a runner that exported nothing but MIGRATION_DATABASE_URL.
 // The harness's superuser comes from MIGRATION_DATABASE_URL itself
@@ -16,54 +16,6 @@ if (!process.env.DATABASE_URL && process.env.MIGRATION_DATABASE_URL) {
   process.env.DATABASE_URL = process.env.MIGRATION_DATABASE_URL;
 }
 
-/**
- * Refuse to run against a database a background worker is also draining.
- *
- * These tests drive worker functions (processWebhookDeliveryBatch, the outbox
- * drain, the reapers) directly against real rows. Those claims are
- * `FOR UPDATE SKIP LOCKED` over the whole table, not scoped to a tenant, and
- * the retention sweep deletes delivery rows outright — so a live worker on the
- * same database competes for the very rows a test just inserted. It wins some
- * of the time, and the test then observes a partial result and fails on an
- * assertion that has nothing to do with the code under test.
- *
- * `npm run docker:up` starts audit-outbox-worker against the dev database,
- * which is the same one .env points these tests at, so the normal local state
- * is the racing one. CI runs no worker container, so this check is silent there.
- *
- * A ~50% flake that blames an unrelated assertion is worse than a refusal: it
- * teaches people to re-run until green. Fail fast and name the fix instead.
- */
-/**
- * Each worker's pool application_name, mapped to how you actually stop it.
- * Naming only the outbox worker would leave someone who tripped the check on
- * the retention GC following an instruction that does not apply to them.
- */
-const WORKERS: ReadonlyArray<{
-  applicationName: string;
-  stop: string;
-  /** Undefined when there is nothing to restart with a command. */
-  restart?: string;
-}> = [
-  {
-    applicationName: "passwd-sso-outbox-worker",
-    stop: "docker compose stop audit-outbox-worker",
-    restart: "docker compose start audit-outbox-worker",
-  },
-  {
-    applicationName: "passwd-sso-retention-gc-worker",
-    stop: "docker compose stop retention-gc-worker",
-    restart: "docker compose start retention-gc-worker",
-  },
-  {
-    // A compose service only in docker-compose.workers.yml, so the -f set must
-    // name it; a publisher run by hand has no container to stop.
-    applicationName: "passwd-sso-audit-anchor-publisher",
-    stop: "docker compose -f docker-compose.yml -f docker-compose.workers.yml stop audit-anchor-publisher (or stop the process you started by hand)",
-    restart: "docker compose -f docker-compose.yml -f docker-compose.workers.yml start audit-anchor-publisher",
-  },
-];
-
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
   throw new Error(
@@ -72,39 +24,32 @@ if (!databaseUrl) {
 }
 
 const { Client } = await import("pg");
+const { scratchDatabaseRefusal } = await import("../../../scripts/lib/integration-scratch-db.mjs");
 const probe = new Client({ connectionString: databaseUrl });
 try {
   await probe.connect();
-  const { rows } = await probe.query<{ application_name: string; count: string }>(
-    `SELECT application_name, count(*) AS count
-       FROM pg_stat_activity
-      WHERE datname = current_database()
-        AND application_name = ANY($1::text[])
-      GROUP BY application_name`,
-    [WORKERS.map((w) => w.applicationName)],
+  // Only a database scripts/run-integration-tests.mjs created for this run:
+  // the suite writes and deletes rows and drives worker claims over whole
+  // tables, so a shared database (the dev one, which a live instance and the
+  // compose workers use) both suffers that and feeds the suite leftovers, and
+  // its workers race the suite for the same rows. No worker connects to a
+  // database created for one run unless pointed at it by name, which is why
+  // the former worker-detection refusal is gone. The role-URL check below
+  // holds every other connection to this same database.
+  const { rows: self } = await probe.query<{ name: string; comment: string | null }>(
+    `SELECT d.datname AS name, shobj_description(d.oid, 'pg_database') AS comment
+       FROM pg_database d
+      WHERE d.datname = current_database()`,
   );
-  if (rows.length > 0) {
-    const detected = rows.map((r) => ({
-      row: r,
-      worker: WORKERS.find((w) => w.applicationName === r.application_name),
-    }));
-    const restarts = detected
-      .map((d) => d.worker?.restart)
-      .filter((cmd): cmd is string => Boolean(cmd));
+  const refusal = scratchDatabaseRefusal(self[0]?.name, self[0]?.comment ?? null);
+  if (refusal) {
     throw new Error(
       [
-        `Refusing to run integration tests: a background worker is connected to the same database.`,
+        `Refusing to run integration tests: ${refusal}.`,
         ``,
-        ...detected.map(
-          ({ row, worker }) =>
-            `  ${row.application_name} (${row.count} connection(s)) — ${worker?.stop ?? "stop that worker"}`,
-        ),
-        ``,
-        `These tests claim and mutate the same outbox / delivery rows the worker drains,`,
-        `so results would be non-deterministic. Stop the worker(s) above, then re-run.`,
-        // Only offered for workers that actually have a restart command, so
-        // nobody is told to `docker compose start` something with no service.
-        ...(restarts.length > 0 ? [``, `Restart afterwards with:`, ...restarts.map((c) => `  ${c}`)] : []),
+        `Run them with \`npm run test:integration\` (scripts/run-integration-tests.mjs), which creates an empty`,
+        `scratch database on the cluster MIGRATION_DATABASE_URL names, migrates it, runs this suite on it and`,
+        `drops it. Pass vitest arguments after \`--\`, e.g. \`npm run test:integration -- vault\`.`,
       ].join("\n"),
     );
   }

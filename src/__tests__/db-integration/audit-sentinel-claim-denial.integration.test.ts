@@ -37,7 +37,7 @@
  * teardown as a second line of defense and reports a VC2 violation by name
  * rather than passing vacuously.
  */
-import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from "vitest";
 import { randomUUID } from "node:crypto";
 import type { Account } from "next-auth";
 
@@ -79,6 +79,30 @@ describe("C3: a sentinel-pointing tenant_claims row denies sign-in reportably", 
 
   afterAll(async () => {
     await ctx.cleanup();
+  });
+
+  // dropSentinelClaim can purge the events its claim produced only while the
+  // sentinel holds nothing else: the purge routine is scoped to the whole
+  // tenant. Refused up front, before a claim is written, rather than leaving
+  // this case's events behind on the sentinel for the C12 block of
+  // tenant-claim-cli to refuse on.
+  beforeEach(async () => {
+    const rows = await ctx.su.prisma.$queryRaw<{ claims: string[]; events: bigint }[]>`
+      SELECT
+        ARRAY(SELECT claim FROM tenant_claims WHERE tenant_id = ${SYSTEM_TENANT_ID}::uuid ORDER BY claim) AS claims,
+        (SELECT COUNT(*)::bigint FROM tenant_claim_events
+           WHERE old_tenant_id = ${SYSTEM_TENANT_ID}::uuid
+              OR new_tenant_id = ${SYSTEM_TENANT_ID}::uuid) AS events
+    `;
+    const claims = rows[0]?.claims ?? [];
+    const events = Number(rows[0]?.events ?? 0);
+    if (claims.length > 0 || events > 0) {
+      throw new Error(
+        `[C3] refusing to run: the sentinel tenant already holds claim(s) [${claims.join(", ")}] and ` +
+          `${events} claim event(s) this case did not write, so its teardown could not purge ` +
+          "its own events. See docs/operations/sentinel-tenant-membership.md before removing anything.",
+      );
+    }
   });
 
   /**

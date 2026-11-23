@@ -292,6 +292,10 @@ BACKUP_DIR=/var/backups/passwd-sso \
   `oauth_client_secret`, `host`, `hostaddr`, `gssencmode`, `dbname`, …) are
   refused, and the password is delivered through a mode-0600 passfile so it
   never reaches any process's argv.
+  The passfile is removed when the run ends. If it cannot be, the run warns
+  with its path and — when the backup itself succeeded — exits 1 with
+  `BACKUP_ERR:CLEANUP_INCOMPLETE`: the generation is published, but the
+  password is still on disk. Remove the file; the next run also sweeps it.
 - **`BACKUP_DATABASES` is a default, not a discovery.** On a managed instance
   the names usually differ from the Compose deployment's. The script enumerates
   every non-template database, warns for each one absent from the list, and

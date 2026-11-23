@@ -158,6 +158,11 @@ create_scratch() {
   fi
   SCRATCH_DB="$name"
   pg_exec postgres -c "CREATE DATABASE \"$name\" TEMPLATE \"$TEMPLATE\"" >/dev/null
+  local marker
+  marker="$(node --input-type=module -e 'import { scratchMarker } from "./scripts/lib/integration-scratch-db.mjs"; console.log(scratchMarker({ host: (await import("node:os")).hostname(), pid: Number(process.argv[1]), createdAt: new Date() }))' "$$")"
+  local comment_sql
+  comment_sql="$(pg_exec postgres -c "SELECT format('COMMENT ON DATABASE %I IS %L', \$1::text, \$2::text)" "$name" "$marker")"
+  pg_exec postgres -c "$comment_sql" >/dev/null
   # CREATE DATABASE does not copy the database ACL: replicate it, PUBLIC included.
   pg_exec postgres -c "
     DO \$do\$
@@ -286,7 +291,9 @@ run_row() {
   [[ "$n" == "1" ]] || { echo "row $row: exactly one of function.patch, mutation.sql, source.patch" >&2; return 1; }
 
   local db
-  db="rp_dmg_$(printf '%s' "$row" | tr -c 'a-z0-9' '_' | cut -c1-30)_$$_$RANDOM"
+  # A scratch-database name and marker (scripts/lib/integration-scratch-db.mjs):
+  # the integration harness refuses any database without both.
+  db="$(node --input-type=module -e 'import { scratchDatabaseName } from "./scripts/lib/integration-scratch-db.mjs"; console.log(scratchDatabaseName())')"
   echo "== $row (scratch database $db)"
   create_scratch "$db" || { cleanup; return 1; }
   local line

@@ -36,7 +36,8 @@ import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-re
 export function TravelModeCard() {
   const t = useTranslations("TravelMode");
   // The disable route shares the vault-unlock lockout, so its lockout copy
-  // comes from the Vault namespace that formatLockedUntil reads.
+  // comes from the Vault namespace that formatLockedUntil reads; so do its
+  // rate-limit and retry-later copies, as on the vault lock screen.
   const tVault = useTranslations("Vault");
   const tAuth = useTranslations("Auth");
   const travelMode = useTravelMode();
@@ -87,6 +88,12 @@ export function TravelModeCard() {
         setDisableError(t("passphraseIncorrect"));
       } else if (result.error === API_ERROR.ACCOUNT_LOCKED) {
         setDisableError(formatLockedUntil(result.lockedUntil, tVault));
+      } else if (result.error === API_ERROR.RATE_LIMIT_EXCEEDED) {
+        setDisableError(tVault("rateLimited"));
+      } else if (result.error === API_ERROR.SERVICE_UNAVAILABLE) {
+        // The server could not check the passphrase (e.g. its verifier pepper
+        // is not configured): the same passphrase may succeed on a retry.
+        setDisableError(tVault("retryLater"));
       } else if (result.error === API_ERROR.UNAUTHORIZED) {
         // The session expired: no passphrase can succeed, so leave the
         // dialog for a fresh sign-in.

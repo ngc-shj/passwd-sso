@@ -384,7 +384,7 @@ describe("POST /api/share-links/verify-access", () => {
     expect(status).toBe(200);
   });
 
-  it("emits VERIFIER_PEPPER_MISSING audit and returns 403 when pepper version is missing", async () => {
+  it("answers 503 with one VERIFIER_PEPPER_MISSING audit and no VERIFY_FAILED row when the pepper version is missing", async () => {
     mockVerifyAccessPassword.mockReturnValue({ ok: false, reason: "MISSING_PEPPER_VERSION" });
 
     const res = await POST(
@@ -392,9 +392,11 @@ describe("POST /api/share-links/verify-access", () => {
         body: validBody,
       }),
     );
-    const { status } = await parseResponse(res);
+    const { status, json } = await parseResponse(res);
 
-    expect(status).toBe(403);
+    expect(status).toBe(503);
+    expect(json.error).toBe("SERVICE_UNAVAILABLE");
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "VERIFIER_PEPPER_MISSING",
@@ -402,7 +404,44 @@ describe("POST /api/share-links/verify-access", () => {
         userId: ANONYMOUS_ACTOR_ID,
         actorType: "ANONYMOUS",
         scope: "TENANT",
+        targetId: "share-1",
+        metadata: { storedVersion: 1 },
       }),
     );
+    expect(mockCreateShareAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("answers a wrong password with SHARE_PASSWORD_INCORRECT and one VERIFY_FAILED row, no pepper audit", async () => {
+    mockVerifyAccessPassword.mockReturnValue({ ok: false, reason: "WRONG_PASSPHRASE" });
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/share-links/verify-access", {
+        body: validBody,
+      }),
+    );
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SHARE_PASSWORD_INCORRECT");
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "SHARE_ACCESS_VERIFY_FAILED" }),
+    );
+    expect(mockCreateShareAccessToken).not.toHaveBeenCalled();
+  });
+
+  it("refuses an unrecognised refusal reason as a wrong password, never as success", async () => {
+    mockVerifyAccessPassword.mockReturnValue({ ok: false, reason: "SOMETHING_NEW" });
+
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/share-links/verify-access", {
+        body: validBody,
+      }),
+    );
+    const { status, json } = await parseResponse(res);
+
+    expect(status).toBe(403);
+    expect(json.error).toBe("SHARE_PASSWORD_INCORRECT");
+    expect(mockCreateShareAccessToken).not.toHaveBeenCalled();
   });
 });

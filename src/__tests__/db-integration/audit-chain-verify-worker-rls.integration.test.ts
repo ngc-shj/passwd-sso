@@ -46,6 +46,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type pg from "pg";
 import {
   assertRlsApplies,
@@ -514,15 +515,23 @@ describe("audit-chain verify worker boots as the verifier role", () => {
     expect(url.username).toBe(VERIFIER_ROLE);
     url.searchParams.set("application_name", BOOT_APPLICATION_NAME);
 
+    // tsx loaded in-process, not the tsx CLI: the CLI relays SIGTERM to its
+    // child, waits 30 ms for an acknowledgement, and under load SIGKILLs the
+    // child and exits 143 itself, whatever the worker's handler does.
     const child = spawn(
-      join(REPO_ROOT, "node_modules/.bin/tsx"),
-      ["--tsconfig", join(REPO_ROOT, "tsconfig.json"), join(REPO_ROOT, "scripts/audit-chain-verify-worker.ts")],
+      process.execPath,
+      [
+        "--import",
+        pathToFileURL(join(REPO_ROOT, "node_modules/tsx/dist/loader.mjs")).href,
+        join(REPO_ROOT, "scripts/audit-chain-verify-worker.ts"),
+      ],
       {
         // Only what the cell names: no DATABASE_URL to fall back on, and no
         // inherited NODE_ENV or worker setting (the type marks NODE_ENV required).
         env: {
           NODE_ENV: "test",
           PATH: process.env.PATH,
+          TSX_TSCONFIG_PATH: join(REPO_ROOT, "tsconfig.json"),
           AUDIT_CHAIN_VERIFY_DATABASE_URL: url.toString(),
           AUDIT_CHAIN_VERIFY_TICK_INTERVAL_MS: "1000",
         },

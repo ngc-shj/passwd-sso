@@ -16,13 +16,22 @@ import { spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve, dirname } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, "..", "..");
 const WORKER = resolve(REPO_ROOT, "scripts", "audit-chain-verify-worker.ts");
 const TSX = resolve(REPO_ROOT, "node_modules/.bin/tsx");
 const TSX_ARGS = ["--tsconfig", resolve(REPO_ROOT, "tsconfig.json"), WORKER];
+// Signal cells load tsx in-process instead. The tsx CLI relays a signal to its
+// child and waits 30 ms for an acknowledgement; under load it misses that,
+// SIGKILLs the child and exits 143 itself, whatever the worker's handler does.
+const TSX_IN_PROCESS_ARGS = [
+  "--import",
+  pathToFileURL(resolve(REPO_ROOT, "node_modules/tsx/dist/loader.mjs")).href,
+  WORKER,
+];
+const TSX_IN_PROCESS_ENV = { TSX_TSCONFIG_PATH: resolve(REPO_ROOT, "tsconfig.json") };
 
 const VALID_URL = "postgresql://passwd_app:secret-pw@db:5432/passwd_sso";
 // Port 1 on loopback: the connection is refused at once.
@@ -155,8 +164,8 @@ describe("audit-chain-verify-worker shutdown", () => {
   });
 
   it("exits promptly on SIGTERM during the sleep between ticks", async () => {
-    const child = spawn(TSX, TSX_ARGS, {
-      env: { PATH: process.env.PATH, AUDIT_CHAIN_VERIFY_DATABASE_URL: REFUSED_URL },
+    const child = spawn(process.execPath, TSX_IN_PROCESS_ARGS, {
+      env: { PATH: process.env.PATH, ...TSX_IN_PROCESS_ENV, AUDIT_CHAIN_VERIFY_DATABASE_URL: REFUSED_URL },
       cwd,
       stdio: ["ignore", "pipe", "pipe"],
     });

@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { useVault } from "@/lib/vault/vault-context";
+import { resolveUnlockError } from "./vault-lock-screen";
+import { SessionExpiredCard } from "./session-expired-card";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +33,7 @@ export function VaultSetupWizard({ contextMessage }: VaultSetupWizardProps) {
   const [showPassphrase, setShowPassphrase] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const isValid =
     passphrase.length >= PASSPHRASE_MIN_LENGTH &&
@@ -44,14 +47,30 @@ export function VaultSetupWizard({ contextMessage }: VaultSetupWizardProps) {
     setError("");
     try {
       await setup(passphrase);
-    } catch {
-      setError(t("setupError"));
+    } catch (err) {
+      // Setup throws UNAUTHORIZED when the session was refused or has ended:
+      // retrying cannot succeed, so route to sign-in as the lock screen does.
+      const setupError = t("setupError");
+      const resolved = resolveUnlockError(err, {
+        lockedUntil: () => setupError,
+        rateLimited: setupError,
+        unavailable: setupError,
+        interrupted: setupError,
+        fallback: setupError,
+      });
+      if (resolved.kind === "sessionExpired") {
+        setSessionExpired(true);
+      } else {
+        setError(resolved.message);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const strength = getStrength(passphrase);
+
+  if (sessionExpired) return <SessionExpiredCard />;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">

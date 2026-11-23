@@ -5,17 +5,24 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
-const { mockSetup, mockGetStrength } = vi.hoisted(() => ({
+const { mockSetup, mockGetStrength, mockPush } = vi.hoisted(() => ({
   mockSetup: vi.fn(),
   mockGetStrength: vi.fn(),
+  mockPush: vi.fn(),
 }));
 
 vi.mock("next-intl", () => ({
   useTranslations: () => (key: string) => key,
 }));
 
-vi.mock("@/lib/vault/vault-context", () => ({
+vi.mock("@/lib/vault/vault-context", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/vault/vault-context")>()),
   useVault: () => ({ setup: mockSetup }),
+}));
+
+vi.mock("@/i18n/navigation", () => ({
+  useRouter: () => ({ push: mockPush }),
+  Link: "a",
 }));
 
 vi.mock("@/lib/ui/ime-guard", () => ({
@@ -54,6 +61,8 @@ vi.mock("@/lib/validations", () => ({
 }));
 
 import { VaultSetupWizard } from "./vault-setup-wizard";
+import { VaultUnlockError, VAULT_UNLOCK_INTERRUPTED } from "@/lib/vault/vault-context";
+import { API_ERROR } from "@/lib/http/api-error-codes";
 
 // ── Tests ───────────────────────────────────────────────────
 
@@ -185,7 +194,37 @@ describe("VaultSetupWizard form behavior", () => {
     fireEvent.click(screen.getByText("setupButton"));
 
     expect(await screen.findByText("setupError")).toBeInTheDocument();
+    expect(screen.queryByText("sessionExpired")).toBeNull();
     expect(screen.getByText("setupButton")).not.toBeDisabled();
+  });
+
+  // A refused or ended session cannot be retried from the form: setup throws
+  // UNAUTHORIZED and the wizard routes to sign-in, as the lock screen does.
+  it("shows the session-expired screen and routes to sign-in when setup throws UNAUTHORIZED", async () => {
+    mockSetup.mockRejectedValue(new VaultUnlockError(API_ERROR.UNAUTHORIZED));
+    render(<VaultSetupWizard />);
+    typeInto("passphrase", VALID_PASSPHRASE);
+    typeInto("confirmPassphrase", VALID_PASSPHRASE);
+
+    fireEvent.click(screen.getByText("setupButton"));
+
+    expect(await screen.findByText("sessionExpired")).toBeInTheDocument();
+    expect(screen.queryByText("setupError")).toBeNull();
+    expect(screen.queryByLabelText("passphrase")).toBeNull();
+    fireEvent.click(screen.getByText("goToSignIn"));
+    expect(mockPush).toHaveBeenCalledWith("/auth/signin");
+  });
+
+  it("shows the setup error, not the session-expired screen, for another unlock error code", async () => {
+    mockSetup.mockRejectedValue(new VaultUnlockError(VAULT_UNLOCK_INTERRUPTED));
+    render(<VaultSetupWizard />);
+    typeInto("passphrase", VALID_PASSPHRASE);
+    typeInto("confirmPassphrase", VALID_PASSPHRASE);
+
+    fireEvent.click(screen.getByText("setupButton"));
+
+    expect(await screen.findByText("setupError")).toBeInTheDocument();
+    expect(screen.queryByText("sessionExpired")).toBeNull();
   });
 
   it("toggles the passphrase input between hidden and visible", () => {

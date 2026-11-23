@@ -37,6 +37,7 @@ import { buildManifestArtifactKey } from "@/lib/audit/anchor-artifact-keys";
 import { kidForPublicKey, publicKeyForSigningKey } from "@/lib/audit/anchor-manifest";
 import { archivePublicKey } from "@/__tests__/helpers/anchor-manifest-fixtures";
 import { setBypassRlsGucs, type PrismaWithPool, type TestContext } from "./helpers";
+import { assertNoForeignRows } from "./foreign-rows";
 
 export const CADENCE_MS = MS_PER_DAY;
 export const OFFSET_MS = 5 * MS_PER_MINUTE;
@@ -123,17 +124,12 @@ export async function writeSetting(su: PrismaWithPool, key: string, value: strin
 
 /** Fail unless the only chain-enabled tenants are `allowed`. */
 export async function assertOnlyChainEnabledTenants(su: PrismaWithPool, allowed: readonly string[]): Promise<void> {
-  const rows = await su.prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
-    return tx.$queryRawUnsafe<{ id: string }[]>(`SELECT id FROM tenants WHERE audit_chain_enabled = true`);
-  });
-  const foreign = rows.map((r) => r.id).filter((id) => !allowed.includes(id));
-  if (foreign.length > 0) {
-    throw new Error(
-      `the publisher reads every chain-enabled tenant, and ${foreign.length} on this database are not ` +
-        `this file's (${foreign.join(", ")}); disable or remove them before running it`,
-    );
-  }
+  await assertNoForeignRows(
+    su,
+    "the publisher reads every chain-enabled tenant",
+    `SELECT id::text AS ref FROM tenants WHERE audit_chain_enabled = true AND id <> ALL($1::uuid[])`,
+    allowed,
+  );
 }
 
 /**
@@ -143,21 +139,13 @@ export async function assertOnlyChainEnabledTenants(su: PrismaWithPool, allowed:
  * (DESTINATION_BEHIND_DATABASE) for a reason the case does not show.
  */
 export async function assertNoForeignPublishedAnchors(su: PrismaWithPool, allowed: readonly string[]): Promise<void> {
-  const rows = await su.prisma.$transaction(async (tx) => {
-    await setBypassRlsGucs(tx);
-    return tx.$queryRawUnsafe<{ tenant_id: string }[]>(
-      `SELECT tenant_id FROM audit_chain_anchors WHERE last_published_at IS NOT NULL`,
-    );
-  });
-  const foreign = rows.map((r) => r.tenant_id).filter((id) => !allowed.includes(id));
-  if (foreign.length > 0) {
-    throw new Error(
-      `the publisher reads last_published_at from every anchor row, and ${foreign.length} on this database ` +
-        `are not this case's (tenants ${foreign.join(", ")}). Clear them before running it: ` +
-        `UPDATE audit_chain_anchors SET last_published_at = NULL WHERE tenant_id IN (` +
-        `${foreign.map((id) => `'${id}'`).join(", ")}); — or remove those tenants.`,
-    );
-  }
+  await assertNoForeignRows(
+    su,
+    "the publisher reads last_published_at from every anchor row",
+    `SELECT tenant_id::text AS ref FROM audit_chain_anchors
+      WHERE last_published_at IS NOT NULL AND tenant_id <> ALL($1::uuid[])`,
+    allowed,
+  );
 }
 
 export type PublisherOutboxRow = {

@@ -529,3 +529,145 @@ Each of the entry, history and CEK loops checks `lockedSince` on every iteration
   - **Crash fixed:** a recursion crash on mutual re-exports was found and fixed, with a termination row.
   - **Remaining declared bypasses:** call results (`wrap(post)`), the function or container boundary, and raw `fetch`.
 - **Check E.** Re-implemented on the AST: renames, aliases, re-exports, namespace access and export lines are counted, and the setup-route cap is pinned. 12 deny rows and 3 allow rows were added.
+
+---
+
+# Review round 6
+
+Scope: the round-5 fixes, `git diff f82f44b3f..577dc810b`.
+
+**Round-5 findings:** all resolved. The round-5 ledgers were re-derived on HEAD, because r5-fix-a had run on a pre-simplify control.
+- **backup-db:** the old-trap mutant is red 3/3 deterministically, not only under load.
+- **R43:** no widening. UNAUTHORIZED and INTERRUPTED are unreachable for a wrong credential, and the 503 is unreachable for a wrong verifier.
+
+There are no Critical findings. The one Major finding concerns test infrastructure (T6-3).
+
+## Findings
+
+- **T6-3 [Major, test infrastructure]** — the `runScript` timeout sends SIGTERM, which bash defers until the foreground child returns.
+  - A hung child command (a stub, `docker exec`, `pg_*`) hangs the synchronous cell indefinitely.
+  - The comment claiming "a hung run is still stopped" is false.
+- **S6-1 [Minor, R39]** — the session check in `installKeyMaterial` is level-based.
+  - A user switch from A to B (authenticated → authenticated) keeps A's key material installed.
+  - An unlock started under A can install under B's session.
+- **S6-2 [Minor, R38]** — a genuine `setupRequired` is discarded, not re-asked, after an intervening unlock install.
+- **F6-1 [Minor, R38]** — an in-flight status response is applied after the session ends. A signed-out user is then shown the setup wizard.
+- **F6-4 [Minor, R49]** — setup refusals VAULT_ALREADY_SETUP and a POST 401 end in a generic `setupError`, with no LOCKED transition and no route to sign-in.
+- **F6-3 / S6-7 / A6-1 [Minor, R3]** — `share-links/verify-access` is a seventh pepper caller that still maps MISSING_PEPPER_VERSION to "wrong password", with a failed-attempt audit row.
+- **F6-2 [Minor]** — the travel-mode card renders 503 and 429 as a generic failure.
+- **S6-3 / F6-5 / A6-2 [Minor, R49]** — backup-db cleanup can still be interrupted between `trap - EXIT` and `trap :`.
+- **S6-4 / F6-A1 [Minor]** — with `set +e`, a failed passfile or partial removal exits 0 without any output.
+- **T6-4 [Minor]** — `trap :` versus `trap ''` is unpinned.
+- **T6-1 / T6-2 [Minor]** — the layout-effect ordering and the position of the install count relative to the refusal check are unpinned.
+- **S6-5 / T6-6 [Minor, R49]** — the C11 gate misses `fetchApi` aliases reached through a namespace member, an `export *` barrel, a property alias, destructuring, or `.bind`.
+- **S6-6 / T6-5 [Minor, R47]** — Check E misses aliases built from expressions and computed-key spellings.
+
+## Process note — the gate mechanism changes from detection to refusal
+
+The C11 gate and Check E were evaded by new spellings in rounds 4, 5 and 6, and each round added detection for the spellings reported. Following the escalation rule (a gate escaped twice means changing the mechanism), both gates now refuse the undecidable class outright:
+- **`fetchApi`:** it may be referenced only as a direct callee or as a plain import. Any other value use is refused, except at an explicit allowlist of the three real injection sites, whose receiving parameters are tracked as sources.
+- **`INITIAL_VAULT_KEY_VERSION`:** it may appear only in its definition, in a plain import or re-export, and once as the direct `keyVersion:` value in each of the two setup sites.
+
+## Resolution Status (round 6)
+
+Red-proof ledgers are in the scratchpad: `r6-fix-a/`, `r6-fix-b/` and `r6-fix-c/`, each with a `ledger.md`. Every new deny pin is red on HEAD or on a named mutant, and is paired with an allow pin.
+
+### T6-3 / T6-4 — resolved
+- `runScript` now defaults to `killSignal: "SIGKILL"`. A stub that sleeps 30 s is stopped in under 2 s; without the default, the mutant hangs for 30 s.
+- `trap :` versus `trap ''` is pinned by a cell that sends a signal during cleanup: the signal must still be able to kill the run.
+
+### S6-1 / F6-1 / S6-2 / T6-1 / T6-2 / F6-4 — resolved
+- **S6-1.** A user switch between two defined user ids drops the keys and moves the epoch, so an unlock started under A installs nothing under B. A refetch for the same user, or one that carries no user id, keeps the vault unlocked.
+- **F6-1.** A status response that arrives after the session ends is ignored.
+- **S6-2.** After an intervening unlock install, a setup-required verdict triggers a re-ask instead of being discarded. If the re-ask confirms a reset, the vault goes to SETUP_REQUIRED and no unlock installs into it.
+- **T6-1.** The session sync runs as a layout effect. An unlock POST that resolves in the commit that ends the session reports UNAUTHORIZED.
+- **T6-2.** The install count is bumped only after a successful install, so a refused unlock does not trigger a re-ask.
+- **F6-4.**
+  - VAULT_ALREADY_SETUP moves the vault to LOCKED and unlock then works.
+  - A 401 on setup throws UNAUTHORIZED, and the wizard shows the session-expired card with a route to sign-in.
+
+### F6-3 / S6-7 / A6-1 — resolved
+- **Server.** `share-links/verify-access` maps MISSING_PEPPER_VERSION to a VERIFIER_PEPPER_MISSING audit and a 503, with no VERIFY_FAILED row. Every other non-ok reason is still refused as an incorrect password.
+- **Why it stays separate.** The check stays local to the route because the actor is anonymous and `checkStoredVerifier` needs a userId.
+- **Client.** The share-password gate already mapped 503 to a "retry later" message without counting the attempt.
+- **Remaining callers.** No other caller of `verifyPassphraseVerifier` exists. The remaining HMAC verifier callers are writers under the current version.
+
+### F6-2 — resolved
+The travel-mode card maps RATE_LIMIT_EXCEEDED to `rateLimited` and SERVICE_UNAVAILABLE to `retryLater`.
+
+### S6-3 / F6-5 / A6-2 / S6-4 / F6-A1 — resolved
+- **Window closed.** `trap :` is armed before `trap - EXIT`. `on_signal` returns when it runs inside cleanup, which closes the window around `local rc=$?`.
+- **Silent exit 0 fixed.** A passfile that `rm` fails to remove, or that still exists afterwards, is reported with its path. That run exits 1 with `BACKUP_ERR:CLEANUP_INCOMPLETE` rather than 0, and the backup-recovery docs describe the code.
+- **Other leftovers.** A failed removal of `.partial` or of the lock produces a warning.
+
+### S6-5 / T6-6 / S6-6 / T6-5 — resolved by refusal
+- **The C11 gate** permits `fetchApi` only as:
+  - a direct callee;
+  - a plain import;
+  - a type position;
+  - a key;
+  - one of four allowlisted injection sites.
+  - **The four sites:** the import folder and tag resolvers, and the team-attachment and re-key runner deps. Their receiving parameters or members are tracked as sources. `password-import-tags.ts` is the fourth site, found while enumerating.
+  - **Refused:**
+    - every other value use;
+    - every rename;
+    - every re-export;
+    - a namespace or default import of `url-helpers`;
+    - `export *`;
+    - a dynamic `import()` or `require()` that may load it.
+  - **Stale entries.** An allowlist entry that no longer matches exactly once is refused.
+  - **Newly checked.** Tracking the re-key runner's `deps.fetch` brought `fetchOrStop` under the gate; its reads are clean.
+- **Check E** permits `INITIAL_VAULT_KEY_VERSION` only in:
+  - its definition;
+  - the index re-export;
+  - a plain named import;
+  - at most one direct `keyVersion:` value in each of the two setup sites.
+  - **Refused:** every other spelling, including computed keys, namespace or `export *` access to either module, and loaders.
+- **Removed:** the alias-following code in both gates.
+- **Bypasses still declared** in the C11 header:
+  - a response helper carried as a value;
+  - the request or Response crossing a function boundary;
+  - raw `fetch`;
+  - runtime loaders.
+- **Red-proof.** Every deny row is red on HEAD or killed by a named mutant (M1–M19, E1–E15). E15 survived at first, and the row that kills it was added. The binding-default row caught a bug in the first draft of the gate.
+
+### Adjacent (round 6) — integration tests ran against the shared dev database — resolved structurally
+- **Symptom.** Four integration files failed locally because of three leaked test tenants:
+  - `test-tenant-3dfd7ceb` was left by a crashed run, and its anchor row carried a `last_published_at`.
+  - `rls-x-tenant-a/b` were left by a local run of `rls-cross-tenant-seed.sql`, and they held v1 webhook rows.
+- **Root cause.** The harness ran on whatever `DATABASE_URL` named, which locally is the dev database the live instance and the compose workers share. Leaked rows persisted across runs, tests wrote to and deleted from a live database, and every run needed the workers stopped. CI hid all of this because it uses a fresh database.
+- **Fix.** `npm run test:integration` is now `scripts/run-integration-tests.mjs`, and CI runs the same runner.
+  - **What a run does:**
+    1. Creates an empty database named `passwd_it_<stamp>_<pid>_<hex>` from `template0` and sets a marker comment on it.
+    2. Applies the per-database half of `bootstrap-rds-roles.mjs` and then `migrate deploy`.
+    3. Runs `--denied-only` and `db:check-drift`.
+    4. Runs vitest.
+    5. Drops the database, in a cleanup that cannot be interrupted. A failed drop reports `INTEGRATION_CLEANUP_INCOMPLETE` and exits nonzero.
+  - **Guarding the cluster.** Cluster-global role state is snapshotted before and after the run, and any change is refused.
+  - **Stale databases.** A database left by a dead run is swept on the next run, but only when it is marked, its creator's process on this host is dead, and nothing is connected to it.
+  - **`setup.ts`** refuses any database that lacks the name pattern and the marker. The worker-detection refusal is removed, because a compose worker cannot reach a per-run database.
+- **Within-run coupling.** These fixes were swept across every integration file. Each is proven by planting foreign rows on a scratch database.
+  - **12 files.** Each now asserts only on its own rows, or fails loudly through `assertNoForeignRows` (`foreign-rows.ts`) when the code under test is inherently database-wide.
+  - **An empty pass.** `audit-outbox-depth-check` passed without exercising its row when 50 foreign rows were due.
+  - **A flaky isolation step.** In `audit-outbox-sweep-caps`, a millisecond-rounding bug made the step flaky.
+  - **Cluster-wide lock-wait probes.** The probes in `key-version-guard` and `vault-rotate-key-attachments` observed the whole cluster; they are now scoped.
+- **Verification.**
+  - The full suite passed through the runner: 175 files and 2459 tests, with the compose workers running.
+  - The dev database row counts were unchanged, and no scratch database was left.
+  - `check:rls-grant-evidence` passed.
+  - A CI-path run on a throwaway `postgres:16` cluster passed.
+  - The red-proofs for the runner, M1–M13, are in the scratchpad `it-scratch-a/`, and the plants for the 12 files are in `it-scratch-b/`.
+- **Data.** Before the leaked tenants were removed from the dev database, a full backup was taken and validated. They were removed with `deleteTestData`.
+
+### Simplify pass (round 6)
+- **Accepted.**
+  - **`module-specifier.mjs`.** The dynamic `import()`/`require()` analysis that the C11 gate and Check E each carried is now one shared module, `scripts/checks/lib/module-specifier.mjs`. The two copies were diffed and are identical on every input. Merging them surfaced two shared holes, and both now resolve to "may":
+    - a binding destructured from a const string (`const [s] = "./x"`);
+    - a template head that stops inside the `@/` alias (`` `@${p}` ``).
+    - Each is pinned by a test that is red on the old behaviour. Mutants M1–M11 and MALL are in the scratchpad `specifier-lib/`.
+  - **`SessionExpiredCard`.** The lock screen and the setup wizard now share this component.
+  - **`assertNoForeignRows`.** The two anchor-publisher preconditions now use this helper. A new `anchor-publisher-fixtures.integration.test.ts` pins that each refuses a foreign row and accepts allowed ones.
+- **Not taken.**
+  - Collapsing the wizard's `resolveUnlockError` call: the helper stays the one place that decides which codes mean "session expired".
+  - A shared `pg` client helper for the scripts: none exists to reuse, and adding one widens the diff past this round.
+- **Declared, not closed.** A `..` in a template's dynamic tail falls outside the bundler premise. Refusing it would also refuse legitimate templates such as the i18n message loader.

@@ -40,30 +40,44 @@
  *     other way, a destructuring assignment — the site is reported (fails
  *     closed).
  *
- * A SOURCE is a call to `fetchApi` (bare, a property `x.fetchApi` for an
- * injected one, an import binding of it under any local name — `import {
- * fetchApi as f }` from any module, or a name a scanned module exports holding
- * it, by an export clause, `export default` or an exported variable — or a
- * local name that may hold it — a parameter defaulting to it, a
- * `const`/`let`/`var` initialised with it or assigned it later, an alias of
- * such a name, a destructured `{ fetchApi: f }`) or to a RESPONSE HELPER: a
- * function (declaration, a `const` bound to an arrow/function expression or
- * to `useCallback(fn, deps)`, or an anonymous default-exported function or
- * arrow) under src/lib or a scan root that returns a
- * source call, directly or through a local `const` it was awaited into —
- * derived to a fixpoint, not listed by hand. A helper whose returned call
- * takes the request init from one of its own parameters forwards the question
- * to its call site's argument at that position; any other helper is mutating
- * when its returned call is. A local helper resolves through the file's own
- * binding (lib/scope-bindings). An imported one (named, aliased, default, or a
- * member of a namespace import) resolves through its import specifier — `@/…`
- * or relative, following `export { … } from`, an export clause, and `export
- * default <name>` — to the declaring module, since two modules may export
- * same-named helpers with different verdicts. When the specifier does not
- * resolve to a scanned module, every exported helper of that name could be the
- * one called, and the most conservative verdict wins. A default export the
- * module resolves to no function of its own (`export default wrap(post)`)
- * could be any of that module's helpers, and the most conservative of them wins.
+ * A SOURCE is a direct call `fetchApi(…)`, a call of the receiver of an
+ * allowlisted injection (see "fetchApi is called, never held"), or a call to a
+ * RESPONSE HELPER: a function (declaration, a `const` bound to an
+ * arrow/function expression or to `useCallback(fn, deps)`, or an anonymous
+ * default-exported function or arrow) under src/lib or a scan root that
+ * returns a source call, directly or through a local `const` it was awaited
+ * into — derived to a fixpoint, not listed by hand. A helper whose returned
+ * call takes the request init from one of its own parameters forwards the
+ * question to its call site's argument at that position; any other helper is
+ * mutating when its returned call is. A local helper resolves through the
+ * file's own binding (lib/scope-bindings). An imported one (named, aliased,
+ * default, or a member of a namespace import) resolves through its import
+ * specifier — `@/…` or relative, following `export { … } from`, an export
+ * clause, and `export default <name>` — to the declaring module, since two
+ * modules may export same-named helpers with different verdicts. When the
+ * specifier does not resolve to a scanned module, every exported helper of
+ * that name could be the one called, and the most conservative verdict wins.
+ * A default export the module resolves to no function of its own (`export
+ * default wrap(post)`) could be any of that module's helpers, and the most
+ * conservative of them wins.
+ *
+ * ## fetchApi is called, never held (FETCH_API_VALUE_USE)
+ *
+ * Following fetchApi through aliases lost to a new spelling three rounds
+ * running, so it is no longer followed: in every scanned file the name
+ * `fetchApi` may appear only as the callee of a direct call, as an import
+ * specifier importing it by its own name, in a type position (`typeof
+ * fetchApi`), as a declared name or object/type key, or at an allowlisted
+ * injection site (FETCH_API_INJECTIONS, keyed by file and shape, each with its
+ * reason and the receiver whose calls become sources). Everything else is
+ * refused: a renamed import, any re-export, an alias (`const f = fetchApi`,
+ * a default, `||=`, a ternary), `.bind`/`.call`/`.apply`, an argument, an
+ * object property, `x.fetchApi`, `x["fetchApi"]`, destructuring it off an
+ * object, and — for its module, src/lib/url-helpers — a namespace or default
+ * import, `export *`, and an `import()`/`require()` that may load it (a
+ * non-literal specifier may, unless a template's literal head or a `const`
+ * string rules the module out). A stale allowlist entry (site or receiver
+ * gone) is refused too.
  *
  * The error path is covered too: every body read of such a response is denied,
  * since `readApiErrorBody` reads through `parseJsonBodyOnce` as well.
@@ -81,19 +95,24 @@
  * ## Control class (R49)
  *
  * A fail-closed verification gate adjudicated by the TypeScript AST, with
- * name-based helper discovery. Known bypasses:
- *   - a named export bound to something other than a function literal or a
- *     fetchApi alias (`export const send = wrap(post)`): a call's result is not
- *     followed, so it is no helper and an import of it resolves to none (the
- *     default-export case above is followed instead);
+ * name-based helper discovery. fetchApi itself cannot be laundered: every
+ * spelling that would carry it under another name is refused above. Known
+ * bypasses — each needs a Program and inter-procedural value flow to decide,
+ * and refusing the shape outright would deny ordinary code:
+ *   - a response HELPER (not fetchApi) carried as a value: aliased (`const
+ *     go = save`), wrapped (`export const send = wrap(post)`), or passed as a
+ *     callback — React passes handlers as props everywhere, so this is not
+ *     refused, and a call through such a value is not a source;
  *   - the request or its Response crosses a function or container boundary:
  *     passed as an argument (including a named `.then(handler)`), returned from
  *     a function that is not a derived helper (an object or class method, a
  *     `useMemo`-built function, a returned `let`), or placed in an array or
  *     object other than the literal argument of a `Promise` combinator;
- *   - a fetcher injected under another name with no `= fetchApi` default
- *     (`deps.fetch`, `fetchImpl`), and raw `fetch` (banned in client code by
- *     eslint `CallExpression[callee.name='fetch']`).
+ *   - a fetcher that never was fetchApi: raw `fetch` (banned in client code by
+ *     eslint `CallExpression[callee.name='fetch']`, which misses
+ *     `window.fetch`);
+ *   - a module loaded by a runtime loader the bundler does not see
+ *     (`createRequire`, `eval`) — it cannot resolve `@/…` in a browser bundle.
  *
  * ## Client code under src/lib
  *
@@ -120,6 +139,7 @@ import { SyntaxKind } from "ts-morph";
 import { dirname, join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DEFAULT_SOURCE_EXTENSIONS as SOURCE_EXTENSIONS, createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
+import { loadArgumentMayName, moduleLoaderOf, specifierMayName } from "./lib/module-specifier.mjs";
 import {
   FN_KINDS,
   bindingIndex,
@@ -284,87 +304,222 @@ function initMutates(init, sf) {
 /** name → [{ sf, fn, name, exported, isDefault, forward: number | null }] */
 const helpers = new Map();
 
+// ── fetchApi is called, never held ───────────────────────────────────────────
+//
+// Following fetchApi through aliases, re-exports and namespaces lost to a new
+// spelling every round, so it is not followed: outside the injection sites
+// below, the name may only be called or imported by its own name, and every
+// other spelling is refused. A source call is then always spelled `fetchApi(`
+// or reaches a receiver listed here.
+
+const isStringLiteral = (e) =>
+  e?.getKind() === SyntaxKind.StringLiteral || e?.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral;
+
+const FETCH_API = "fetchApi";
+const FETCH_API_MODULE = "src/lib/url-helpers";
+
 /**
- * `fetchApi`, `x.fetchApi`, or a local name that holds it: a parameter
- * defaulting to it (`fetcher: FetchLike = fetchApi`) or a `const` alias.
+ * Where fetchApi is handed to code that takes its fetcher as a dependency.
+ * `site` is the one occurrence of the name the entry permits in `file`;
+ * `receiver` is where that value is called, and its calls are SOURCES. An
+ * entry whose site or receiver is no longer there is refused (stale).
  */
-function isFetchApiCallee(callee, sf, seen = new Set()) {
-  if (callee.getKind() === SyntaxKind.PropertyAccessExpression) return callee.getName() === "fetchApi";
-  if (callee.getKind() !== SyntaxKind.Identifier) return false;
-  const name = callee.getText();
-  if (name === "fetchApi") return true;
-  const decl = visibleBinding(name, callee, bindingsOf(sf));
-  if (!decl) return importsFetchApi(name, sf, seen);
-  if (seen.has(decl)) return false;
-  seen.add(decl);
-  const holdsFetchApi = (e) => {
-    const v = unwrapExpression(e);
-    return v?.getKind() === SyntaxKind.Identifier && isFetchApiCallee(v, sf, seen);
-  };
-  // Any binding that may hold it — whatever its declaration kind — is a
-  // source, so the gate fails closed: a `let`/`var` initialised with it, one
-  // assigned it later (`f = fetchApi`), an alias of an alias, or a destructured
-  // `{ fetchApi: f }`.
-  const nameNode = decl.getNameNode();
-  if (nameNode.getKind() === SyntaxKind.Identifier) {
-    if (holdsFetchApi(decl.getInitializer?.())) return true;
+const FETCH_API_INJECTIONS = [
+  {
+    file: "src/components/passwords/import/password-import-folders.ts",
+    site: { kind: "parameter-default", fn: "resolveFolderPathsForImport", param: "fetcher" },
+    receiver: { file: "src/components/passwords/import/password-import-folders.ts", kind: "parameter", fn: "resolveFolderPathsForImport", param: "fetcher" },
+    reason: "its tests pass a fake fetcher; callers take the fetchApi default",
+  },
+  {
+    file: "src/components/passwords/import/password-import-tags.ts",
+    site: { kind: "parameter-default", fn: "resolveTagNameToIdForImport", param: "fetcher" },
+    receiver: { file: "src/components/passwords/import/password-import-tags.ts", kind: "parameter", fn: "resolveTagNameToIdForImport", param: "fetcher" },
+    reason: "its tests pass a fake fetcher; callers take the fetchApi default",
+  },
+  {
+    file: "src/components/team/forms/team-attachment-section.tsx",
+    site: { kind: "argument-property", callee: "uploadTeamAttachment", from: "@/lib/team/team-attachment-upload", property: "fetchApi" },
+    receiver: { file: "src/lib/team/team-attachment-upload.ts", kind: "member-call", member: "fetchApi" },
+    reason: "the upload flow is React-free and takes its fetcher in its deps object",
+  },
+  {
+    file: "src/components/team/security/team-rekey-finish-control.tsx",
+    site: { kind: "argument-property", callee: "runRekeyPass", from: "@/lib/team/rekey-runner", property: "fetch" },
+    receiver: { file: "src/lib/team/rekey-runner.ts", kind: "member-call", member: "fetch" },
+    reason: "the re-key runner is React-free and takes its fetcher in its deps object",
+  },
+];
+
+/** The function a declaration or a `const` arrow/function expression names `name`, or null. */
+function namedFunction(sf, name) {
+  const decl = sf.getDescendantsOfKind(SyntaxKind.FunctionDeclaration).find((f) => f.getName() === name);
+  if (decl) return decl;
+  const v = sf.getDescendantsOfKind(SyntaxKind.VariableDeclaration).find((d) => d.getName() === name);
+  const init = unwrapExpression(v?.getInitializer());
+  return init && FN_KINDS.has(init.getKind()) ? init : null;
+}
+
+const configErrors = [];
+const receiverParams = new Set();
+const receiverMembers = new Map(); // rel → Set<member>
+for (const entry of FETCH_API_INJECTIONS) {
+  const { receiver } = entry;
+  const target = fileByRel.get(receiver.file);
+  if (!target) continue; // refused below when its site is used
+  if (receiver.kind === "parameter") {
+    const param = namedFunction(target.sf, receiver.fn)?.getParameters().find((p) => p.getName() === receiver.param);
+    if (param) receiverParams.add(param);
+    else configErrors.push(`${receiver.file}: injection receiver ${receiver.fn}(${receiver.param}) not found (stale FETCH_API_INJECTIONS entry)`);
   } else {
-    const el = nameNode.getDescendantsOfKind(SyntaxKind.BindingElement).find((b) => b.getName() === name);
-    if (el && (el.getPropertyNameNode()?.getText() ?? el.getName()) === "fetchApi") return true;
+    const calls = target.sf
+      .getDescendantsOfKind(SyntaxKind.CallExpression)
+      .filter((c) => c.getExpression().getKind() === SyntaxKind.PropertyAccessExpression && c.getExpression().getName() === receiver.member);
+    if (calls.length === 0) configErrors.push(`${receiver.file}: no .${receiver.member}(…) call receives the injected fetchApi (stale FETCH_API_INJECTIONS entry)`);
+    const members = receiverMembers.get(receiver.file) ?? new Set();
+    members.add(receiver.member);
+    receiverMembers.set(receiver.file, members);
   }
-  if (!identifierAssignmentsOf(sf).has(name)) return false;
-  return referencesTo(name, decl, nameNode, sf).some((id) => {
-    const p = outermost(id).getParent();
-    return (
-      p?.getKind() === SyntaxKind.BinaryExpression &&
-      p.getOperatorToken().getKind() === SyntaxKind.EqualsToken &&
-      unwrapExpression(p.getLeft()) === id &&
-      holdsFetchApi(p.getRight())
-    );
-  });
 }
 
 /**
- * True when the module-level name `local` is an import binding of fetchApi
- * under any local name: imported as `fetchApi` from any module (a package
- * outside the scan included), or as a name a scanned module exports holding
- * it — `export { fetchApi as request } from "…"`, an export clause, `export
- * default`, or an exported variable over its own import of it or a local alias
- * chain to one (`const a = fetchApi; export const request = a`).
+ * A source callee: the name `fetchApi` itself (the only spelling the
+ * value-use rule leaves), or a receiver of an allowlisted injection.
  */
-function importsFetchApi(local, sf, seen = new Set()) {
-  const imported = importOf(local, sf);
-  if (!imported) return false;
-  return exportNamesFetchApi(imported.spec, imported.exported, relBySf.get(sf), seen);
+function isFetchApiCallee(callee, sf) {
+  if (callee.getKind() === SyntaxKind.PropertyAccessExpression) {
+    return receiverMembers.get(relBySf.get(sf))?.has(callee.getName()) ?? false;
+  }
+  if (callee.getKind() !== SyntaxKind.Identifier) return false;
+  if (callee.getText() === FETCH_API) return true;
+  const decl = visibleBinding(callee.getText(), callee, bindingsOf(sf));
+  return decl?.getKind() === SyntaxKind.Parameter && receiverParams.has(decl);
 }
 
-function exportNamesFetchApi(spec, exported, fromRel, seen) {
-  if (exported === "fetchApi") return true;
-  const target = moduleFile(spec, fromRel);
-  if (!target) return false;
-  const key = `${target.rel}:${exported}`;
-  if (seen.has(key)) return false;
-  seen.add(key);
-  if (exported === "default") {
-    const assignment = target.sf.getExportAssignments().find((a) => !a.isExportEquals());
-    const expr = unwrapExpression(assignment?.getExpression());
-    if (expr?.getKind() === SyntaxKind.Identifier && isFetchApiCallee(expr, target.sf, seen)) return true;
+const NAME_KEY_KINDS = new Set([
+  SyntaxKind.PropertyAssignment,
+  SyntaxKind.PropertySignature,
+  SyntaxKind.PropertyDeclaration,
+  SyntaxKind.MethodDeclaration,
+  SyntaxKind.MethodSignature,
+  SyntaxKind.GetAccessor,
+  SyntaxKind.SetAccessor,
+  SyntaxKind.EnumMember,
+  SyntaxKind.JsxAttribute,
+]);
+const DECLARATION_NAME_KINDS = new Set([
+  SyntaxKind.FunctionDeclaration,
+  SyntaxKind.VariableDeclaration,
+  SyntaxKind.Parameter,
+  SyntaxKind.ClassDeclaration,
+  SyntaxKind.NamespaceImport,
+]);
+
+/** The injection entry whose site `id` (a `fetchApi` reference in `rel`) is, or null. */
+function injectionAt(id, rel, sf) {
+  const parent = id.getParent();
+  for (const entry of FETCH_API_INJECTIONS) {
+    if (entry.file !== rel) continue;
+    const { site } = entry;
+    if (site.kind === "parameter-default") {
+      if (parent.getKind() !== SyntaxKind.Parameter || parent.getInitializer() !== id || parent.getName() !== site.param) continue;
+      if (namedFunction(sf, site.fn) === parent.getParent()) return entry;
+      continue;
+    }
+    // argument-property: `{ fetchApi }` / `{ fetch: fetchApi }` in an object
+    // literal passed straight to the receiver's entry point, imported from its module.
+    const isShorthand = parent.getKind() === SyntaxKind.ShorthandPropertyAssignment && site.property === FETCH_API;
+    const isAssigned = parent.getKind() === SyntaxKind.PropertyAssignment && parent.getInitializer() === id && parent.getName() === site.property;
+    if (!isShorthand && !isAssigned) continue;
+    const call = parent.getParent().getParent();
+    if (call?.getKind() !== SyntaxKind.CallExpression || !call.getArguments().includes(parent.getParent())) continue;
+    const callee = call.getExpression();
+    if (callee.getKind() !== SyntaxKind.Identifier || callee.getText() !== site.callee) continue;
+    if (visibleBinding(site.callee, callee, bindingsOf(sf))) continue;
+    if (importOf(site.callee, sf)?.spec === site.from) return entry;
   }
-  for (const decl of target.sf.getExportDeclarations()) {
-    const el = decl.getNamedExports().find((n) => (n.getAliasNode()?.getText() ?? n.getName()) === exported);
-    if (!el) continue;
-    const from = decl.getModuleSpecifierValue();
-    if (from) return exportNamesFetchApi(from, el.getName(), target.rel, seen);
-    return isFetchApiCallee(el.getNameNode(), target.sf, seen);
+  return null;
+}
+
+/**
+ * Why the identifier `id` spelled `fetchApi` is a refused value use, or null
+ * when it is permitted: a direct call, an import by its own name, a
+ * declaration or key of that name, a type position, an injection site.
+ */
+function fetchApiValueUse(id, rel, sf, sitesUsed) {
+  if (id.getFirstAncestorByKind(SyntaxKind.TypeQuery)) return null;
+  const parent = id.getParent();
+  const kind = parent.getKind();
+  if (kind === SyntaxKind.CallExpression && parent.getExpression() === id) return null;
+  if (kind === SyntaxKind.ImportSpecifier) {
+    if (parent.isTypeOnly() || parent.getImportDeclaration().isTypeOnly()) return null;
+    const alias = parent.getAliasNode();
+    return parent.getName() === FETCH_API && (!alias || alias.getText() === FETCH_API) ? null : "renamed import";
   }
-  // `export const request = fetchApi` (or a local alias of it): the exported
-  // binding holds it exactly as a local alias does.
-  for (const statement of target.sf.getVariableStatements()) {
-    if (!statement.isExported()) continue;
-    const decl = statement.getDeclarations().find((d) => d.getNameNode().getKind() === SyntaxKind.Identifier && d.getName() === exported);
-    if (decl) return isFetchApiCallee(decl.getNameNode(), target.sf, seen);
+  if (kind === SyntaxKind.ExportSpecifier) return "re-export";
+  if (kind === SyntaxKind.BindingElement && parent.getInitializer() !== id) {
+    // `{ fetchApi } = x` and `{ fetchApi: f } = x` read it off an object;
+    // `{ other: fetchApi } = x` only declares a local of that name. A default
+    // (`{ f = fetchApi }`) is a value use, refused below.
+    const property = parent.getPropertyNameNode();
+    return property === id || (!property && parent.getNameNode() === id) ? "read off an object by destructuring" : null;
   }
-  return false;
+  if (kind === SyntaxKind.ImportClause) return null; // `import fetchApi from "…"` declares a local
+  if (DECLARATION_NAME_KINDS.has(kind) && parent.getNameNode() === id) return null;
+  if (NAME_KEY_KINDS.has(kind) && parent.getNameNode() === id) return null;
+  if (kind === SyntaxKind.PropertyAccessExpression && parent.getNameNode() === id) {
+    const call = parent.getParent();
+    const called = call?.getKind() === SyntaxKind.CallExpression && call.getExpression() === parent;
+    return called && receiverMembers.get(rel)?.has(FETCH_API) ? null : "property access .fetchApi";
+  }
+  const entry = injectionAt(id, rel, sf);
+  if (entry) {
+    sitesUsed.set(entry, (sitesUsed.get(entry) ?? 0) + 1);
+    return null;
+  }
+  if (kind === SyntaxKind.PropertyAccessExpression) return `member .${parent.getName()} of fetchApi`;
+  return "held, passed or stored";
+}
+
+const valueUses = [];
+const sitesUsed = new Map();
+for (const { rel, sf } of files) {
+  const refuse = (at, why) => valueUses.push({ rel, line: at.getStartLineNumber(), why });
+  for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+    if (id.getText() !== FETCH_API) continue;
+    const why = fetchApiValueUse(id, rel, sf, sitesUsed);
+    if (why) refuse(id, why);
+  }
+  // `x["fetchApi"]`, `{ ["fetchApi"]: f } = x`: the member under a string key.
+  for (const lit of [...sf.getDescendantsOfKind(SyntaxKind.StringLiteral), ...sf.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral)]) {
+    if (lit.getLiteralText() !== FETCH_API) continue;
+    const p = lit.getParent();
+    if (p.getKind() === SyntaxKind.ElementAccessExpression || p.getKind() === SyntaxKind.ComputedPropertyName) refuse(lit, "member read by a string key");
+  }
+  // The defining module only by named import: a namespace or default import, an
+  // `export *` and a dynamic load would hand out a member under any key.
+  for (const decl of sf.getImportDeclarations()) {
+    if (decl.isTypeOnly() || !specifierMayName(decl.getModuleSpecifierValue(), rel, FETCH_API_MODULE)) continue;
+    if (decl.getNamespaceImport()) refuse(decl, "namespace import of its module");
+    if (decl.getDefaultImport()) refuse(decl, "default import of its module");
+  }
+  for (const decl of sf.getExportDeclarations()) {
+    const spec = decl.getModuleSpecifierValue();
+    if (spec && !decl.isTypeOnly() && !decl.hasNamedExports() && specifierMayName(spec, rel, FETCH_API_MODULE)) refuse(decl, "export * of its module");
+  }
+  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
+    const loader = moduleLoaderOf(call);
+    if (loader && loadArgumentMayName(call.getArguments()[0], rel, [FETCH_API_MODULE], bindingsOf(sf))) refuse(call, `${loader} that may load its module`);
+  }
+}
+for (const entry of FETCH_API_INJECTIONS) {
+  const n = sitesUsed.get(entry) ?? 0;
+  if (n === 0 && !fileByRel.has(entry.file) && process.env.MUTATION_RESPONSE_READ_FIXTURE_MODE === "1") continue;
+  if (n !== 1) {
+    configErrors.push(`${entry.file}: injection site ${JSON.stringify(entry.site)} matched ${n} time(s), expected 1 (stale FETCH_API_INJECTIONS entry)`);
+  } else if (!fileByRel.has(entry.receiver.file)) {
+    configErrors.push(`${entry.receiver.file}: receiver of the fetchApi injected in ${entry.file} is not a scanned file (stale FETCH_API_INJECTIONS entry)`);
+  }
 }
 
 /** The scanned file an import specifier names (`@/…` or relative), or null. */
@@ -467,22 +622,6 @@ function conservativeOf(bucket) {
   const forward = bucket[0].forward;
   if (forward !== null && bucket.every((h) => h.forward === forward)) return bucket[0];
   return { ...bucket[0], forward: null };
-}
-
-const assignmentCache = new Map();
-/** Names assigned an identifier somewhere in `sf` (`x = y`): a cheap pre-filter for the scope-aware walk. */
-function identifierAssignmentsOf(sf) {
-  let names = assignmentCache.get(sf);
-  if (!names) {
-    names = new Set();
-    for (const b of sf.getDescendantsOfKind(SyntaxKind.BinaryExpression)) {
-      if (b.getOperatorToken().getKind() !== SyntaxKind.EqualsToken) continue;
-      const left = unwrapExpression(b.getLeft());
-      if (left.getKind() === SyntaxKind.Identifier && unwrapExpression(b.getRight())?.getKind() === SyntaxKind.Identifier) names.add(left.getText());
-    }
-    assignmentCache.set(sf, names);
-  }
-  return names;
 }
 
 /** The helper record a call's callee names, or null. */
@@ -684,9 +823,6 @@ function promiseOf(k) {
   if (k.t === "list") return { ...k, awaited: false };
   return null;
 }
-
-const isStringLiteral = (e) =>
-  e?.getKind() === SyntaxKind.StringLiteral || e?.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral;
 
 /** Climb from `expr` past parentheses, type wrappers and value-forwarding operators to the expression a parent sees. */
 function outermost(expr) {
@@ -974,7 +1110,24 @@ for (const s of sites) {
 }
 const unique = [...reads.values()].sort((a, b) => a.rel.localeCompare(b.rel) || a.line - b.line);
 
+let failed = false;
+if (configErrors.length > 0) {
+  failed = true;
+  console.error(`FETCH_API_INJECTION_STALE: ${NAME} allowlist entries that no longer match the tree:`);
+  for (const e of configErrors) console.error(`  ${e}`);
+}
+if (valueUses.length > 0) {
+  failed = true;
+  valueUses.sort((a, b) => a.rel.localeCompare(b.rel) || a.line - b.line);
+  console.error(`FETCH_API_VALUE_USE: ${valueUses.length} use(s) of fetchApi other than a direct call or an import by its own name:`);
+  for (const u of valueUses) console.error(`  ${u.rel}:${u.line}  fetchApi used as a value (${u.why})`);
+  console.error(
+    "\nCall fetchApi directly. A module that must take its fetcher as a dependency is an injection site: " +
+      "add it to FETCH_API_INJECTIONS with its receiver, so the receiver's calls stay checked.",
+  );
+}
 if (unique.length > 0) {
+  failed = true;
   console.error(`MUTATION_RESPONSE_JSON_READ: ${unique.length} read(s) of a mutation response body outside parseJsonBodyOnce:`);
   for (const s of unique) console.error(`  ${s.rel}:${s.line}  ${s.what} the response of ${s.origins.join(" / ")}`);
   console.error(
@@ -982,8 +1135,8 @@ if (unique.length > 0) {
       "Run the completion (refresh, onSuccess, reset) right after res.ok, then read the body with " +
       "`await parseJsonBodyOnce(res)` (src/lib/http/read-api-error-body.ts) and handle `null`.",
   );
-  process.exit(1);
 }
+if (failed) process.exit(1);
 
 const helperCount = [...helpers.values()].reduce((n, b) => n + b.length, 0);
 console.log(`${NAME}: OK (${denyCount} files, ${helperCount} response helper(s))`);

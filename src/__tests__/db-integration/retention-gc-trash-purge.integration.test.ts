@@ -31,6 +31,7 @@ import {
 import { sweepTrashEntry } from "@/workers/retention-gc-worker/sweep";
 import type { PerTenantTrashEntry } from "@/workers/retention-gc-worker/registry";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { assertNoForeignRows } from "./foreign-rows";
 
 const PERSONAL_ENTRY: PerTenantTrashEntry = {
   kind: "PER_TENANT_TRASH",
@@ -85,6 +86,19 @@ describe("retention-gc sweepTrashEntry: personal trash purge (SC2/C3/C7)", () =>
         days,
       );
     });
+  }
+
+  /** The two cells that assert the sweep's own count: it counts every tenant's past-grace entries. */
+  async function assertNoForeignPastGraceEntries(): Promise<void> {
+    await assertNoForeignRows(
+      ctx.su,
+      "sweepTrashEntry counts the past-grace trashed entries of every tenant with a trash retention",
+      `SELECT e.id::text AS ref FROM password_entries e JOIN tenants t ON t.id = e.tenant_id
+        WHERE t.trash_retention_days IS NOT NULL AND e.deleted_at IS NOT NULL
+          AND e.deleted_at < now() - make_interval(days => t.trash_retention_days)
+          AND e.tenant_id <> $1::uuid`,
+      tenantId,
+    );
   }
 
   async function insertEntry(opts: {
@@ -157,6 +171,7 @@ describe("retention-gc sweepTrashEntry: personal trash purge (SC2/C3/C7)", () =>
   }
 
   it("purges a past-grace trashed entry and cascade-removes its attachment; keeps within-grace + non-trashed", async () => {
+    await assertNoForeignPastGraceEntries();
     await setTrashRetention(tenantId, 30);
 
     // Past grace (31d) — should be purged, with its attachment.
@@ -216,6 +231,7 @@ describe("retention-gc sweepTrashEntry: personal trash purge (SC2/C3/C7)", () =>
   });
 
   it("does not touch a NULL-retention tenant's past-grace trashed entry", async () => {
+    await assertNoForeignPastGraceEntries();
     // tenantId keeps its default NULL trash_retention_days.
     const pastId = await insertEntry({
       ownerTenantId: tenantId,

@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
-import { useRouter } from "@/i18n/navigation";
 import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
 import { VAULT_UNLOCK_INTERRUPTED } from "@/lib/vault/vault-unlock-codes";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -23,8 +22,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
-import { Fingerprint, Loader2, Lock, LogIn, Eye, EyeOff } from "lucide-react";
+import { Fingerprint, Loader2, Lock, Eye, EyeOff } from "lucide-react";
 import { ExtConnectBanner } from "@/components/extension/ext-connect-banner";
+import { SessionExpiredCard } from "./session-expired-card";
 
 /** @internal Exported for testing */
 export function formatLockedUntil(lockedUntil: string | null | undefined, t: (key: string, values?: Record<string, string>) => string): string {
@@ -99,7 +99,6 @@ function consumeWebAuthnSignInFlag(): void {
 export function VaultLockScreen() {
   const t = useTranslations("Vault");
   const tw = useTranslations("WebAuthn");
-  const router = useRouter();
   const { unlock, unlockWithPasskey, unlockWithStoredPrf } = useVault();
 
   const [passphrase, setPassphrase] = useState("");
@@ -235,30 +234,7 @@ export function VaultLockScreen() {
     };
   }, []);
 
-  if (sessionExpired) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">
-        <Card className="w-full max-w-sm rounded-xl border">
-          <CardHeader className="text-center">
-            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-              <LogIn className="h-6 w-6 text-muted-foreground" />
-            </div>
-            <CardTitle>{t("sessionExpired")}</CardTitle>
-            <CardDescription>{t("sessionExpiredDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button
-              className="w-full"
-              onClick={() => router.push("/auth/signin")}
-            >
-              <LogIn className="h-4 w-4 mr-2" />
-              {t("goToSignIn")}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  if (sessionExpired) return <SessionExpiredCard />;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">

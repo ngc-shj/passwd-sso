@@ -69,9 +69,10 @@ describe("retention-gc-worker role privileges (C7/C10/RT5/T5/T11)", () => {
         `DELETE FROM sessions
          WHERE (id) IN (
            SELECT id FROM sessions
-           WHERE expires < now()
+           WHERE expires < now() AND id = $1::uuid
            LIMIT 100
          )`,
+        sessionId,
       );
     });
 

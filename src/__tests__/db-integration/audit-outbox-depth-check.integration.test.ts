@@ -284,9 +284,11 @@ describe("audit_outbox hydration in processDeliveryBatch", () => {
           targetId,
           tenantId,
         );
+        // The claim is table-wide, oldest created_at first: the epoch puts this
+        // row inside the batch whatever other tenants have pending.
         await tx.$executeRawUnsafe(
-          `INSERT INTO audit_deliveries (id, outbox_id, target_id, tenant_id, status)
-           VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'PENDING')`,
+          `INSERT INTO audit_deliveries (id, outbox_id, target_id, tenant_id, status, created_at)
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, 'PENDING', 'epoch')`,
           deliveryId,
           outboxId,
           targetId,
@@ -302,11 +304,14 @@ describe("audit_outbox hydration in processDeliveryBatch", () => {
 
       const [row] = await ctx.su.prisma.$transaction(async (tx) => {
         await setBypassRlsGucs(tx);
-        return tx.$queryRawUnsafe<Array<{ attempt_count: number }>>(
-          `SELECT attempt_count FROM audit_deliveries WHERE id = $1::uuid`,
+        return tx.$queryRawUnsafe<Array<{ status: string; attempt_count: number }>>(
+          `SELECT status::text AS status, attempt_count FROM audit_deliveries WHERE id = $1::uuid`,
           deliveryId,
         );
       });
+      // Claimed (PROCESSING, not still PENDING), so the zero below is the
+      // skip's and not a batch that never reached this row.
+      expect(row.status).toBe("PROCESSING");
       // Never attempted: the mismatch is caught before processOneDelivery,
       // which is the only place attempt_count is incremented.
       expect(row.attempt_count).toBe(0);

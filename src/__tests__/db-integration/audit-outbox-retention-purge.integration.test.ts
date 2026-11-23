@@ -93,13 +93,16 @@ describe("audit-outbox retention purge", () => {
       );
     });
 
-    // Run the purge query (same pattern as purgeRetention in the worker)
+    // Run the purge query (same pattern as purgeRetention in the worker),
+    // confined to this tenant: the worker's is table-wide, and the count
+    // asserted below would take in every other tenant's aged rows.
     const result = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);
       const rows = await tx.$queryRawUnsafe<{ purged: bigint }[]>(
         `WITH deleted AS (
           DELETE FROM audit_outbox
-          WHERE (
+          WHERE tenant_id = $3::uuid
+            AND ((
             status = 'SENT'
             AND sent_at < now() - make_interval(hours => $1)
             AND NOT EXISTS (
@@ -108,12 +111,13 @@ describe("audit-outbox retention purge", () => {
                 AND "audit_deliveries"."status" IN ('PENDING', 'PROCESSING')
             )
           )
-             OR (status = 'FAILED' AND created_at < now() - make_interval(days => $2))
+             OR (status = 'FAILED' AND created_at < now() - make_interval(days => $2)))
           RETURNING id
         )
         SELECT COUNT(*) AS purged FROM deleted`,
         retentionHours,
         failedRetentionDays,
+        tenantId,
       );
       return Number(rows[0]?.purged ?? 0);
     });

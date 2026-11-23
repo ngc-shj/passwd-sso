@@ -10,14 +10,18 @@
  * `["json"]`, destructured `json`, aliases, `Promise.all`/`allSettled`
  * elements, and the unresolvable combinator shapes that fail closed), in
  * src/components, src/hooks, src/app pages and src/lib client modules, and in a
- * component or page that imports a server marker; any alias of fetchApi; a
- * helper reached through an import, resolved through its specifier (S4-4);
- * fetchApi imported under another name or re-exported renamed (an export
- * clause, or an exported variable holding it), and a helper
- * default-exported by name, anonymously, or as an unresolvable expression (S5-2).
+ * component or page that imports a server marker; a helper reached through an
+ * import, resolved through its specifier (S4-4); a helper default-exported by
+ * name, anonymously, or as an unresolvable expression (S5-2); the receiver of
+ * each allowlisted fetchApi injection site.
+ * Refused (FETCH_API_VALUE_USE, R6): fetchApi in any position other than a
+ * direct call or an import by its own name — every alias, re-export, member,
+ * namespace/default import, `export *` and loader spelling of rounds 4-6 —
+ * and an injection outside FETCH_API_INJECTIONS or a stale entry.
  * Allow: a GET,
  * `parseJsonBodyOnce`, a src/lib server module (each marker form, including a
- * mixed type/value import and a namespace import), a route handler.
+ * mixed type/value import and a namespace import), a route handler, each
+ * allowlisted injection site, and the permitted fetchApi spellings.
  * Refuse: an empty file set and a parse error.
  */
 import { describe, it, expect, afterEach } from "vitest";
@@ -327,62 +331,10 @@ describe("check-mutation-response-read", () => {
       `  const all = await Promise.all([${POST}]);\n  const o = { all: 1 };\n  return [o.all, all.length];`,
     ],
     ["a lower-case literal get", '  const res = await fetchApi("/x", { method: "get" });\n  return res.json();'],
-    [
-      "a self-assigned name that never holds fetchApi",
-      `  let g = parseJsonBodyOnce;\n  g = g;\n  const res = await g(new Response());\n  return res;`,
-    ],
   ])("allows %s", (_label, body) => {
     const r = run({ "src/components/a.tsx": component(body) });
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("check-mutation-response-read: OK (1 files");
-  });
-
-  // Any binding that may hold fetchApi is a source, whatever its declaration kind.
-  it.each([
-    ["a let alias", "  let f2 = fetchApi;"],
-    ["a var alias", "  var f2 = fetchApi;"],
-    ["a name assigned fetchApi later", "  let f2: typeof fetchApi;\n  f2 = fetchApi;"],
-    ["an alias of an alias", "  const f1 = fetchApi;\n  const f2 = f1;"],
-    ["a destructured { fetchApi: f2 }", "  const { fetchApi: f2 } = { fetchApi };"],
-  ])("denies a request through %s", (_label, alias) => {
-    const body = `${alias}\n  const res = await f2("/x", { method: "POST" });\n  return res.json();`;
-    const line = 4 + alias.split("\n").length + 1;
-    const r = run({ "src/components/a.tsx": component(body) });
-    expect(r.code).toBe(1);
-    expect(r.stderr).toContain(`src/components/a.tsx:${line}  body read on the response of f2(…)`);
-  });
-
-  it("denies in src/hooks and src/app pages too", () => {
-    const body = '  const res = await fetchApi("/x", { method: "POST" });\n  return res.json();';
-    const r = run({ "src/hooks/use-a.ts": component(body), "src/app/[locale]/p/page.tsx": component(body) });
-    expect(r.code).toBe(1);
-    expect(r.stderr).toContain("MUTATION_RESPONSE_JSON_READ: 2 read(s)");
-    expect(r.stderr).toContain("src/hooks/use-a.ts:5");
-    expect(r.stderr).toContain("src/app/[locale]/p/page.tsx:5");
-  });
-
-  it("denies a parameter that defaults to fetchApi", () => {
-    const r = run({
-      "src/components/a.ts":
-        PRELUDE +
-        "export async function f(fetcher: typeof fetchApi = fetchApi) {\n" +
-        '  const res = await fetcher("/x", { method: "POST" });\n' +
-        "  return res.json();\n}\n",
-    });
-    expect(r.code).toBe(1);
-    expect(r.stderr).toContain("src/components/a.ts:5  body read on the response of fetcher(…)");
-  });
-
-  it("denies an injected x.fetchApi", () => {
-    const r = run({
-      "src/components/a.ts":
-        PRELUDE +
-        "export async function f(deps: { fetchApi: typeof fetchApi }) {\n" +
-        '  const res = await deps.fetchApi("/x", { method: "POST" });\n' +
-        "  return res.json();\n}\n",
-    });
-    expect(r.code).toBe(1);
-    expect(r.stderr).toContain("src/components/a.ts:5");
   });
 
   it("denies the response of a src/lib helper that returns a mutating fetchApi call", () => {
@@ -495,8 +447,7 @@ describe("check-mutation-response-read", () => {
     expect(r.stderr).toContain(`body read on the response of ${callee}(…)`);
   });
 
-  // S5-2: fetchApi itself reached through an import binding under another
-  // local name, and a helper reached through `export default <identifier>`.
+  // S5-2: a helper reached through `export default <identifier>`.
   const URL_HELPERS = "export function fetchApi(path: string, init?: RequestInit): Promise<Response> {\n  return fetch(path, init);\n}\n";
   const callImported = (importLine, callee, init) =>
     `${importLine}\nexport async function handler() {\n  const res = await ${callee}("/x"${init ? `, ${init}` : ""});\n  return res.json();\n}\n`;
@@ -504,44 +455,6 @@ describe("check-mutation-response-read", () => {
     `${PRELUDE}const send = (path: string) => fetchApi(path, { method: "${method}" });\n`;
 
   it.each([
-    ["a renamed import of fetchApi", { "src/components/a.tsx": callImported('import { fetchApi as f } from "@/lib/url-helpers";', "f", '{ method: "POST" }') }, "f"],
-    [
-      "a renamed import of a module that re-exports fetchApi under another name",
-      {
-        "src/lib/http/index.ts": 'export { fetchApi as request } from "../url-helpers";\n',
-        "src/components/a.tsx": callImported('import { request } from "@/lib/http";', "request", '{ method: "POST" }'),
-      },
-      "request",
-    ],
-    [
-      "fetchApi re-exported through an exported const",
-      {
-        "src/lib/http/request.ts": 'import { fetchApi } from "@/lib/url-helpers";\nexport const request = fetchApi;\n',
-        "src/components/a.tsx": callImported('import { request } from "@/lib/http/request";', "request", '{ method: "POST" }'),
-      },
-      "request",
-    ],
-    [
-      "fetchApi re-exported through a local alias chain",
-      {
-        "src/lib/http/request.ts": 'import { fetchApi } from "@/lib/url-helpers";\nconst a = fetchApi;\nexport const request = a;\n',
-        "src/components/a.tsx": callImported('import { request } from "@/lib/http/request";', "request", '{ method: "POST" }'),
-      },
-      "request",
-    ],
-    [
-      "fetchApi re-exported through an export clause over a local alias",
-      {
-        "src/lib/http/request.ts": 'import { fetchApi } from "@/lib/url-helpers";\nconst a = fetchApi;\nexport { a as request };\n',
-        "src/components/a.tsx": callImported('import { request } from "@/lib/http/request";', "request", '{ method: "POST" }'),
-      },
-      "request",
-    ],
-    [
-      "a renamed import of a package outside the scan",
-      { "src/components/a.tsx": callImported('import { fetchApi as f } from "some-package";', "f", '{ method: "POST" }') },
-      "f",
-    ],
     [
       "a default-imported helper exported as `export default send`",
       {
@@ -568,6 +481,15 @@ describe("check-mutation-response-read", () => {
       },
       "send",
     ],
+    [
+      "a helper re-exported through an `export *` barrel",
+      {
+        "src/lib/req.ts": 'import { fetchApi } from "@/lib/url-helpers";\nexport function post(url: string) {\n  return fetchApi(url, { method: "POST" });\n}\n',
+        "src/lib/index.ts": 'export * from "./req";\n',
+        "src/components/a.tsx": callImported('import { post } from "@/lib";', "post"),
+      },
+      "post",
+    ],
   ])("denies %s", (_label, files, callee) => {
     const r = run({ "src/lib/url-helpers.ts": URL_HELPERS, ...files });
     expect(r.code).toBe(1);
@@ -575,14 +497,6 @@ describe("check-mutation-response-read", () => {
   });
 
   it.each([
-    ["a renamed import of fetchApi used for a GET", { "src/components/a.tsx": callImported('import { fetchApi as f } from "@/lib/url-helpers";', "f") }],
-    [
-      "fetchApi re-exported through an exported const, used for a GET",
-      {
-        "src/lib/http/request.ts": 'import { fetchApi } from "@/lib/url-helpers";\nconst a = fetchApi;\nexport const request = a;\n',
-        "src/components/a.tsx": callImported('import { request } from "@/lib/http/request";', "request"),
-      },
-    ],
     [
       "a default-exported GET helper",
       {
@@ -602,6 +516,181 @@ describe("check-mutation-response-read", () => {
     const r = run({ "src/lib/url-helpers.ts": URL_HELPERS, ...files });
     expect(r.code).toBe(0);
     expect(r.stdout).toContain("check-mutation-response-read: OK");
+  });
+
+  // R6 (S6-5/T6-6): fetchApi is not followed through aliases; every spelling
+  // other than a direct call or an import by its own name is refused.
+  const IMPORT_FETCH_API = 'import { fetchApi } from "@/lib/url-helpers";\n';
+  const inHandler = (body) => `${IMPORT_FETCH_API}export async function handler(c: boolean, other: typeof fetchApi) {\n${body}\n}\n`;
+  const refusal = (rel, line, why) => `${rel}:${line}  fetchApi used as a value (${why})`;
+  const A = "src/components/a.tsx";
+  const HELD = "held, passed or stored";
+
+  it.each([
+    ["a const alias", { [A]: inHandler("  const f2 = fetchApi;\n  return f2;") }, A, 3, HELD],
+    ["a let alias", { [A]: inHandler("  let f2 = fetchApi;\n  return f2;") }, A, 3, HELD],
+    ["a var alias", { [A]: inHandler("  var f2 = fetchApi;\n  return f2;") }, A, 3, HELD],
+    ["a name assigned fetchApi later", { [A]: inHandler("  let f2: typeof fetchApi = other;\n  f2 = fetchApi;\n  return f2;") }, A, 4, HELD],
+    ["an alias through a ternary", { [A]: inHandler("  const f2 = c ? fetchApi : other;\n  return f2;") }, A, 3, HELD],
+    ["an alias through ??", { [A]: inHandler("  const f2 = other ?? fetchApi;\n  return f2;") }, A, 3, HELD],
+    ["an alias through ||=", { [A]: inHandler("  let f2: typeof fetchApi | null = null;\n  f2 ||= fetchApi;\n  return f2;") }, A, 4, HELD],
+    ["a parameter default outside the allowlist", { [A]: `${IMPORT_FETCH_API}export function f(fetcher = fetchApi) {\n  return fetcher;\n}\n` }, A, 2, HELD],
+    ["a binding-element default", { [A]: `${IMPORT_FETCH_API}export const { f2 = fetchApi } = {} as { f2?: typeof fetchApi };\n` }, A, 2, HELD],
+    ["an argument", { [A]: inHandler("  return Promise.resolve(fetchApi);") }, A, 3, HELD],
+    ["an object property", { [A]: inHandler("  return { fetcher: fetchApi };") }, A, 3, HELD],
+    ["a shorthand object property", { [A]: inHandler("  return { fetchApi };") }, A, 3, HELD],
+    ["an array element", { [A]: inHandler("  return [fetchApi];") }, A, 3, HELD],
+    ["a JSX attribute value", { [A]: `${IMPORT_FETCH_API}declare function X(p: { f: unknown }): null;\nexport const el = <X f={fetchApi} />;\n` }, A, 3, HELD],
+    ["fetchApi.bind(null)", { [A]: inHandler("  return fetchApi.bind(null);") }, A, 3, "member .bind of fetchApi"],
+    ["fetchApi.call(...)", { [A]: inHandler('  return fetchApi.call(null, "/x", { method: "POST" });') }, A, 3, "member .call of fetchApi"],
+    ["fetchApi.apply(...)", { [A]: inHandler('  return fetchApi.apply(null, ["/x"]);') }, A, 3, "member .apply of fetchApi"],
+    ["a default export", { [A]: `${IMPORT_FETCH_API}export default fetchApi;\n` }, A, 2, HELD],
+    ["an injected x.fetchApi outside a receiver", { [A]: `export async function f(deps: { fetchApi(p: string): Promise<Response> }) {\n  return deps.fetchApi("/x");\n}\n` }, A, 2, "property access .fetchApi"],
+    ["a member read by a string key", { [A]: `export function f(deps: Record<string, unknown>) {\n  return deps["fetchApi"];\n}\n` }, A, 2, "member read by a string key"],
+    ["a computed destructuring key", { [A]: `export function f(deps: Record<string, unknown>) {\n  const { ["fetchApi"]: g } = deps;\n  return g;\n}\n` }, A, 2, "member read by a string key"],
+    ["destructuring it off an object", { [A]: `export function f(deps: { fetchApi: unknown }) {\n  const { fetchApi } = deps;\n  return fetchApi;\n}\n` }, A, 2, "read off an object by destructuring"],
+    ["destructuring it off an object under another name", { [A]: `export function f(deps: { fetchApi: unknown }) {\n  const { fetchApi: g } = deps;\n  return g;\n}\n` }, A, 2, "read off an object by destructuring"],
+    ["a renamed import", { [A]: 'import { fetchApi as f } from "@/lib/url-helpers";\nexport const g = () => f("/x", { method: "POST" });\n' }, A, 1, "renamed import"],
+    ["a renamed import of a package outside the scan", { [A]: 'import { fetchApi as f } from "some-package";\nexport const g = () => f("/x");\n' }, A, 1, "renamed import"],
+    ["an import of another name as fetchApi", { [A]: 'import { request as fetchApi } from "@/lib/req";\nexport const g = () => fetchApi("/x");\n' }, A, 1, "renamed import"],
+    ["a renamed import default-exported through an alias (R5)", { "src/lib/req.ts": 'import { fetchApi as f } from "@/lib/url-helpers";\nconst g = f;\nexport default g;\n' }, "src/lib/req.ts", 1, "renamed import"],
+    ["a renamed re-export (R5)", { "src/lib/http/index.ts": 'export { fetchApi as request } from "../url-helpers";\n' }, "src/lib/http/index.ts", 1, "re-export"],
+    ["a re-export by its own name", { "src/lib/http/index.ts": 'export { fetchApi } from "@/lib/url-helpers";\n' }, "src/lib/http/index.ts", 1, "re-export"],
+    ["an export clause over the import", { "src/lib/http/r.ts": `${IMPORT_FETCH_API}export { fetchApi };\n` }, "src/lib/http/r.ts", 2, "re-export"],
+    ["an exported const (R5)", { "src/lib/http/r.ts": `${IMPORT_FETCH_API}export const request = fetchApi;\n` }, "src/lib/http/r.ts", 2, HELD],
+    ["an exported destructuring rename (S6-5)", { "src/lib/http/r.ts": 'import * as U from "@/lib/url-helpers";\nexport const { fetchApi: request } = U;\n' }, "src/lib/http/r.ts", 2, "read off an object by destructuring"],
+    ["an exported let assigned later (R5)", { "src/lib/http/r.ts": `${IMPORT_FETCH_API}export let request: typeof fetchApi | null = null;\nrequest = fetchApi;\n` }, "src/lib/http/r.ts", 3, HELD],
+    ["a namespace import of its module (S6-5)", { [A]: 'import * as u from "@/lib/url-helpers";\nexport const g = () => u.fetchApi("/x", { method: "POST" });\n' }, A, 1, "namespace import of its module"],
+    ["a namespace member alias const r = u.fetchApi (S6-5)", { [A]: 'import * as u from "@/lib/url-helpers";\nexport const r = u.fetchApi;\n' }, A, 2, "property access .fetchApi"],
+    ["a namespace import by a relative specifier", { "src/lib/vault/x.ts": 'import * as u from "../url-helpers";\nexport const r = u;\n' }, "src/lib/vault/x.ts", 1, "namespace import of its module"],
+    ["a default import of its module", { [A]: 'import u from "@/lib/url-helpers";\nexport const r = u;\n' }, A, 1, "default import of its module"],
+    ["an export * barrel of its module (S6-5)", { "src/lib/index.ts": 'export * from "./url-helpers";\n' }, "src/lib/index.ts", 1, "export * of its module"],
+    ["an export * as namespace of its module", { "src/lib/index.ts": 'export * as u from "@/lib/url-helpers";\n' }, "src/lib/index.ts", 1, "export * of its module"],
+    ["a dynamic import of its module", { [A]: 'export async function g() {\n  return import("@/lib/url-helpers");\n}\n' }, A, 2, "import() that may load its module"],
+    ["a dynamic import with a non-literal specifier", { [A]: 'export async function g(m: string) {\n  return import(m);\n}\n' }, A, 2, "import() that may load its module"],
+    ["a dynamic import whose template head may reach it", { [A]: 'export async function g(m: string) {\n  return import(`@/lib/${m}`);\n}\n' }, A, 2, "import() that may load its module"],
+    ["a require of its module", { [A]: 'declare const require: (m: string) => unknown;\nexport const u = require("../lib/url-helpers");\n' }, A, 2, "require() that may load its module"],
+  ])("refuses fetchApi as a value: %s", (_label, files, rel, line, why) => {
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS, ...files });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(refusal(rel, line, why));
+  });
+
+  it.each([
+    ["a direct call with a plain import", { [A]: `${IMPORT_FETCH_API}export async function g() {\n  const res = await fetchApi("/x", { method: "POST" });\n  return parseJsonBodyOnce(res);\n}\ndeclare function parseJsonBodyOnce(r: Response): Promise<unknown>;\n` }],
+    ["an optional direct call", { [A]: `${IMPORT_FETCH_API}export const g = () => fetchApi?.("/x");\n` }],
+    ["a type position", { [A]: `${IMPORT_FETCH_API}export type F = typeof fetchApi;\nexport const g = (f: typeof fetchApi) => f;\n` }],
+    ["an object key and a type key spelled fetchApi", { [A]: "export interface D { fetchApi: () => void }\nexport const d: D = { fetchApi: () => undefined };\n" }],
+    ["a type-only renamed import", { [A]: 'import type { fetchApi as F } from "@/lib/url-helpers";\nexport type G = typeof F;\n' }],
+    ["a named import of another binding from its module", { [A]: 'import { withBasePath } from "@/lib/url-helpers";\nexport const p = withBasePath("/x");\n' }],
+    ["a dynamic import whose template head rules it out", { "src/i18n/m.ts": "export async function g(m: string) {\n  return import(`../../messages/${m}.json`);\n}\n" }],
+    ["a dynamic import of a const package name", { [A]: 'export async function g() {\n  const name = "hash-wasm";\n  return import(name);\n}\n' }],
+  ])("allows %s", (_label, files) => {
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS + "export const withBasePath = (p: string) => p;\n", ...files });
+    expect(r.stderr).toBe("");
+    expect(r.code).toBe(0);
+  });
+
+  // The allowlisted injection sites: each shape is accepted at its own file,
+  // and its receiver's calls are sources whose body reads stay checked.
+  const PARSE = "declare function parseJsonBodyOnce(r: Response): Promise<unknown>;\n";
+  const importSite = (rel, fn) => (read) => ({
+    [rel]:
+      `${IMPORT_FETCH_API}${PARSE}type FetchLike = (url: string, init?: RequestInit) => Promise<Response>;\n` +
+      `export async function ${fn}(entries: unknown[], path: string, fetcher: FetchLike = fetchApi) {\n` +
+      `  const res = await fetcher(path, { method: "POST" });\n  return ${read};\n}\n`,
+  });
+  const FOLDERS = "src/components/passwords/import/password-import-folders.ts";
+  const TAGS = "src/components/passwords/import/password-import-tags.ts";
+  const UPLOAD = "src/lib/team/team-attachment-upload.ts";
+  const RUNNER = "src/lib/team/rekey-runner.ts";
+  const attachmentSite = (read) => ({
+    "src/components/team/forms/team-attachment-section.tsx":
+      `${IMPORT_FETCH_API}import { uploadTeamAttachment } from "@/lib/team/team-attachment-upload";\n` +
+      "export async function onUpload(file: unknown) {\n  return uploadTeamAttachment({ teamId: \"t\", fetchApi }, file);\n}\n",
+    [UPLOAD]:
+      `${PARSE}export async function uploadTeamAttachment(deps: { teamId: string; fetchApi: (p: string, i?: RequestInit) => Promise<Response> }, file: unknown) {\n` +
+      `  const res = await deps.fetchApi("/x", { method: "POST", body: String(file) });\n  return ${read};\n}\n`,
+  });
+  const rekeySite = (read) => ({
+    "src/components/team/security/team-rekey-finish-control.tsx":
+      `${IMPORT_FETCH_API}import { runRekeyPass } from "@/lib/team/rekey-runner";\n` +
+      'export async function run() {\n  return runRekeyPass({ teamId: "t", fetch: fetchApi });\n}\n',
+    [RUNNER]:
+      `${PARSE}export async function runRekeyPass(deps: { teamId: string; fetch: (p: string, i?: RequestInit) => Promise<Response> }) {\n` +
+      "  const fetchOrStop = async (path: string, init?: RequestInit): Promise<Response> => {\n" +
+      "    try {\n      return await deps.fetch(path, init);\n    } catch {\n      throw new Error(\"stop\");\n    }\n  };\n" +
+      `  const res = await fetchOrStop("/x", { method: "PUT" });\n  return ${read};\n}\n`,
+  });
+  const SITES = [
+    ["the import-folders parameter default", importSite(FOLDERS, "resolveFolderPathsForImport"), `${FOLDERS}:6`, "fetcher(…)"],
+    ["the import-tags parameter default", importSite(TAGS, "resolveTagNameToIdForImport"), `${TAGS}:6`, "fetcher(…)"],
+    ["the attachment upload deps property", attachmentSite, `${UPLOAD}:4`, "deps.fetchApi(…)"],
+    ["the re-key runner deps property", rekeySite, `${RUNNER}:11`, "fetchOrStop(…)"],
+  ];
+
+  it.each(SITES)("allows the injection site %s", (_label, site) => {
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS, ...site("parseJsonBodyOnce(res)") });
+    expect(r.stderr).toBe("");
+    expect(r.code).toBe(0);
+  });
+
+  it.each(SITES)("checks the receiver of the injection site %s", (_label, site, at, origin) => {
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS, ...site("res.json()") });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`${at}  body read on the response of ${origin}`);
+    expect(r.stderr).not.toContain("FETCH_API_VALUE_USE");
+  });
+
+  it.each([
+    [
+      "the re-key shape in a file that is not allowlisted",
+      () => {
+        const files = rekeySite("parseJsonBodyOnce(res)");
+        const rel = "src/components/team/security/team-rekey-finish-control.tsx";
+        return { ...files, "src/components/team/other.tsx": files[rel], [rel]: undefined };
+      },
+      "src/components/team/other.tsx",
+      4,
+    ],
+    [
+      "the attachment shape calling a same-named function from another module",
+      () => {
+        const files = attachmentSite("parseJsonBodyOnce(res)");
+        const rel = "src/components/team/forms/team-attachment-section.tsx";
+        return { ...files, [rel]: files[rel].replace('"@/lib/team/team-attachment-upload"', '"@/lib/team/other-upload"') };
+      },
+      "src/components/team/forms/team-attachment-section.tsx",
+      4,
+    ],
+    [
+      "an allowlisted parameter default in a function of another name",
+      () => ({ [FOLDERS]: importSite(FOLDERS, "resolveOther")("parseJsonBodyOnce(res)")[FOLDERS] }),
+      FOLDERS,
+      4,
+    ],
+  ])("refuses a non-allowlisted injection: %s", (_label, make, rel, line) => {
+    const files = Object.fromEntries(Object.entries(make()).filter(([, v]) => v !== undefined));
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS, ...files });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(refusal(rel, line, HELD));
+  });
+
+  it("refuses an allowlist entry whose receiver is gone", () => {
+    const files = rekeySite("parseJsonBodyOnce(res)");
+    delete files[RUNNER];
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS, ...files });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("FETCH_API_INJECTION_STALE");
+    expect(r.stderr).toContain(`${RUNNER}: receiver of the fetchApi injected in src/components/team/security/team-rekey-finish-control.tsx is not a scanned file`);
+  });
+
+  it("refuses an allowlist entry whose receiver no longer calls the injected member", () => {
+    const files = rekeySite("parseJsonBodyOnce(res)");
+    files[RUNNER] = files[RUNNER].replace("deps.fetch(path, init)", "Promise.reject(path)");
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS, ...files });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`${RUNNER}: no .fetch(…) call receives the injected fetchApi`);
   });
 
   it("terminates on an export-clause import cycle", () => {

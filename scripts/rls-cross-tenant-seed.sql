@@ -10,9 +10,15 @@
 -- to also bypass the BEFORE INSERT triggers (enforce_tenant_id_from_context)
 -- that otherwise would reject inserts when app.tenant_id is unset.
 --
--- Local usage:
+-- Local usage: never against the dev database passwd_sso (or any database
+-- something else uses). The seed is additive with no teardown and re-GRANTs
+-- every table to passwd_app; its rows outlive the run and broke later
+-- integration runs there. Use a throwaway database, migrated first, and drop it:
+--   docker exec -i passwd-sso-db-1 psql -U passwd_user -d postgres -c 'CREATE DATABASE rls_verify_scratch'
+--   MIGRATION_DATABASE_URL=postgresql://passwd_user:<pw>@localhost:5432/rls_verify_scratch npx prisma migrate deploy
 --   cat scripts/rls-cross-tenant-seed.sql | docker exec -i passwd-sso-db-1 \
---     psql -U passwd_user -d passwd_sso -v ON_ERROR_STOP=1
+--     psql -U passwd_user -d rls_verify_scratch -v ON_ERROR_STOP=1
+--   docker exec -i passwd-sso-db-1 psql -U passwd_user -d postgres -c 'DROP DATABASE rls_verify_scratch WITH (FORCE)'
 --
 -- Maintenance contract — adding a new tenant-scoped table requires:
 --   1. Migration: add tenant_id column + ENABLE/FORCE RLS + tenant_isolation policy.

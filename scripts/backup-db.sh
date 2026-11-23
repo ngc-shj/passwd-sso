@@ -63,7 +63,7 @@ IFS=$' \t\n'
 ERR_CODES="BAD_ENV BAD_URL NO_CA NO_DOCKER NO_COMPOSE_FILE UNKNOWN_SERVICE
 DB_NOT_RUNNING NO_CLIENT DEST_UNSAFE DEST_IN_REPO LOCKED DUMP_FAILED
 VALIDATE_FAILED PRUNE_ABORTED RUN_VANISHED OLD_BASH INTERRUPTED INTERNAL
-CONNECT_FAILED STAMP_TAKEN"
+CONNECT_FAILED STAMP_TAKEN CLEANUP_INCOMPLETE"
 
 # Single exit point for failures. The EXIT trap only ever normalises a status
 # it did not produce; it never synthesises a code.
@@ -96,20 +96,34 @@ ORIGINAL_CWD="$(pwd -P)"
 
 cleanup() {
   local rc=$?
-  trap - EXIT
-  # Nothing may cut this function short. A signal handled here used to run
-  # on_signal, whose `exit` — with the EXIT trap already cleared — left the
-  # passfile and the lock behind and surfaced a raw 128+n status. The common
-  # trigger is SIGPIPE from this function's OWN warnings: a caller that sends
-  # SIGTERM and stops reading (node's spawnSync timeout does exactly that), or
-  # a log pipe whose reader died, leaves the "kept …" and INTERRUPTED lines
-  # below writing to a reader-less stderr. With a no-op handler the write fails
-  # with EPIPE instead, and `set +e` keeps that failure (or any other step's)
-  # from aborting the remaining steps; the status decision at the end reads
-  # only rc. A no-op, not `trap ''`: an IGNORED disposition is inherited by the
-  # rm/mv/cat this function runs, deafening them to a supervisor's TERM.
+  # Nothing that arrives once this function has started may cut it short, and
+  # two mechanisms cover the two halves of it. A signal handled here used to
+  # run on_signal, whose `exit` — inside the EXIT trap, which bash does not run
+  # twice — left the passfile and the lock behind and surfaced a raw 128+n
+  # status. The common trigger is SIGPIPE from this function's OWN warnings: a
+  # caller that sends SIGTERM and stops reading, or a log pipe whose reader
+  # died, leaves the "kept …" and INTERRUPTED lines below writing to a
+  # reader-less stderr.
+  #
+  # From here to the no-op line below (this `local`, and the `trap` builtin
+  # itself) only on_signal's own guard holds: it returns, without exiting or
+  # recording a signal name, whenever it runs inside this function. bash
+  # restores $? around a trap handler, so rc is unaffected. The no-op handlers
+  # are armed BEFORE the EXIT trap is cleared — the other order left a window
+  # where on_signal exited with no EXIT trap at all — and `trap` resets $?, so
+  # rc has to be read first.
+  #
+  # From the no-op line on, a signal runs `:`. A no-op, not `trap ''`: an
+  # IGNORED disposition is inherited by the rm/mv/cat this function runs,
+  # deafening them to a supervisor's TERM. `set +e` keeps a failed step (an
+  # EPIPE write, a failed removal) from aborting the remaining steps; the
+  # removals report their own failure, and the status decision at the end
+  # reads only rc and whether the passfile is gone. SIGKILL remains: nothing
+  # here survives it, which is why the next run sweeps .pgpass.* residue.
   trap : INT TERM HUP QUIT PIPE ALRM USR1 USR2
+  trap - EXIT
   set +e
+  local passfile_left=""
 
   if [ -n "$RUN_PARTIAL" ] && [ -d "$RUN_PARTIAL" ]; then
     if [ -n "$KEEP_PARTIAL_AS_FAILED" ]; then
@@ -127,20 +141,27 @@ cleanup() {
         warn "kept $failed_dst for diagnosis"
       else
         warn "could not keep $RUN_PARTIAL for diagnosis; removing it"
-        rm -rf -- "$RUN_PARTIAL"
+        rm -rf -- "$RUN_PARTIAL" || warn "could not remove $RUN_PARTIAL; remove it by hand"
       fi
     else
-      rm -rf -- "$RUN_PARTIAL"
+      rm -rf -- "$RUN_PARTIAL" || warn "could not remove $RUN_PARTIAL; remove it by hand"
     fi
   fi
 
-  [ -n "$PGPASS_FILE" ] && rm -f -- "$PGPASS_FILE" 2>/dev/null
+  # Checked, not assumed: with `set +e` a failed removal was silent and a
+  # successful run exited 0 with the superuser's password still on disk.
+  if [ -n "$PGPASS_FILE" ] \
+     && { ! rm -f -- "$PGPASS_FILE" 2>/dev/null || [ -e "$PGPASS_FILE" ]; }; then
+    warn "could not remove the passfile $PGPASS_FILE; it holds the database password — remove it by hand"
+    passfile_left=1
+  fi
 
   # Only if it is still OURS: a run that lost a race and exits must not remove
   # the winner's lock. rm -rf, not rmdir: the lock directory holds a pid file.
   if [ -n "$LOCK_DIR" ] && [ -d "$LOCK_DIR" ] \
      && [ "$(cat -- "$LOCK_DIR/pid" 2>/dev/null || true)" = "$$" ]; then
-    rm -rf -- "$LOCK_DIR" 2>/dev/null || true
+    rm -rf -- "$LOCK_DIR" 2>/dev/null \
+      || warn "could not remove the lock $LOCK_DIR; the next run refuses until it is removed"
   fi
 
   if [ "$rc" -ne 0 ] && [ -z "$FAILED_CODE" ]; then
@@ -157,10 +178,20 @@ cleanup() {
     fi
   fi
 
+  if [ "$rc" -eq 0 ] && [ -n "$passfile_left" ]; then
+    # The generation is published, but a run that leaves the credential behind
+    # must not report success. A failed run keeps its own code: one identifier
+    # per failure, and the warning above already names the file.
+    printf 'BACKUP_ERR:CLEANUP_INCOMPLETE the backup was published, but the passfile %s is still on disk\n' "$PGPASS_FILE" >&2
+    exit 1
+  fi
   [ "$rc" -eq 0 ] && exit 0
   exit 1
 }
 on_signal() {
+  # Inside cleanup: see its opening comment. Neither exit nor record the
+  # signal — the run's status and the signal that caused it are already set.
+  case " ${FUNCNAME[*]} " in *" cleanup "*) return 0 ;; esac
   SIGNAL_NAME="$1"
   # Between creating something and recording it for the EXIT trap, exit only
   # once it is recorded. bash runs this handler as soon as the foreground mkdir

@@ -1177,13 +1177,13 @@ describe("bootstrap-rds-roles convergeRole (real DB)", () => {
   });
 
   /**
-   * T8 — the `--denied-only` CLI mode, which is what CI now depends on.
+   * T8 — the `--denied-only` CLI mode, which every integration run depends on.
    *
-   * `.github/workflows/ci-integration.yml` runs `prisma migrate deploy` and THEN
-   * a table-blind `GRANT ... ON ALL TABLES ... TO passwd_app`, so every
-   * integration run re-granted what migration 20260522000200 revoked and tested a
-   * database whose audit tables the app role could rewrite. The workflow now
-   * calls this mode instead of spelling the policy a fourth time in YAML.
+   * CI once ran `prisma migrate deploy` and THEN a table-blind
+   * `GRANT ... ON ALL TABLES ... TO passwd_app`, so every integration run
+   * re-granted what migration 20260522000200 revoked and tested a database whose
+   * audit tables the app role could rewrite. `scripts/run-integration-tests.mjs`
+   * now calls this mode after `migrate deploy` on each scratch database instead.
    *
    * Driven as a SUBPROCESS, because the property under test is the CLI entry
    * point — argv parsing, the transaction, the exit code — not the helper the

@@ -1393,7 +1393,10 @@ describe("vault attachment rotation — Phase B integration (#437)", () => {
           (async () => {
             await new Promise((r) => setTimeout(r, 80));
             const r = await instanceC.pool.query<{ count: string }>(
-              `SELECT COUNT(*)::text AS count FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`,
+              // pg_locks spans the cluster: another database's advisory waiter is not this probe's.
+              `SELECT COUNT(*)::text AS count FROM pg_locks
+                WHERE locktype = 'advisory' AND NOT granted
+                  AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`,
             );
             pgLocksObserved = parseInt(r.rows[0].count, 10) > 0;
           })(),
