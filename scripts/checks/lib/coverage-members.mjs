@@ -31,7 +31,7 @@ export const MEMBER_PATHSPECS = [
   "sentry.server.config.ts",
 ];
 
-const NON_MEMBER = /\.(test|spec)\.|\/__tests__\/|\.d\.ts$/;
+const isNonMember = (path) => /\.(test|spec)\./.test(path) || path.includes("/__tests__/") || path.endsWith(".d.ts");
 
 // A pathspec typo or a moved root file shrinks the set without emptying it, so
 // a non-empty result is not evidence the set is whole. These four anchor it:
@@ -70,7 +70,7 @@ export function listMembers(exec = gitLsFiles) {
   }
   const members = String(stdout)
     .split("\0")
-    .filter((p) => p.length > 0 && !NON_MEMBER.test(p))
+    .filter((p) => p.length > 0 && !isNonMember(p))
     .sort();
   if (members.length === 0) {
     throw new Error("COVERAGE_MEMBERS_EMPTY: the member pathspecs matched no file");

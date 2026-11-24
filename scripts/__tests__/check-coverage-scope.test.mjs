@@ -100,7 +100,7 @@ describe("listMembers", () => {
       fakeGit((m) => [...m, "src/a.test.ts", "src/b.spec.tsx", "src/__tests__/helper.ts", "src/types/x.d.ts"]),
     );
     expect(members).not.toEqual(expect.arrayContaining(["src/a.test.ts"]));
-    expect(members.filter((m) => /test|spec|\.d\.ts$/.test(m) && !realMembers.includes(m))).toEqual([]);
+    expect(members.filter((m) => (m.includes("test") || m.includes("spec") || m.endsWith(".d.ts")) && !realMembers.includes(m))).toEqual([]);
     expect(members).toHaveLength(realMembers.length);
   });
 
@@ -122,7 +122,7 @@ describe("listMembers", () => {
 
   it.each(REQUIRED)("refuses when the required member %s is absent", (path) => {
     expect(() => listMembers(fakeGit((m) => m.filter((x) => x !== path)))).toThrow(
-      new RegExp(`COVERAGE_MEMBERS_REQUIRED_ABSENT: ${path.replace(/\./g, "\\.")}$`),
+      new RegExp(`COVERAGE_MEMBERS_REQUIRED_ABSENT: ${path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`),
     );
   });
 });
