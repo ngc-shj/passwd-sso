@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { execFileSync } from "node:child_process";
 import {
   readFileSync,
@@ -56,12 +56,17 @@ const CONTRACT_ENTRIES = [
   "./src/lib/key-provider/types.ts",
 ];
 
+let template;
 let fixture;
 let tsconfigPath;
 let baselinePath;
 
-beforeEach(() => {
-  fixture = mkdtempSync(join(tmpdir(), "public-contract-test-"));
+// The fixture is built and its baseline seeded once; each case gets a fresh
+// copy. Seeding compiles the program, and doing that per case made the hook
+// the slowest step in the file and timed it out on a loaded machine.
+beforeAll(() => {
+  template = mkdtempSync(join(tmpdir(), "public-contract-template-"));
+  fixture = template;
   for (const rel of FIXTURE_SOURCES) {
     const dst = join(fixture, rel);
     mkdirSync(dirname(dst), { recursive: true });
@@ -113,6 +118,17 @@ beforeEach(() => {
   const seeded = runGate(["--update"]);
   expect(seeded.output).toBe("");
   expect(seeded.code).toBe(0);
+}, 60_000);
+
+afterAll(() => {
+  rmSync(template, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  fixture = mkdtempSync(join(tmpdir(), "public-contract-test-"));
+  cpSync(template, fixture, { recursive: true, verbatimSymlinks: true });
+  tsconfigPath = join(fixture, "tsconfig.json");
+  baselinePath = join(fixture, "baseline.d.txt");
 });
 
 afterEach(() => {
@@ -149,7 +165,9 @@ function patchEvents(from, to) {
   writeFileSync(path, src.replace(from, to), "utf8");
 }
 
-describe("check-public-contract", () => {
+// Each case compiles the fixture in a child process, whose time follows the
+// machine's load, not this code. The timeout is a hang guard, not a budget.
+describe("check-public-contract", { timeout: 60_000 }, () => {
   it("passes on an unmodified copy of the sources", () => {
     expect(runGate().code).toBe(0);
   });
