@@ -635,6 +635,76 @@ describe("VaultProvider — setup after a lock during the POST", () => {
     30_000,
   );
 
+  // T10-5: the vault can be UNLOCKED when the response arrives. Once the POST
+  // has committed, a status check (here a same-user session refetch after the
+  // page hide) finds the vault set up, which lets an unlock with the passphrase
+  // just entered install its keys before the setup's own response is read.
+  it.each([
+    ["a 201", undefined],
+    ["a VAULT_ALREADY_SETUP 409", alreadySetUp],
+  ] as const)(
+    "keeps an unlock that completed while %s was in flight, and its keys",
+    async (_kind, response) => {
+      const { fetchMock } = makeFetchEnv(null);
+      const baseHandler = fetchMock.getMockImplementation();
+      if (!baseHandler) throw new Error("fetch env has no base handler");
+      const committed = deferred();
+      const gate = deferred();
+      globalThis.fetch = (async (url: string, init?: RequestInit) => {
+        if (url === "/api/vault/setup") {
+          const res = await baseHandler(url, init);
+          committed.resolve();
+          await gate.promise;
+          return response ?? res;
+        }
+        return baseHandler(url, init);
+      }) as unknown as typeof fetch;
+
+      const { result, rerender } = renderHook(() => useVault(), { wrapper });
+      await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.SETUP_REQUIRED));
+      let settled!: Promise<unknown>;
+      act(() => {
+        settled = result.current.setup(PASSPHRASE).then(
+          () => undefined,
+          (caught: unknown) => caught,
+        );
+      });
+      await act(async () => {
+        await committed.promise;
+      });
+      act(() => {
+        pageHidden();
+        mockUseSession.mockReturnValue({
+          data: { user: { id: "user-1", email: "u@example.com" } },
+          status: "authenticated",
+          update: vi.fn(),
+        });
+        rerender();
+      });
+      await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.LOCKED));
+      let unlocked: boolean | undefined;
+      await act(async () => {
+        unlocked = await result.current.unlock(PASSPHRASE);
+      });
+      expect(unlocked).toBe(true);
+      const keyOfUnlock = result.current.encryptionKey;
+      const secretOfUnlock = result.current.getSecretKey();
+      expect(keyOfUnlock).not.toBeNull();
+
+      gate.resolve();
+      let caught: unknown;
+      await act(async () => {
+        caught = await settled;
+      });
+
+      expect(caught).toBeUndefined();
+      expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+      expect(result.current.encryptionKey).toBe(keyOfUnlock);
+      expect(result.current.getSecretKey()).toEqual(secretOfUnlock);
+    },
+    30_000,
+  );
+
   it.each([
     ["a 201", undefined],
     ["a VAULT_ALREADY_SETUP 409", alreadySetUp],

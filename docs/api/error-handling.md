@@ -419,9 +419,17 @@ the validated `client_id`, `redirect_uri` and the submitted `state`, `scope`
 and PKCE parameters, and writes nothing: no code, no DCR claim, no denial and
 no audit row. The authorize GET then re-runs sign-in and step-up and renders
 consent for whoever the session now belongs to, who decides for themselves.
-The bounce runs only after the parameters are validated (the client, its
-registered `redirect_uri`, and on Allow the PKCE challenge and scope); a
-request failing those checks keeps its `400` JSON answer.
+The consent form posts the same authorization-request parameters on Allow
+and Deny, so either bounce reaches a re-rendered consent.
+
+The bounce runs only after the client and its registered `redirect_uri` are
+validated; a request failing those checks keeps its `400` JSON answer. On
+Allow, the PKCE challenge, its method and the scope are validated before the
+bounce too (a failure is a `400` JSON answer from the consent route). On Deny
+the consent route does not validate them: they are echoed as posted, and the
+authorize GET validates them, so a Deny posted without a valid
+`code_challenge` (not one the consent form sends) is bounced and then answered
+`400` JSON by the authorize GET.
 
 ### 5.2 Token + revoke endpoints (RFC 6749 §5.2; RFC 7009 §2.2)
 

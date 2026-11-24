@@ -171,9 +171,14 @@ export async function POST(req: NextRequest) {
   const expectedUserId = EXPECTED_USER_ID_SCHEMA.safeParse(formData.get("expected_user_id"));
   const userChanged = !expectedUserId.success || expectedUserId.data !== session.user.id;
 
-  // Stale-session recovery: params are now validated, so it is safe to bounce the
-  // browser back to the authorize GET (which re-runs auth + step-up and redirects
-  // to sign-in). The callback is a self-origin app path, not the client redirect_uri.
+  // Stale-session recovery: client_id and redirect_uri are now validated, so it
+  // is safe to bounce the browser back to the authorize GET (which re-runs auth +
+  // step-up and redirects to sign-in). The callback is a self-origin app path,
+  // not the client redirect_uri. The PKCE parameters and scope are echoed as
+  // posted: on Allow the gate above has validated them; on Deny nothing here
+  // has, and the authorize GET validates them instead. The consent form posts
+  // them on Deny as well as Allow — a bounce without code_challenge would end
+  // on the GET's JSON 400 instead of a re-rendered consent.
   if (stepUpStale || userChanged) {
     // serverAppUrl yields a relative path when no origin env is configured, which
     // new URL(relative) would throw on. Guard for parity with mobile/authorize's

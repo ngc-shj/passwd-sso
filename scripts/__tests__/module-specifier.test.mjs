@@ -49,10 +49,17 @@ const registry = (name, fields = {}) => ({
   ...fields,
 });
 
-// An installed package the compiler resolves by its own types.
-const typed = (name, manifest = {}) => ({
-  [`node_modules/${name}/package.json`]: JSON.stringify({ name, types: "index.d.ts", ...manifest }),
-  [`node_modules/${name}/index.d.ts`]: "export {};\n",
+// An installed package the compiler resolves by its own types; `path` is its
+// directory below `at` (`a/node_modules/b` for a nested copy).
+const typed = (path, manifest = {}, at = "node_modules") => ({
+  [`${at}/${path}/package.json`]: JSON.stringify({ name: path.split("/node_modules/").pop(), types: "index.d.ts", ...manifest }),
+  [`${at}/${path}/index.d.ts`]: "export {};\n",
+});
+
+// A runtime package with no types of its own (they are in `@types`).
+const untyped = (path, manifest = {}, at = "node_modules") => ({
+  [`${at}/${path}/package.json`]: JSON.stringify({ name: path.split("/node_modules/").pop(), main: "index.js", ...manifest }),
+  [`${at}/${path}/index.js`]: "module.exports = {};\n",
 });
 
 // The repository's lockfile: every installed package the "none" cases load, and
@@ -69,9 +76,48 @@ const LOCK = {
     "node_modules/patched-pkg": registry("patched-pkg"),
     "node_modules/uses-patched": registry("uses-patched", { dependencies: { "patched-pkg": "1.0.0" } }),
     "node_modules/uses-uses": registry("uses-uses", { peerDependencies: { "uses-patched": "1.0.0" } }),
-    // Its dependency is a nested copy, which patches/ still names.
+    // Its dependency is a nested copy of a name patches/ names: tainted by
+    // that name, whichever copy the lookup finds (nest-d pins the lookup).
     "node_modules/nests-patched": registry("nests-patched", { dependencies: { "patched-pkg": "1.0.0" } }),
     "node_modules/nests-patched/node_modules/patched-pkg": registry("patched-pkg"),
+    "node_modules/uses-optional": registry("uses-optional", { optionalDependencies: { "patched-pkg": "1.0.0" } }),
+    // nest-d's nest-x is its nested copy, which depends on the patched nest-p;
+    // the top-level nest-x is clean, so only the nested lookup taints nest-d.
+    "node_modules/nest-d": registry("nest-d", { dependencies: { "nest-x": "2.0.0" } }),
+    "node_modules/nest-x": registry("nest-x"),
+    "node_modules/nest-d/node_modules/nest-x": registry("nest-x", { dependencies: { "nest-p": "1.0.0" } }),
+    "node_modules/nest-p": registry("nest-p"),
+    "node_modules/chain-outer": registry("chain-outer"),
+    "node_modules/chain-outer/node_modules/chain-inner": registry("chain-inner"),
+    // A dependency the project's own package bundles.
+    "node_modules/root-bundled": { version: "1.0.0", inBundle: true },
+    "node_modules/foreign-host": { version: "1.0.0", resolved: "https://npm.example.com/foreign-host/-/foreign-host-1.0.0.tgz", integrity: "sha512-fixture" },
+    "node_modules/root-only": registry("root-only"),
+    "node_modules/mapped-pkg": registry("mapped-pkg"),
+    // S10-1: a nearer clean copy in src/fall/, a farther one linked from the repo.
+    "src/fall/node_modules/fall-sub": registry("fall-sub"),
+    "node_modules/fall-sub": { resolved: "linked-src/fall-sub", link: true },
+    "node_modules/@types/fall-sub": registry("@types/fall-sub"),
+    "src/fall/node_modules/fall-entry": registry("fall-entry"),
+    "node_modules/fall-entry": { resolved: "linked-src/fall-entry", link: true },
+    "node_modules/@types/fall-entry": registry("@types/fall-entry"),
+    "node_modules/fall-types": registry("fall-types"),
+    "src/fall/node_modules/@types/fall-types": registry("@types/fall-types"),
+    "node_modules/@types/fall-types": { version: "1.0.0", resolved: "file:vendor/types-fall-types-1.0.0.tgz", integrity: "sha512-fixture" },
+    "node_modules/above-in": registry("above-in"),
+    "node_modules/above-out": registry("above-out"),
+    "node_modules/loose": registry("loose"),
+    "node_modules/@types/loose": registry("@types/loose"),
+    // S10-2: a name that is really another package, by a link and by an npm alias.
+    "node_modules/alias-target": registry("alias-target"),
+    "node_modules/alias-link": registry("alias-link"),
+    "node_modules/@types/alias-link": registry("@types/alias-link"),
+    "node_modules/npm-alias": registry("alias-target"),
+    "node_modules/@types/npm-alias": registry("@types/npm-alias"),
+    // T10-2: a clean copy at the root, an escaping one in memo/.
+    "node_modules/memo-y": registry("memo-y"),
+    "node_modules/@types/memo-y": registry("@types/memo-y"),
+    "memo/node_modules/memo-y": registry("memo-y"),
     "node_modules/from-file": { version: "1.0.0", resolved: "file:vendor/from-file-1.0.0.tgz", integrity: "sha512-fixture" },
     "node_modules/from-git": { version: "1.0.0", resolved: "git+ssh://git@github.com/o/from-git.git#0123456", integrity: "sha512-fixture" },
     "node_modules/from-url": { version: "1.0.0", resolved: "https://example.com/archive/from-url.tgz", integrity: "sha512-fixture" },
@@ -92,7 +138,7 @@ const types = (name) => ({
 
 const TREE = {
   "tsconfig.json": JSON.stringify({
-    compilerOptions: { module: "esnext", moduleResolution: "bundler", allowJs: true, resolveJsonModule: true, paths: { "@/*": ["./src/*"], "@alt/*": ["./gen/*", "./src/*"] } },
+    compilerOptions: { module: "esnext", moduleResolution: "bundler", allowJs: true, resolveJsonModule: true, paths: { "@/*": ["./src/*"], "@alt/*": ["./gen/*", "./src/*"], "mapped-pkg": ["./node_modules/@scope/pkg/index.d.ts"] } },
   }),
   "package.json": JSON.stringify({ name: "repo", private: true, scripts: {}, dependencies: {} }),
   [TARGET]: "export const fetchApi = 1;\n",
@@ -181,6 +227,71 @@ const TREE = {
   ...typed("file-bundler/node_modules/bundled"),
   // A builtin's name, installed as a package a browser build may take instead.
   "node_modules/string_decoder/package.json": JSON.stringify({ name: "string_decoder", browser: "../../src/lib/url-helpers.ts" }),
+  ...typed("uses-optional"),
+  ...typed("nest-d"),
+  ...typed("nest-x"),
+  ...typed("nest-d/node_modules/nest-x"),
+  ...typed("nest-p"),
+  "patches/nest-p+1.0.0.patch": "",
+  // patch-package's nested chain: chain-inner under chain-outer.
+  "patches/chain-outer+1.0.0++chain-inner+2.0.0.patch": "",
+  ...typed("chain-outer"),
+  ...typed("chain-outer/node_modules/chain-inner"),
+  ...typed("root-bundled"),
+  ...typed("foreign-host"),
+  ...typed("root-only"),
+  // `paths` maps mapped-pkg to another installed package; a runtime without
+  // the mapping loads mapped-pkg itself.
+  ...typed("mapped-pkg"),
+  // S10-1. Node and bundlers load the farther (linked) copy for fall-sub/sub,
+  // which the nearer copy lacks, and for fall-entry, whose nearer copy has no
+  // entry; TypeScript resolves both through the root's @types.
+  ...untyped("fall-sub", {}, "src/fall/node_modules"),
+  "linked-src/fall-sub/package.json": JSON.stringify({ name: "fall-sub", main: "index.js" }),
+  "linked-src/fall-sub/index.js": "module.exports = {};\n",
+  "linked-src/fall-sub/sub.js": "module.exports = require('../../src/lib/url-helpers');\n",
+  ...types("fall-sub"),
+  "node_modules/@types/fall-sub/sub.d.ts": "export {};\n",
+  "src/fall/node_modules/fall-entry/package.json": JSON.stringify({ name: "fall-entry" }),
+  "linked-src/fall-entry/package.json": JSON.stringify({ name: "fall-entry", main: "index.js" }),
+  "linked-src/fall-entry/index.js": "module.exports = require('../../src/lib/url-helpers');\n",
+  ...types("fall-entry"),
+  // The compiler takes the nearer @types/fall-types; for a subpath it lacks,
+  // it falls through to the root's, which is not from the registry.
+  ...untyped("fall-types"),
+  ...typed("@types/fall-types", {}, "src/fall/node_modules"),
+  ...types("fall-types"),
+  ...typed("above-in"),
+  ...typed("above-out"),
+  // Node tries node_modules/loose.js before the directory.
+  "node_modules/loose.js": "module.exports = require('../src/lib/url-helpers');\n",
+  ...types("loose"),
+  "patches/alias-target+1.0.0.patch": "",
+  ...untyped("alias-target"),
+  ...types("alias-link"), // node_modules/alias-link is linked to alias-target (beforeAll)
+  ...untyped("npm-alias", { name: "alias-target" }),
+  ...types("npm-alias"),
+  ...untyped("memo-y"),
+  ...types("memo-y"),
+  // A browser build of memo/ loads repo code; TypeScript resolves the root's @types.
+  ...untyped("memo-y", { browser: "../../../src/lib/url-helpers.ts" }, "memo/node_modules"),
+  // A project with its own lockfile, .npmrc and patches/ (F10-2, T10-6).
+  "nested/package-lock.json": JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      "": { name: "nested" },
+      "node_modules/only-nested": { version: "1.0.0", resolved: "https://npm.example.com/r/only-nested/-/only-nested-1.0.0.tgz", integrity: "sha512-fixture" },
+      "node_modules/@nested/scoped": { version: "1.0.0", resolved: "https://scoped.example.com/@nested/scoped/-/scoped-1.0.0.tgz", integrity: "sha512-fixture" },
+      "node_modules/nested-default": registry("nested-default"),
+      "node_modules/nested-patched": { version: "1.0.0", resolved: "https://npm.example.com/r/nested-patched/-/nested-patched-1.0.0.tgz", integrity: "sha512-fixture" },
+    },
+  }),
+  "nested/.npmrc": "; fixture\nregistry=https://npm.example.com/r\n@nested:registry=https://scoped.example.com/\n",
+  "nested/patches/nested-patched+1.0.0.patch": "",
+  ...typed("only-nested", {}, "nested/node_modules"),
+  ...typed("@nested/scoped", {}, "nested/node_modules"),
+  ...typed("nested-default", {}, "nested/node_modules"),
+  ...typed("nested-patched", {}, "nested/node_modules"),
 };
 
 let base;
@@ -201,6 +312,13 @@ beforeAll(() => {
   symlinkSync("../src/lib", join(root, "node_modules/linked"));
   symlinkSync("../../src/lib", join(root, "node_modules/escape-pkg/lib"));
   symlinkSync("../linked-src/types-linked", join(root, "node_modules/types-linked"));
+  symlinkSync("../linked-src/fall-sub", join(root, "node_modules/fall-sub"));
+  symlinkSync("../linked-src/fall-entry", join(root, "node_modules/fall-entry"));
+  symlinkSync("alias-target", join(root, "node_modules/alias-link"));
+  // Above the repository's root: one copy really inside it, one outside it.
+  mkdirSync(join(base, "node_modules/above-out"), { recursive: true });
+  writeFileSync(join(base, "node_modules/above-out/package.json"), JSON.stringify({ name: "above-out", main: "../../repo/src/lib/url-helpers.ts" }));
+  symlinkSync("../repo/src/lib", join(base, "node_modules/above-in"));
   resolver = createModuleResolver({ root, isScanned });
 });
 afterAll(() => rmSync(base, { recursive: true, force: true }));
@@ -404,6 +522,147 @@ describe("createModuleResolver: an installed package is decided by what the runt
     } finally {
       rmSync(bare, { recursive: true, force: true });
     }
+  });
+});
+
+describe("createModuleResolver: every copy a runtime or the compiler may load is judged (S10-1)", () => {
+  const FALL = "src/fall/a.ts";
+
+  it("a subpath the nearer copy lacks: the runtime falls through to a farther copy linked from the repo", () => {
+    expect(resolver.resolve("fall-sub/sub", FALL)).toEqual({
+      kind: "opaque",
+      why: "resolves into a package, but node_modules/fall-sub is really linked-src/fall-sub, outside node_modules",
+    });
+  });
+
+  it("a nearer copy with no entry: the runtime falls through to a farther copy linked from the repo", () => {
+    expect(resolver.resolve("fall-entry", FALL)).toEqual({
+      kind: "opaque",
+      why: "resolves into a package, but node_modules/fall-entry is really linked-src/fall-entry, outside node_modules",
+    });
+  });
+
+  it("a farther @types copy the compiler may fall through to", () => {
+    expect(resolver.resolve("fall-types", FALL)).toEqual({
+      kind: "opaque",
+      why: "resolves into a package, but node_modules/@types/fall-types is installed from file:vendor/types-fall-types-1.0.0.tgz, not the registry",
+    });
+  });
+
+  it("a copy above the repository's root that is really inside it", () => {
+    const r = resolver.resolve("above-in", FROM);
+    expect(r.kind).toBe("opaque");
+    expect(r.why).toBe(`resolves into a package, but ${join(base, "node_modules/above-in")}, above the repository, is really src/lib inside it`);
+  });
+
+  it("a copy above the repository's root that is outside it is ignored", () => {
+    expect(resolver.resolve("above-out", FROM)).toEqual({ kind: "none" });
+  });
+
+  it("a module file node_modules/<name>.js, which Node tries before the package directory", () => {
+    expect(resolver.resolve("loose", FROM)).toEqual({ kind: "opaque", why: "resolves into a package, but node_modules/loose.js is a module file, not a package" });
+  });
+});
+
+describe("createModuleResolver: an installed copy is judged by the directory it really is (S10-2)", () => {
+  it("a name linked to another, patched package", () => {
+    expect(resolver.resolve("alias-link", FROM)).toEqual({
+      kind: "opaque",
+      why: "resolves into a package, but node_modules/alias-link is really node_modules/alias-target, not alias-link",
+    });
+  });
+
+  it("an npm alias, whose package.json names another package", () => {
+    expect(resolver.resolve("npm-alias", FROM)).toEqual({
+      kind: "opaque",
+      why: 'resolves into a package, but node_modules/npm-alias is really "alias-target" by its package.json, not npm-alias',
+    });
+  });
+});
+
+describe("createModuleResolver: a copy is judged against the lockfile governing where it is installed (F10-2)", () => {
+  const NESTED = "nested/a.ts";
+
+  it("a root package imported from a project with its own lockfile uses the root's lockfile", () => {
+    expect(resolver.resolve("root-only", NESTED)).toEqual({ kind: "none" });
+  });
+
+  it("the project's own package uses its own lockfile and its .npmrc registry", () => {
+    expect(resolver.resolve("only-nested", NESTED)).toEqual({ kind: "none" });
+    expect(resolver.resolve("@nested/scoped", NESTED)).toEqual({ kind: "none" });
+  });
+
+  it("a registry the project's .npmrc replaces is refused", () => {
+    expect(resolver.resolve("nested-default", NESTED)).toEqual({
+      kind: "opaque",
+      why: "resolves into a package, but node_modules/nested-default is installed from https://registry.npmjs.org/nested-default/-/nested-default-1.0.0.tgz, not the registry",
+    });
+  });
+
+  it("the project's own patches/", () => {
+    expect(resolver.resolve("nested-patched", NESTED)).toEqual({
+      kind: "opaque",
+      why: "resolves into a package, but nested-patched is patched by nested/patches/nested-patched+1.0.0.patch",
+    });
+  });
+});
+
+describe("createModuleResolver: lockfile and patch facts (T10-1, T10-3, T10-6)", () => {
+  it("a tarball from a host the repository does not configure, with a registry-shaped path", () => {
+    expect(resolver.resolve("foreign-host", FROM)).toEqual({
+      kind: "opaque",
+      why: "resolves into a package, but node_modules/foreign-host is installed from https://npm.example.com/foreign-host/-/foreign-host-1.0.0.tgz, not the registry",
+    });
+  });
+
+  it("a dependency reaching a patched package only through its own nested copy", () => {
+    expect(resolver.resolve("nest-d", FROM)).toEqual({ kind: "opaque", why: "resolves into a package, but node_modules/nest-d depends on patched nest-p" });
+    // Positive control: the top-level copy of that dependency is clean.
+    expect(resolver.resolve("nest-x", FROM)).toEqual({ kind: "none" });
+  });
+
+  it("an optional dependency on a patched package", () => {
+    expect(resolver.resolve("uses-optional", FROM)).toEqual({
+      kind: "opaque",
+      why: "resolves into a package, but node_modules/uses-optional depends on patched patched-pkg",
+    });
+  });
+
+  it("the inner package of a ++ patch chain", () => {
+    expect(resolver.resolve("chain-inner", "node_modules/chain-outer/index.js")).toEqual({
+      kind: "opaque",
+      why: "resolves into a package, but chain-inner is patched by patches/chain-outer+1.0.0++chain-inner+2.0.0.patch",
+    });
+  });
+
+  it("a dependency the project's own package bundles", () => {
+    expect(resolver.resolve("root-bundled", FROM)).toEqual({
+      kind: "opaque",
+      why: "resolves into a package, but node_modules/root-bundled is bundled by the project package-lock.json pins, which the repository authors",
+    });
+  });
+
+  it("a compiler file in a package other than the one a runtime looks up (a paths mapping)", () => {
+    expect(resolver.resolve("mapped-pkg", FROM)).toEqual({
+      kind: "opaque",
+      why: "resolves into a package, but node_modules/@scope/pkg/index.d.ts is in @scope/pkg, not the package a runtime looks up",
+    });
+  });
+
+  it("a subpath that leaves its package", () => {
+    expect(resolver.resolve("react-like/../@types/react-like", FROM)).toEqual({
+      kind: "opaque",
+      why: 'resolves into a package, but "react-like/../@types/react-like" leaves package react-like',
+    });
+  });
+
+  it("decides each importing directory's copies apart (T10-2)", () => {
+    const fresh = createModuleResolver({ root, isScanned });
+    expect(fresh.resolve("memo-y", "a.ts")).toEqual({ kind: "none" });
+    expect(fresh.resolve("memo-y", "memo/b.ts")).toEqual({
+      kind: "opaque",
+      why: 'resolves into a package, but memo/node_modules/memo-y/package.json names "../../../src/lib/url-helpers.ts", which leaves node_modules',
+    });
   });
 });
 

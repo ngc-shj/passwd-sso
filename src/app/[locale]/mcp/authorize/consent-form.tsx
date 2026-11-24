@@ -77,41 +77,23 @@ export function ConsentForm({
     }
   };
 
-  const handleAllow = () => {
+  // Allow and Deny post the same authorization-request parameters. The route
+  // bounces either one back to the authorize GET when the session changed user
+  // or needs step-up, and that GET refuses a request without code_challenge or
+  // scope — so a Deny that left them out would land on a JSON 400.
+  const submitConsent = (action: "allow" | "deny") => {
     setLoading(true);
     const form = document.createElement("form");
     form.method = "POST";
     form.action = withBasePath("/api/mcp/authorize/consent");
     const fields: Record<string, string> = {
+      ...(action === "deny" ? { action: "deny" } : {}),
       client_id: clientId,
       expected_user_id: expectedUserId,
       redirect_uri: redirectUri,
       scope: scopes.join(" "),
       code_challenge: codeChallenge,
       code_challenge_method: codeChallengeMethod,
-      state,
-    };
-    for (const [key, value] of Object.entries(fields)) {
-      const input = document.createElement("input");
-      input.type = "hidden";
-      input.name = key;
-      input.value = value;
-      form.appendChild(input);
-    }
-    document.body.appendChild(form);
-    form.submit();
-  };
-
-  const handleDeny = () => {
-    setLoading(true);
-    const form = document.createElement("form");
-    form.method = "POST";
-    form.action = withBasePath("/api/mcp/authorize/consent");
-    const fields = {
-      action: "deny",
-      client_id: clientId,
-      expected_user_id: expectedUserId,
-      redirect_uri: redirectUri,
       state,
     };
     for (const [key, value] of Object.entries(fields)) {
@@ -176,13 +158,13 @@ export function ConsentForm({
           <Button
             variant="outline"
             className="flex-1"
-            onClick={handleDeny}
+            onClick={() => submitConsent("deny")}
             disabled={loading}
           >
             <ShieldX className="mr-2 h-4 w-4" />
             {t("deny")}
           </Button>
-          <Button className="flex-1" onClick={handleAllow} disabled={loading}>
+          <Button className="flex-1" onClick={() => submitConsent("allow")} disabled={loading}>
             {loading ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (

@@ -17,14 +17,17 @@
  * resolution ends. A specifier
  *   - resolving to a target names it;
  *   - naming an installed package, or a Node builtin, names none (a package is
- *     not repo code) — judged by what the RUNTIME loads, not by what the
- *     compiler resolved: TypeScript may resolve `@types/<pkg>` (or any file
- *     under node_modules) while the runtime loads `<pkg>`, so the package a
- *     runtime looks up by name from the importing directory is examined, and
- *     so is the package the compiler's file is in (see `installedPackage`);
- *     a package linked into the repo, one whose package.json names a path
- *     leaving node_modules, or one the repository patches may load repo code
- *     and may name any target;
+ *     not repo code) — judged by every copy a runtime or the compiler could
+ *     load, not by the one TypeScript picked: Node and bundlers fall through
+ *     to a farther `node_modules/<pkg>` when a nearer one lacks the subpath or
+ *     an entry, and the compiler likewise through `@types/<pkg>`, so every
+ *     `node_modules/<pkg>` and `node_modules/@types/<pkg>` from the importing
+ *     directory up to the repository root is examined (see `runtimePackage`),
+ *     and so is the package the compiler's file is in. A copy linked into the
+ *     repo, one that is really another package, one whose package.json names a
+ *     path leaving node_modules, one the repository patches, or one its
+ *     lockfile does not pin to a registry tarball may load repo code and may
+ *     name any target;
  *   - resolving to a JSON file names none (data cannot re-export);
  *   - resolving to another repo source file the gate scans names none: that
  *     file is held to the same rule, so a re-export of a target in it is
@@ -45,7 +48,7 @@
  * and this gate cannot know which runs it. The tree's legitimate ones are
  * named, with reasons, in the gate's template allowlist (templateAllowlist).
  */
-import { realpathSync, readdirSync, readFileSync, existsSync } from "node:fs";
+import { realpathSync, readdirSync, readFileSync, existsSync, statSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { dirname, join, posix, relative, sep } from "node:path";
 import { SyntaxKind, ts } from "ts-morph";
@@ -122,7 +125,6 @@ export function createModuleResolver({ root, isScanned }) {
   const resolutions = new Map(); // `${dir}\0${spec}` → result
   const siblings = new Map(); // directory → Map<stem, count>
   const packages = new Map(); // directory → why its package.json may redirect, or null
-  const escapes = new Map(); // installed package directory → why it may load repo code, or null
 
   function configFor(dir) {
     if (configs.has(dir)) return configs.get(dir);
@@ -181,69 +183,70 @@ export function createModuleResolver({ root, isScanned }) {
     return why;
   }
 
+  const insideRepo = (abs) => abs === realRoot || abs.startsWith(realRoot + sep);
+
   /**
-   * Why the installed package directory `pkgDir` may load a file outside
-   * node_modules, or null: its real location must be inside node_modules (a
-   * package linked from the repo is repo code), and every path its non-inert
-   * fields can name must stay there. Any field may name the entry a runtime
-   * takes (`main`, `browser`, an `exports` condition TypeScript skips), so all
-   * of them are followed whatever the condition: a symlink inside the package,
-   * or a `..` target, reaches repo code TypeScript never saw.
+   * Why the installed package `real` (a real directory inside node_modules,
+   * holding `manifest`) may load a file outside node_modules, or null: every
+   * path its non-inert fields can name must stay there. Any field may name the
+   * entry a runtime takes (`main`, `browser`, an `exports` condition TypeScript
+   * skips), so all of them are followed whatever the condition: a symlink
+   * inside the package, or a `..` target, reaches repo code TypeScript never
+   * saw.
    */
-  function packageEscape(pkgDir) {
-    if (escapes.has(pkgDir)) return escapes.get(pkgDir);
-    let why = null;
-    let real;
-    try {
-      real = realpathSync(pkgDir);
-    } catch {
-      why = `${toPosix(relative(realRoot, pkgDir))} cannot be followed`;
-    }
-    if (why === null && !insideNodeModules(toPosix(relative(realRoot, real)))) {
-      why = `${toPosix(relative(realRoot, pkgDir))} is really ${toPosix(relative(realRoot, real))}, outside node_modules`;
-    }
-    if (why === null) {
-      const name = toPosix(relative(realRoot, join(pkgDir, "package.json")));
+  function packageEscape(real, manifest) {
+    const name = toPosix(relative(realRoot, join(real, "package.json")));
+    const targets = Object.entries(manifest).flatMap(([field, value]) => (INERT_PACKAGE_FIELDS.has(field) ? [] : stringsIn(value)));
+    for (const target of targets) {
+      // A pattern or an extensionless target loads a file under the deepest
+      // directory it names that exists.
+      let p = join(real, target.split("*")[0]);
+      while (!existsSync(p) && p !== real) p = dirname(p);
+      let reached;
       try {
-        const manifest = JSON.parse(readFileSync(join(real, "package.json"), "utf-8"));
-        const targets = Object.entries(manifest).flatMap(([field, value]) => (INERT_PACKAGE_FIELDS.has(field) ? [] : stringsIn(value)));
-        for (const target of targets) {
-          // A pattern or an extensionless target loads a file under the
-          // deepest directory it names that exists.
-          let p = join(real, target.split("*")[0]);
-          while (!existsSync(p) && p !== real) p = dirname(p);
-          if (!insideNodeModules(toPosix(relative(realRoot, realpathSync(p))))) {
-            why = `${name} names ${JSON.stringify(target)}, which leaves node_modules`;
-            break;
-          }
-        }
+        reached = realpathSync(p);
       } catch {
-        why = `${name} is missing, unreadable or names a path that cannot be followed`;
+        return `${name} names ${JSON.stringify(target)}, which cannot be followed`;
       }
+      if (!insideNodeModules(toPosix(relative(realRoot, reached)))) return `${name} names ${JSON.stringify(target)}, which leaves node_modules`;
     }
-    escapes.set(pkgDir, why);
-    return why;
+    return null;
   }
 
   // What stays trusted, by design: the contents of a package published to a
-  // registry, installed as the lockfile pins it (a registry tarball, checked
-  // against its `integrity`), and everything it depends on. Neither gate reads
-  // that code, and what it loads is its publisher's, not this repository's: a
-  // publisher shipping code that requires `../../src/...` is a supply-chain
-  // compromise, which these gates do not claim to detect. Code the repository
-  // authors into an installed package is not trusted, by the facts checked
-  // here: a package the postinstall `patch-package` patches
-  // (patches/<name>+<version>.patch), one whose installed dependencies reach a
-  // patched package (it loads the patched code), and one the lockfile records
-  // as installed from anywhere but a registry tarball (`file:`, a link, git, a
-  // URL, no source) — a source the repository may author.
-  let patched; // package name → patch file, or why patches/ cannot be read
-  function readPatches() {
-    if (patched === undefined) {
-      const dir = join(realRoot, "patches");
+  // registry the repository configures, installed as the lockfile pins it (a
+  // registry tarball, checked against its `integrity`), and everything it
+  // depends on. Neither gate reads that code, and what it loads is its
+  // publisher's, not this repository's: a publisher shipping code that
+  // requires `../../src/...` is a supply-chain compromise, which these gates
+  // do not claim to detect. Code the repository authors into an installed
+  // package is not trusted, by the facts checked here: a package the
+  // postinstall `patch-package` patches (patches/<name>+<version>.patch,
+  // beside the repository's root or the package's own lockfile), one whose
+  // installed dependencies reach a patched package (it loads the patched
+  // code), and one the lockfile records as installed from anywhere but a
+  // registry tarball (`file:`, a link, git, a URL, another host, no source) —
+  // a source the repository may author.
+  //
+  // What this cannot see — the trust boundary: a module a runtime finds
+  // outside the repository (a node_modules above its root that is really
+  // outside it, NODE_PATH, Node's global folders, a global install); a
+  // resolution configured outside tsconfig.json and package.json (a bundler's
+  // `resolve.alias` or `resolve.modules`, Turbopack's `resolveAlias`, Yarn
+  // PnP, an import map, a loader hook); a registry named only in a user's or
+  // global npmrc (its tarballs are refused, not trusted); and an installed
+  // directory whose files differ from the tarball its lockfile entry pins
+  // (edited by hand, or by a package's own install script): node_modules is
+  // judged by its location, manifest and lockfile entry, not by its bytes.
+  const patchDirs = new Map(); // directory → Map<package name, patch file>, or why its patches/ cannot be read
+  function readPatches(dir) {
+    if (!patchDirs.has(dir)) {
+      const patchDir = join(dir, "patches");
+      const label = toPosix(relative(realRoot, patchDir));
+      let patched;
       try {
         patched = new Map();
-        const files = existsSync(dir) ? readdirSync(dir, { recursive: true }).map(toPosix).filter((f) => f.endsWith(".patch")) : [];
+        const files = existsSync(patchDir) ? readdirSync(patchDir, { recursive: true }).map(toPosix).filter((f) => f.endsWith(".patch")) : [];
         for (const file of files) {
           // patch-package's file name: `a+1.0.0`, `@s+a+1.0.0`, nested
           // `a+1.0.0++b+2.0.0` (b under a); every package of a chain loads
@@ -251,29 +254,63 @@ export function createModuleResolver({ root, isScanned }) {
           for (const part of posix.basename(file).replace(/(\.dev)?\.patch$/, "").split("++")) {
             const segments = part.split("+").filter(Boolean);
             const name = segments[0]?.startsWith("@") ? (segments.length > 2 ? `${segments[0]}/${segments[1]}` : null) : segments.length > 1 ? segments[0] : null;
-            if (name === null) throw new Error(`patches/${file} names no package`);
-            patched.set(name, `patches/${file}`);
+            if (name === null) throw new Error(`${label}/${file} names no package`);
+            patched.set(name, `${label}/${file}`);
           }
         }
       } catch (e) {
-        patched = `patches/ cannot be read (${e instanceof Error ? e.message : String(e)})`;
+        patched = `${label}/ cannot be read (${e instanceof Error ? e.message : String(e)})`;
       }
+      patchDirs.set(dir, patched);
     }
-    return patched;
+    return patchDirs.get(dir);
   }
 
-  function patchOf(name) {
-    readPatches();
+  /** The packages patched for the project whose lockfile is in `dir`: the root's patches/ and its own. */
+  function patchesFor(dir) {
+    const own = readPatches(dir);
+    const root = readPatches(realRoot);
+    if (typeof own === "string") return own;
+    if (typeof root === "string") return root;
+    return new Map([...own, ...root]);
+  }
+
+  function patchOf(name, lock) {
+    const patched = typeof lock === "string" ? readPatches(realRoot) : lock.patched;
     if (typeof patched === "string") return patched;
     const file = patched.get(name);
     return file === undefined ? null : `${name} is patched by ${file}`;
   }
 
+  /**
+   * The registry URL prefixes the project in `dir` installs from: its own
+   * .npmrc's `registry` (npm's default https://registry.npmjs.org/ when
+   * unset) and each `@scope:registry`. A value this cannot read as a URL (an
+   * environment reference) adds none and replaces the default.
+   */
+  function registriesOf(dir) {
+    const file = join(dir, ".npmrc");
+    let main = "https://registry.npmjs.org/";
+    const scoped = [];
+    if (existsSync(file)) {
+      for (const line of readFileSync(file, "utf-8").split(/\r?\n/)) {
+        const m = /^\s*(@[^:=\s]+:)?registry\s*=\s*(.*?)\s*$/.exec(line);
+        if (!m) continue;
+        const url = /^https?:\/\/[^\s$]+$/.test(m[2]) ? m[2].replace(/\/?$/, "/") : null;
+        if (m[1]) {
+          if (url !== null) scoped.push(url);
+        } else main = url;
+      }
+    }
+    return [main, ...scoped].filter((url) => url !== null);
+  }
+
   const locks = new Map(); // directory → its governing lockfile, or why there is none
   /**
    * The package-lock.json nearest above `dir` within the repository, as
-   * `{ dir, rel, packages, tainted }` (`tainted`: lockfile key → the patched
-   * package its installed dependencies reach), or why it cannot be used.
+   * `{ dir, rel, packages, patched, registries, tainted }` (`tainted`:
+   * lockfile key → the patched package its installed dependencies reach), or
+   * why it cannot be used.
    */
   function lockFor(dir) {
     if (locks.has(dir)) return locks.get(dir);
@@ -284,7 +321,8 @@ export function createModuleResolver({ root, isScanned }) {
       try {
         const { lockfileVersion, packages } = JSON.parse(readFileSync(file, "utf-8"));
         if (!(lockfileVersion >= 2) || packages === null || typeof packages !== "object") throw new Error("no lockfileVersion 2+ packages map");
-        lock = { dir, rel, packages, tainted: taintedKeys(packages) };
+        const patched = patchesFor(dir);
+        lock = { dir, rel, packages, patched, registries: registriesOf(dir), tainted: typeof patched === "string" ? new Map() : taintedKeys(packages, patched) };
       } catch (e) {
         lock = `${rel} cannot be read (${e instanceof Error ? e.message : String(e)})`;
       }
@@ -300,14 +338,11 @@ export function createModuleResolver({ root, isScanned }) {
   /**
    * Every lockfile key whose installed dependency closure (dependencies,
    * optional and peer dependencies, each found as Node finds it from the
-   * dependent's own node_modules upward) holds a patched package, mapped to
-   * that package's name.
+   * dependent's own node_modules upward) holds a package `names` patches,
+   * mapped to that package's name.
    */
-  function taintedKeys(packages) {
-    const names = readPatches();
+  function taintedKeys(packages, names) {
     const tainted = new Map();
-    if (typeof names === "string") return tainted; // patchOf answers first
-    if (names.size === 0) return tainted;
     const dependents = new Map(); // key → keys that depend on it
     for (const [key, entry] of Object.entries(packages)) {
       if (key === "") continue;
@@ -338,74 +373,160 @@ export function createModuleResolver({ root, isScanned }) {
   }
 
   // npm's lockfile records a registry install as the tarball URL
-  // `https://<registry>/<name>/-/<file>.tgz` beside its `integrity`.
-  const REGISTRY_TARBALL = /^https:\/\/[^/]+\/(@[^/]+\/)?[^/]+\/-\/[^/]+\.tgz$/;
+  // `<registry>/<name>/-/<file>.tgz` beside its `integrity`.
+  const TARBALL_PATH = /^(@[^/]+\/)?[^/]+\/-\/[^/]+\.tgz$/;
 
-  /** Why the lockfile governing `dir` does not show `pkgDir` installed from a registry, unpatched, or null. */
-  function lockedSource(pkgDir, dir) {
-    const lock = lockFor(dir);
+  /** Why `lock` does not show the installed package `real` installed from a configured registry, unpatched, or null. */
+  function lockedSource(real, lock) {
     if (typeof lock === "string") return lock;
-    let key = toPosix(relative(lock.dir, pkgDir));
+    let key = toPosix(relative(lock.dir, real));
     const dependsOn = lock.tainted.get(key);
     if (dependsOn !== undefined) return `${key} depends on patched ${dependsOn}`;
     let entry = lock.packages[key];
-    // A bundled dependency ships inside its parent's tarball: the parent's source is its source.
-    while (entry?.inBundle && key.includes("/node_modules/")) {
+    // A bundled dependency ships inside its parent's tarball: the parent's
+    // source is its source. One with no parent inside node_modules ships in
+    // the project's own package, which the repository authors.
+    while (entry?.inBundle) {
+      if (!key.includes("/node_modules/")) return `${key} is bundled by the project ${lock.rel} pins, which the repository authors`;
       key = key.slice(0, key.lastIndexOf("/node_modules/"));
       entry = lock.packages[key];
     }
-    if (entry === undefined || entry.inBundle) return `${key} is not in ${lock.rel}`;
+    if (entry === undefined) return `${key} is not in ${lock.rel}`;
     if (entry.link) return `${key} is installed from a link to ${entry.resolved}, not the registry`;
-    if (typeof entry.resolved !== "string" || typeof entry.integrity !== "string" || !REGISTRY_TARBALL.test(entry.resolved)) {
+    const fromRegistry = typeof entry.resolved === "string" && lock.registries.some((r) => entry.resolved.startsWith(r) && TARBALL_PATH.test(entry.resolved.slice(r.length)));
+    if (!fromRegistry || typeof entry.integrity !== "string") {
       return `${key} is installed from ${entry.resolved ?? "an unrecorded source"}${typeof entry.integrity === "string" ? "" : " with no integrity"}, not the registry`;
     }
     return null;
   }
 
-  /** Why the installed package `name` in `pkgDir`, imported from `dir`, may load repo code, or null. */
-  const installedPackage = (name, pkgDir, dir) => patchOf(name) ?? packageEscape(pkgDir) ?? lockedSource(pkgDir, dir);
+  const judged = new Map(); // `${pkgDir}\0${name}` → why it may load repo code, or null
+  /**
+   * Why the installed copy `pkgDir` of the package `name` may load repo code,
+   * or null. It is judged by the directory it really is: that must be inside
+   * node_modules (a package linked from the repo is repo code) and be `name`
+   * both by its path and by its package.json (a `node_modules/foo` that is
+   * really `bar`, by a link or an npm alias, loads `bar`); its patches, entry
+   * paths and lockfile entry are that directory's, and the lockfile is the one
+   * governing where it is installed — the nearest package-lock.json above the
+   * outermost node_modules holding it — keyed relative to that lockfile.
+   */
+  function installedPackage(name, pkgDir) {
+    const memo = `${pkgDir}\0${name}`;
+    if (!judged.has(memo)) judged.set(memo, judgeInstalled(name, pkgDir));
+    return judged.get(memo);
+  }
+
+  function judgeInstalled(name, pkgDir) {
+    const at = toPosix(relative(realRoot, pkgDir));
+    let real;
+    try {
+      real = realpathSync(pkgDir);
+    } catch {
+      return `${at} cannot be followed`;
+    }
+    const relReal = toPosix(relative(realRoot, real));
+    if (!insideNodeModules(relReal)) return `${at} is really ${relReal}, outside node_modules`;
+    let manifest;
+    try {
+      manifest = JSON.parse(readFileSync(join(real, "package.json"), "utf-8"));
+    } catch {
+      manifest = null;
+    }
+    if (manifest === null || typeof manifest !== "object" || Array.isArray(manifest)) return `${relReal}/package.json is missing or unreadable`;
+    const realName = relReal.slice(relReal.lastIndexOf("node_modules/") + "node_modules/".length);
+    if (realName !== name) return `${at} is really ${relReal}, not ${name}`;
+    if ((manifest.name ?? name) !== name) return `${at} is really ${JSON.stringify(manifest.name)} by its package.json, not ${name}`;
+    const segments = relReal.split("/");
+    const lock = lockFor(join(realRoot, ...segments.slice(0, segments.indexOf("node_modules"))));
+    return patchOf(name, lock) ?? packageEscape(real, manifest) ?? lockedSource(real, lock);
+  }
+
+  // What a runtime may take for `node_modules/<name>`: Node tries it as a
+  // file, then with each extension, before the directory; TypeScript tries
+  // its own extensions likewise.
+  const NODE_MODULES_SUFFIXES = ["", ...RUNTIME_EXTENSIONS, ".node", ".d.ts", ".d.mts", ".d.cts"];
+
+  const candidates = new Map(); // `${dir}\0${name}` → { dirs, why }
+  /**
+   * Every `node_modules/<name>` a runtime or the compiler may take for an
+   * importer in `dir`, in `dir` and in each directory above it — not only the
+   * nearest: Node and bundlers fall through to a farther copy when a nearer
+   * one lacks the subpath or an entry. `dirs` are the package directories
+   * inside the repository, each to be judged. A module file there
+   * (`node_modules/<name>.js`) is no package, so it is a `why`. Above the
+   * repository's root a copy is outside what these gates answer for and is
+   * ignored, unless it is really inside the repository, which is a `why`.
+   */
+  function candidatesOf(name, dir) {
+    const memo = `${dir}\0${name}`;
+    if (!candidates.has(memo)) {
+      const dirs = [];
+      let why = null;
+      for (let d = dir; why === null; d = dirname(d)) {
+        const inside = insideRepo(d);
+        for (const suffix of existsSync(join(d, "node_modules")) ? NODE_MODULES_SUFFIXES : []) {
+          const p = join(d, "node_modules", name) + suffix;
+          let real;
+          try {
+            real = realpathSync(p);
+          } catch {
+            continue;
+          }
+          if (!inside) {
+            if (insideRepo(real)) why = `${p}, above the repository, is really ${toPosix(relative(realRoot, real)) || "."} inside it`;
+          } else if (suffix === "" && statSync(real).isDirectory()) dirs.push(p);
+          else why = `${toPosix(relative(realRoot, p))} is a module file, not a package`;
+          if (why !== null) break;
+        }
+        if (dirname(d) === d) break;
+      }
+      candidates.set(memo, { dirs, why });
+    }
+    return candidates.get(memo);
+  }
+
+  // `@types/<x>` describes `<x>` (`@types/scope__name` describes `@scope/name`).
+  const typesName = (name) => (name.startsWith("@types/") ? null : `@types/${name.startsWith("@") ? name.slice(1).replace("/", "__") : name}`);
 
   /**
-   * Why what the runtime loads for the bare specifier `spec`, from `dir`, may
-   * be repo code, or null. The package is found the way Node and bundlers
-   * find it, whatever condition picks the file inside it: `node_modules/<name>`
-   * in `dir` or the nearest directory above. `optional`: a missing package is
-   * no answer (an unprefixed builtin, which the runtime provides).
+   * Why a package a runtime or the compiler may load for the bare specifier
+   * `spec`, from `dir`, may be repo code, or null: every candidate
+   * (candidatesOf) of the package and of its `@types` package must pass
+   * installedPackage, whatever subpath or condition picks the file inside it.
+   * `optional`: a missing package is no answer (an unprefixed builtin, which
+   * the runtime provides).
    */
   function runtimePackage(spec, dir, optional) {
     const pkg = packageOfSpecifier(spec);
     if (pkg === null) return `${JSON.stringify(spec)} names no package`;
+    // `pkg/../other` loads from a directory beside the candidates judged here.
     if (posix.normalize(`./${pkg.subpath}`).startsWith("../")) return `${JSON.stringify(spec)} leaves package ${pkg.name}`;
-    const pkgDir = installedDirOf(pkg.name, dir);
-    if (pkgDir !== null) return installedPackage(pkg.name, pkgDir, dir);
-    return optional ? null : `no package ${pkg.name} is installed where a runtime looks for it`;
-  }
-
-  const installedDirs = new Map(); // `${dir}\0${name}` → node_modules/<name> a runtime finds, or null
-  function installedDirOf(name, dir) {
-    const key = `${dir}\0${name}`;
-    if (!installedDirs.has(key)) {
-      let found = null;
-      for (let d = dir; ; d = dirname(d)) {
-        const pkgDir = join(d, "node_modules", name);
-        if (existsSync(pkgDir)) {
-          found = pkgDir;
-          break;
-        }
-        if (dirname(d) === d) break;
-      }
-      installedDirs.set(key, found);
+    const runtime = candidatesOf(pkg.name, dir);
+    if (runtime.why !== null) return runtime.why;
+    if (runtime.dirs.length === 0 && !optional) return `no package ${pkg.name} is installed where a runtime looks for it`;
+    for (const pkgDir of runtime.dirs) {
+      const why = installedPackage(pkg.name, pkgDir);
+      if (why !== null) return why;
     }
-    return installedDirs.get(key);
+    const types = typesName(pkg.name);
+    if (types === null) return null;
+    const typed = candidatesOf(types, dir);
+    if (typed.why !== null) return typed.why;
+    for (const pkgDir of typed.dirs) {
+      const why = installedPackage(types, pkgDir);
+      if (why !== null) return why;
+    }
+    return null;
   }
 
   /**
    * Why the installed package holding the compiler's file `abs` (a real path
    * under node_modules) may load repo code, or null. It must be the package
    * the runtime looks up (`@types/<x>` describes `<x>`): if the compiler took
-   * another, the two load different code.
+   * another (a `paths` mapping), the two load different code.
    */
-  function compilerPackage(spec, abs, dir) {
+  function compilerPackage(spec, abs) {
     const segments = abs.split(sep);
     const at = segments.lastIndexOf("node_modules");
     const depth = segments[at + 1]?.startsWith("@") ? 3 : 2;
@@ -413,7 +534,7 @@ export function createModuleResolver({ root, isScanned }) {
     if (at + depth >= segments.length) return `${rel} is in no package`;
     const name = segments.slice(at + 1, at + depth).join("/");
     if (runtimeName(name) !== packageOfSpecifier(spec)?.name) return `${rel} is in ${name}, not the package a runtime looks up`;
-    return installedPackage(runtimeName(name), segments.slice(0, at + depth).join(sep), dir);
+    return installedPackage(name, segments.slice(0, at + depth).join(sep));
   }
 
   // A `paths` pattern with several targets: TypeScript takes the first that
@@ -461,7 +582,7 @@ export function createModuleResolver({ root, isScanned }) {
       if (!isBareSpecifier(spec)) return { kind: "opaque", why: `resolves to ${rel} by path, not to a package a runtime looks up by name` };
       // The runtime's package decides first: the compiler's file may be in
       // `@types/<pkg>`, which says nothing of what `<pkg>` loads.
-      const why = runtimePackage(spec, dir, false) ?? compilerPackage(spec, abs, dir);
+      const why = runtimePackage(spec, dir, false) ?? compilerPackage(spec, abs);
       return why === null ? { kind: "none" } : { kind: "opaque", why: `resolves into a package, but ${why}` };
     }
     // Reached by package rules (exports, conditions, symlink handling) that the

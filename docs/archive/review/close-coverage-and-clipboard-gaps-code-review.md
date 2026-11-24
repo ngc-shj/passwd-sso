@@ -937,3 +937,49 @@ All findings were valid and are resolved. Ledgers: `r10-spec/`, `r9-gate/` (re-r
   - Setup's two "session moved" arms share `movedRefusal()`; unlock's check is left alone, because it does not re-ask the status.
   - Each change keeps the verdict or the thrown error unchanged; the module-specifier and vault suites and both gates pass unchanged.
 - **Not taken.** `decide`'s `node_modules` segment test and `insideNodeModules` differ on a final segment literally named `node_modules`, so they are not merged.
+
+# Review round 10
+
+Scope: `git diff d7a35e671..6d220b11d` (review(10)). Round-9 findings were re-verified as resolved, apart from the consent Deny path and the resolver class noted below. The gate's header forwarding, the consent binding and the setup binding hold under execution.
+
+## Findings
+
+- **S10-1 [Major, escalated] The resolver examines only the first `node_modules/<name>` above the importer, but Node and bundlers fall through to a farther copy** when the nearer one lacks the subpath or has no entry. The compiler can likewise land in a farther `@types`. The copy that runs is never examined. Executed on scratch trees; reachable in shape between `extension/node_modules` and the root `node_modules`; no instance in the tree. A fourth escape of the resolver class.
+- **T10-1 [Major]** The nested-copy lookup in `taintedKeys` is unproven: the `nests-patched` fixture also has a patched top-level copy, so a top-level-only walk passes it. A mutant gives a false "none" on a probe.
+- **T10-2 [Major]** The simplify pass's `installedDirOf` memo key is unpinned; a name-only key gives a false "none" that `@types` masks. The round-9 simplify note ("each change keeps the verdict") rested on suites that cannot see it.
+- **S10-2 [Minor]** The runtime package is judged by its lookup name and path, not by the directory it really is; a `node_modules/foo` linked to a patched `bar` passes.
+- **F10-2 [Minor]** A package is checked against the importer's nearest lockfile, not the lockfile governing where it is installed: over-refusal, and a CI/local divergence because CI installs no `extension/node_modules`.
+- **T10-3 [Minor]** Surviving resolver mutants: `++` patch chains, the nested lockfile choice, a terminal `inBundle` entry, the `runtimeName` check, the subpath escape.
+- **T10-6 [Minor]** `REGISTRY_TARBALL` accepts any https host with a `/-/` path.
+- **F10-1 / S10-3 [Minor]** A Deny refused for a changed user (or a stale step-up) bounces without `code_challenge`, so the authorize GET answers a raw JSON 400; the comment and `error-handling.md` claim a re-render.
+- **T10-4 [Minor]** "The original headers minus the session cookies" is pinned only for Host and X-Forwarded-Port.
+- **T10-5 [Minor]** The same-user lock arm's `prev === UNLOCKED ? prev : LOCKED` guard is unpinned.
+
+## Process note — at the cap
+
+Round 10 is the loop's cap. All findings above are fixed and red-proved in this branch. A focused independent verification of those fixes replaces an eleventh full round.
+
+## Resolution Status (round 10)
+
+All findings were valid and are resolved. Ledgers: `r11-spec/ledger-final.txt` (32 mutants, run against the final file's sha256) and `r11-app/ledger.txt` (6 mutants). Every mutant is killed and each control is green.
+
+### S10-1 / S10-2 / F10-2 / T10-6 — the resolver judges every copy a runtime could load
+- **Every candidate.** `candidatesOf` lists each `node_modules/<name>` from the importer up to the filesystem root, and each `@types/<name>` likewise. "None" needs every in-repo copy to pass. A copy above the repository root that realpaths into it is "opaque"; one that stays outside is outside the boundary and ignored. A loose `node_modules/<name>.js` file, which Node tries before the directory, is "opaque".
+- **Real identity.** Each copy is judged at its real path. The name in the real path and in its manifest must equal the specifier's package, so a symlink to another package and an npm alias are "opaque". Patches, entry targets and the lockfile key come from the real location.
+- **Governing lockfile.** Each copy is checked against the nearest `package-lock.json` above its outermost `node_modules`. The local and CI (no `extension/node_modules`) verdicts are now identical: 10 extension imports that CI saw as "opaque" now decide "none" in both settings. No other row changed. Both gates exit 0 in both settings.
+- **Registry.** A lockfile URL is accepted only under a registry the `.npmrc` beside that lockfile configures (`registry=`, `@scope:registry=`), with npm's default when none is set.
+- **Trust boundary, stated in the code.** Modules found outside the repository (`NODE_PATH`, global folders), resolution configured outside tsconfig and package.json (bundler aliases, PnP, import maps, loader hooks), registries named only in user or global npmrc (refused, not trusted), installed bytes that differ from the pinned tarball, and registry-published code itself.
+- **T10-1 / T10-2 / T10-3.** Fixtures pin the nested-copy taint, the memo keys, `++` patch chains, a nested lockfile with its own `.npmrc` and `patches/`, a project-level `inBundle` entry ("opaque": the project, not a registry, authors it), the `runtimeName` check (a `paths` mapping to a differently named package) and the subpath escape. The unreachable `names.size === 0` shortcut added in the round-9 simplify pass was removed.
+
+### Minors
+- **F10-1 / S10-3.** Allow and Deny submit the same authorization-request parameters, through one `submitConsent`. A pin feeds the Deny bounce URL to the real authorize GET handler and sees it forward to consent. The comment and `error-handling.md` §5.1 state that Allow's parameters are validated before the bounce and Deny's at the authorize GET.
+- **T10-4.** On the strip path the forwarded header names and values equal the incoming ones; only the cookie differs.
+- **T10-5.** The guard is reachable: an unlock can complete while the setup POST is in flight, because unlocking does not move the lock epoch. It stays, with the reason in a comment, and pins keep the unlocked state and its keys for both the 201 and the 409 arm.
+
+### Simplify pass (round 10 fixes)
+- **No change taken.**
+  - Per-ancestor memoisation of `candidatesOf` was proposed for I/O; measured gate runtimes are 1.8 s and 6.9 s (1.7 s and 6.2 s before the redesign), so the extra verdict-touching code is not worth it.
+  - Collapsing the string-typed lock and patches states into one throw would keep every verdict fail-closed but drop the more specific reason, so it is not taken.
+  - The `names.size === 0` shortcut stays removed: it is unreachable by any test, and the round-10 resolver fix removed it for that reason.
+  - Merging the runtime and `@types` loops, and extracting the "name after node_modules" slices, are cosmetic.
+- `submitConsent` already merged the Allow and Deny handlers.

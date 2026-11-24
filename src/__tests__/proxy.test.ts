@@ -1744,6 +1744,22 @@ describe("proxy — Tailscale forwarded-header normalization wire-in", () => {
       expect(res.headers.get("x-middleware-request-x-forwarded-port")).toBe("3001");
     });
 
+    // T10-4: the whole forwarded set, not two members — any header added,
+    // dropped or rewritten on the way to the strip shows up here.
+    it("forwards exactly the incoming headers, with only the cookie changed", async () => {
+      fetchSpy.mockImplementation(dispatchFetch(sessionRoute(null)));
+      const req = apiRequest({ Cookie: "theme=dark; authjs.session-token=e0e0-7a13", "x-passwd-expected-user": "user-a" });
+      const incoming = new Map(req.headers.entries());
+      const res = await proxy(req, dummyOptions);
+
+      const forwardedNames = (res.headers.get("x-middleware-override-headers") ?? "").split(",").filter(Boolean);
+      expect([...forwardedNames].sort()).toEqual([...incoming.keys()].sort());
+      const forwarded = Object.fromEntries(
+        forwardedNames.map((name) => [name, res.headers.get(`x-middleware-request-${name}`)]),
+      );
+      expect(forwarded).toEqual({ ...Object.fromEntries(incoming), cookie: "theme=dark" });
+    });
+
     it("leaves the named user's request untouched", async () => {
       fetchSpy.mockImplementation(dispatchFetch(sessionRoute(sessionResponseBody("user-a"))));
       const res = await proxy(

@@ -845,7 +845,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         }
         // The vault exists (this setup's 201 was lost and it was retried, or
         // another tab set it up): leave it LOCKED for an unlock, whether or not
-        // a same-user lock came meanwhile.
+        // a same-user lock came meanwhile. An unlock may already have completed:
+        // once a status check found the vault, nothing stops one while this
+        // POST is in flight, and its UNLOCKED state and keys are kept.
         if (err?.error === API_ERROR.VAULT_ALREADY_SETUP) {
           await refuseIfStale();
           setupRequiredRef.current = false;
@@ -859,7 +861,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // Committed for this user, but locked since it started (page hide and
       // bfcache restore, auto-lock): nothing is installed, and the vault is
       // left LOCKED for an unlock with the passphrase just entered — as when
-      // the vault already exists — not reported as an interrupted unlock.
+      // the vault already exists — not reported as an interrupted unlock. That
+      // unlock may already have completed after the lock (as for
+      // VAULT_ALREADY_SETUP above), so UNLOCKED is kept.
       if (lockedSince(lockEpoch)) {
         setVaultStatus((prev) => (prev === VAULT_STATUS.UNLOCKED ? prev : VAULT_STATUS.LOCKED));
         return;

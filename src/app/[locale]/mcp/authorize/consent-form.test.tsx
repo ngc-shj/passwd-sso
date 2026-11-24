@@ -216,6 +216,7 @@ describe("ConsentForm — submit handlers", () => {
       expect(fields.code_challenge).toBe("challenge-abc");
       expect(fields.code_challenge_method).toBe("S256");
       expect(fields.state).toBe("state-xyz");
+      expect(fields.action).toBeUndefined();
     } finally {
       (captured as unknown as { _restore?: () => void })._restore?.();
     }
@@ -254,7 +255,10 @@ describe("ConsentForm — submit handlers", () => {
     }
   });
 
-  it("Deny click submits a form with action=deny and core OAuth fields", () => {
+  // The route bounces a Deny for a changed user or a stale step-up back to the
+  // authorize GET, which refuses a request without code_challenge or scope; the
+  // Deny form must carry them for that bounce to reach a re-rendered consent.
+  it("Deny click submits a form with action=deny and the authorization-request fields", () => {
     const captured = captureSubmittedForm();
     try {
       render(<ConsentForm {...baseProps} />);
@@ -272,9 +276,9 @@ describe("ConsentForm — submit handlers", () => {
       expect(fields.client_id).toBe("mcpc_abc123");
       expect(fields.redirect_uri).toBe("http://localhost:7777/callback");
       expect(fields.state).toBe("state-xyz");
-      // Deny path does NOT submit the OAuth challenge fields
-      expect(fields.code_challenge).toBeUndefined();
-      expect(fields.scope).toBeUndefined();
+      expect(fields.scope).toBe("credentials:list passwords:write");
+      expect(fields.code_challenge).toBe("challenge-abc");
+      expect(fields.code_challenge_method).toBe("S256");
     } finally {
       (captured as unknown as { _restore?: () => void })._restore?.();
     }
