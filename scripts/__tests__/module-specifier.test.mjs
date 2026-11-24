@@ -284,6 +284,11 @@ const TREE = {
       "node_modules/@nested/scoped": { version: "1.0.0", resolved: "https://scoped.example.com/@nested/scoped/-/scoped-1.0.0.tgz", integrity: "sha512-fixture" },
       "node_modules/nested-default": registry("nested-default"),
       "node_modules/nested-patched": { version: "1.0.0", resolved: "https://npm.example.com/r/nested-patched/-/nested-patched-1.0.0.tgz", integrity: "sha512-fixture" },
+      // V11-3: the @nested scope's registry serving packages outside the scope,
+      // and the scope's package served by the project's main registry.
+      "node_modules/via-scoped": { version: "1.0.0", resolved: "https://scoped.example.com/via-scoped/-/via-scoped-1.0.0.tgz", integrity: "sha512-fixture" },
+      "node_modules/@other/via-scoped": { version: "1.0.0", resolved: "https://scoped.example.com/@other/via-scoped/-/via-scoped-1.0.0.tgz", integrity: "sha512-fixture" },
+      "node_modules/@nested/via-main": { version: "1.0.0", resolved: "https://npm.example.com/r/@nested/via-main/-/via-main-1.0.0.tgz", integrity: "sha512-fixture" },
     },
   }),
   "nested/.npmrc": "; fixture\nregistry=https://npm.example.com/r\n@nested:registry=https://scoped.example.com/\n",
@@ -292,6 +297,40 @@ const TREE = {
   ...typed("@nested/scoped", {}, "nested/node_modules"),
   ...typed("nested-default", {}, "nested/node_modules"),
   ...typed("nested-patched", {}, "nested/node_modules"),
+  ...typed("via-scoped", {}, "nested/node_modules"),
+  ...typed("@other/via-scoped", {}, "nested/node_modules"),
+  ...typed("@nested/via-main", {}, "nested/node_modules"),
+  // V11-1: a project whose lockfile leaves dependencies uninstalled (npm's
+  // legacy-peer-deps leaves peers out); a runtime finds them in the root's
+  // node_modules, which that lockfile does not pin.
+  "peers/package-lock.json": JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      "": { name: "peers" },
+      "node_modules/peer-hard": registry("peer-hard", { peerDependencies: { "patched-pkg": "1.0.0" } }),
+      "node_modules/peer-opt-present": registry("peer-opt-present", {
+        peerDependencies: { "root-only": "1.0.0" },
+        peerDependenciesMeta: { "root-only": { optional: true } },
+      }),
+      "node_modules/peer-opt-absent": registry("peer-opt-absent", {
+        peerDependencies: { "absent-anywhere": "1.0.0" },
+        peerDependenciesMeta: { "absent-anywhere": { optional: true } },
+      }),
+      "node_modules/peer-hard-absent": registry("peer-hard-absent", { peerDependencies: { "absent-anywhere": "1.0.0" } }),
+      "node_modules/dep-absent": registry("dep-absent", { dependencies: { "absent-anywhere": "1.0.0" } }),
+      "node_modules/uses-peer-hard": registry("uses-peer-hard", { dependencies: { "peer-hard": "1.0.0" } }),
+    },
+  }),
+  ...typed("peer-hard", {}, "peers/node_modules"),
+  ...typed("peer-opt-present", {}, "peers/node_modules"),
+  ...typed("peer-opt-absent", {}, "peers/node_modules"),
+  ...typed("peer-hard-absent", {}, "peers/node_modules"),
+  ...typed("dep-absent", {}, "peers/node_modules"),
+  ...typed("uses-peer-hard", {}, "peers/node_modules"),
+  // V11-2: an importer's own package.json naming the package it imports.
+  "src/self-name/package.json": JSON.stringify({ name: "react-like", private: true }),
+  "src/self-exports/package.json": JSON.stringify({ name: "@scope/pkg", exports: { ".": { browser: "./evil.js" } } }),
+  "src/self-exports/evil.js": "export * from '../lib/url-helpers';\n",
 };
 
 let base;
@@ -604,6 +643,102 @@ describe("createModuleResolver: a copy is judged against the lockfile governing 
       kind: "opaque",
       why: "resolves into a package, but nested-patched is patched by nested/patches/nested-patched+1.0.0.patch",
     });
+  });
+});
+
+describe("createModuleResolver: a dependency the governing lockfile does not install (V11-1)", () => {
+  const PEERS = "peers/a.ts";
+  const missing = (key, dep) => ({ kind: "opaque", why: `resolves into a package, but ${key} depends on ${dep}, which peers/package-lock.json does not install` });
+
+  it("a peer left uninstalled that a runtime finds, patched, in the root's node_modules", () => {
+    expect(resolver.resolve("peer-hard", PEERS)).toEqual(missing("node_modules/peer-hard", "patched-pkg"));
+  });
+
+  it("an optional peer left uninstalled with a copy where a runtime looks, however clean", () => {
+    expect(resolver.resolve("peer-opt-present", PEERS)).toEqual(missing("node_modules/peer-opt-present", "root-only"));
+    // Positive control: the root copy itself is clean from the root.
+    expect(resolver.resolve("root-only", FROM)).toEqual({ kind: "none" });
+  });
+
+  it.each([
+    ["a peer not marked optional", "peer-hard-absent"],
+    ["a dependency", "dep-absent"],
+  ])("%s left uninstalled, even with no copy anywhere", (_label, spec) => {
+    expect(resolver.resolve(spec, PEERS)).toEqual(missing(`node_modules/${spec}`, "absent-anywhere"));
+  });
+
+  it("a package whose installed dependency depends on one left uninstalled", () => {
+    expect(resolver.resolve("uses-peer-hard", PEERS)).toEqual(missing("node_modules/uses-peer-hard", "patched-pkg"));
+  });
+
+  it("an optional peer left uninstalled with no copy anywhere a runtime looks is decided", () => {
+    expect(resolver.resolve("peer-opt-absent", PEERS)).toEqual({ kind: "none" });
+  });
+});
+
+describe("createModuleResolver: the importer's own package.json may redirect a bare specifier (V11-2)", () => {
+  it.each(ENTRY_FIELDS.map(([field]) => [field]))("a package.json above the importer holding %s", (field) => {
+    expect(resolver.resolve("@scope/pkg", `src/field-${field}/deep/a.ts`)).toEqual({
+      kind: "opaque",
+      why: `is bare, but src/field-${field}/package.json has "${field}"`,
+    });
+  });
+
+  it("an exports self-reference matched only under the browser condition", () => {
+    expect(resolver.resolve("@scope/pkg", "src/self-exports/a.ts")).toEqual({ kind: "opaque", why: 'is bare, but src/self-exports/package.json has "exports"' });
+  });
+
+  it("a package.json named as the specifier's package", () => {
+    expect(resolver.resolve("react-like/sub", "src/self-name/a.ts")).toEqual({
+      kind: "opaque",
+      why: 'is bare, but src/self-name/package.json is named "react-like", so a resolver may take "react-like/sub" as a self-reference',
+    });
+  });
+
+  it("an inert package.json named otherwise leaves the verdict unchanged", () => {
+    expect(resolver.resolve("@scope/pkg", "src/self-name/a.ts")).toEqual({ kind: "none" });
+    expect(resolver.resolve("@scope/pkg", "src/pkg-inert/a.ts")).toEqual({ kind: "none" });
+    expect(resolver.resolve("fs", "src/pkg-inert/a.ts")).toEqual({ kind: "none" });
+  });
+
+  it("the repository root's package.json, as a browser map", () => {
+    const bare = mkdtempSync(join(tmpdir(), "module-specifier-browser-"));
+    try {
+      const files = {
+        "tsconfig.json": JSON.stringify({ compilerOptions: { module: "esnext", moduleResolution: "bundler" } }),
+        "package.json": JSON.stringify({ name: "proj", browser: { plain: "./src/evil.js" } }),
+        "package-lock.json": JSON.stringify({ lockfileVersion: 3, packages: { "": {}, "node_modules/plain": registry("plain") } }),
+        "node_modules/plain/package.json": JSON.stringify({ name: "plain", types: "index.d.ts" }),
+        "node_modules/plain/index.d.ts": "export {};\n",
+        "src/evil.js": "export {};\n",
+      };
+      for (const [rel, content] of Object.entries(files)) {
+        mkdirSync(dirname(join(bare, rel)), { recursive: true });
+        writeFileSync(join(bare, rel), content);
+      }
+      expect(createModuleResolver({ root: bare, isScanned }).resolve("plain", "src/a.ts")).toEqual({ kind: "opaque", why: 'is bare, but package.json has "browser"' });
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("createModuleResolver: a scope's registry serves only that scope (V11-3)", () => {
+  const NESTED = "nested/a.ts";
+
+  it.each([
+    ["an unscoped package", "via-scoped", "https://scoped.example.com/via-scoped/-/via-scoped-1.0.0.tgz"],
+    ["another scope's package", "@other/via-scoped", "https://scoped.example.com/@other/via-scoped/-/via-scoped-1.0.0.tgz"],
+    ["the scope's package from the main registry", "@nested/via-main", "https://npm.example.com/r/@nested/via-main/-/via-main-1.0.0.tgz"],
+  ])("%s is refused", (_label, spec, resolved) => {
+    expect(resolver.resolve(spec, NESTED)).toEqual({
+      kind: "opaque",
+      why: `resolves into a package, but node_modules/${spec} is installed from ${resolved}, not the registry`,
+    });
+  });
+
+  it("the scope's package from its own registry is decided", () => {
+    expect(resolver.resolve("@nested/scoped", NESTED)).toEqual({ kind: "none" });
   });
 });
 

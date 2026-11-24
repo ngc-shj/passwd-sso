@@ -983,3 +983,25 @@ All findings were valid and are resolved. Ledgers: `r11-spec/ledger-final.txt` (
   - The `names.size === 0` shortcut stays removed: it is unreachable by any test, and the round-10 resolver fix removed it for that reason.
   - Merging the runtime and `@types` loops, and extracting the "name after node_modules" slices, are cosmetic.
 - `submitConsent` already merged the Allow and Deny handlers.
+
+# Verification of review(11)
+
+An independent verifier re-ran the round-10 probes against `97f106c38`; every false "none" they had found is now "opaque", the consent Deny fix and the app pins hold, both gates exit 0 locally and with `extension/node_modules` hidden, and ledger spot-checks reproduce. Its own adversarial trees found three more resolver shapes, none present in the tree:
+
+- **V11-1 [Major]** Dependency taint stops at the governing lockfile; a dependency missing there (a peer left uninstalled by `legacy-peer-deps`, or absent from a nested lock) falls through at runtime to an outer, patched copy.
+- **V11-2 [Major]** The importer's own package.json is never checked for a bare specifier that resolves into `node_modules`: a `browser` replacement map, or an `exports` self-reference matched only under a bundler condition, redirects it to repo code (proved with esbuild and Vite).
+- **V11-3 [Minor]** A scoped `.npmrc` registry is accepted for unscoped packages.
+
+## Stopping rule (chosen by the user)
+
+Past the cap, with the resolver's fifth escape and no real-tree instance, the user chose: fix these three fail-closed, red-prove them, have the fixes verified independently once, and finish. Any further shape found then is recorded here and not pursued in this branch.
+
+## Resolution Status (verification of review(11))
+
+All three are fixed fail-closed by detecting presence, not by modelling runtime resolution. Ledger `r12-spec/ledger.txt` holds 16 mutants, all killed, run against the final file's sha256; the control is green.
+
+- **V11-1.** A dependency, optional dependency or peer that the entry's governing lockfile does not install taints the entry and its dependents. The one exception is an optional peer with no copy anywhere a runtime would look.
+- **V11-2.** A bare specifier is "opaque" unless every package.json from the importer up to the repository root (outside `node_modules`) is inert and does not carry the specifier's package name.
+- **V11-3.** A `@scope:registry=` URL serves only that scope.
+- **Real tree.** Both gates exit 0, both locally and with `extension/node_modules` hidden. Zero verdict rows changed.
+- **Closed by the stopping rule.** Five escapes, none with an instance in the tree, and the gate guards a static check, not runtime behaviour. Further resolver shapes are not pursued in this branch; the trust-boundary comment in `module-specifier.mjs` records what the resolver does not see.
