@@ -222,11 +222,36 @@ code, NOT the HTTP status — the code is the stable contract.**
 
 The proxy's expected-user gate (`src/lib/proxy/expected-user-gate.ts`)
 returns it before any route runs: the request named, in
-`x-passwd-expected-user`, the user its page was rendered for, and the session
-cookie the browser sent is not that user's session (another user signed in in
-another tab, or the session ended). `POST /api/emergency-access/[id]/confirm`
-also returns it, before the grant changes, when the body's `ownerId` is not
-the session user. Either way nothing was written.
+`x-passwd-expected-user`, the user its page is bound to (the first user
+`useSession` named on that page load), and the session cookie the browser sent
+belongs to another user (another user signed in in another tab). An empty
+header names nobody and is refused the same way. `POST
+/api/emergency-access/[id]/confirm` also returns it, before the grant changes,
+when the body's `ownerId` is not the session user. Either way nothing was
+written.
+
+The gate decides on whose session the cookie is, as `/api/auth/session` names
+it — the same field `useSession` reports — not on whether the proxy accepts
+the session:
+
+| Cookie's session | Gate answer |
+|---|---|
+| The named user, valid or not (no active tenant membership, tenant lookup failed) | continues; the session gate decides as without the header |
+| Another user | 409 `SESSION_CHANGED` |
+| Nobody (`/api/auth/session` answered with no user) | continues, with every session cookie removed from the request the route receives |
+| Session read failed (non-OK, fetch or parse error) | 503 `SERVICE_UNAVAILABLE` |
+| Cookie header readable as more than one session | 401 `UNAUTHORIZED` |
+
+"Nobody" is not proof the cookie is dead: Auth.js answers 200 with a null body
+both for an ended session and when its own session lookup throws
+(`@auth/core` `lib/actions/session.js` swallows the error). A route that read
+the cookie again with `auth()` could then resolve it to another user, so the
+proxy forwards that request without the session cookie (every known name and
+its chunks; other cookies are kept). The route acts for nobody, as the gate
+decided; pre-auth passkey sign-in, which needs no session, still works.
+
+The 503 and 401 are already proxy pre-route refusals (`PROXY_PRE_ROUTE_REFUSALS`)
+and do not reload the page: a reload would resend the same cookie.
 
 **409, not 401**: the cookie may well be a valid session — just another
 user's — and 401 is wired in clients to "sign in again" and, on
@@ -237,8 +262,14 @@ session's.
 Clients MUST NOT read it as a business refusal (a wrong passphrase, a denied
 action, a missing record). `fetchApi` (`src/lib/url-helpers.ts`) does not
 return the response: it rejects with `SessionChangedError` — so a multi-step
-flow stops at the first refused step — and reloads the page once, rebuilding
-it for whoever the session now belongs to.
+flow stops at the first refused step — and reloads the page, rebuilding it
+for whoever the session now belongs to. While that reload is pending, further
+409s start no second one and the app's `beforeunload` guards stand down; a
+reload that has not unloaded the page within
+`SESSION_CHANGED_RELOAD_PENDING_MS` (a stop, a handler outside the app) no
+longer holds, so the next 409 reloads again. When `useSession` itself names a
+different user, the binding stays on the first and the page reloads the same
+way.
 
 #### ACCOUNT_LOCKED → 403
 

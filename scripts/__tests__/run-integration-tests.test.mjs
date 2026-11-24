@@ -468,6 +468,14 @@ describe("scratchRedisLifecycle", () => {
     await expect(lifecycle(new FakeRedis(), { sentinel: true }).claim()).rejects.toThrow(/REDIS_SENTINEL/);
   });
 
+  it("refuses a REDIS_URL selecting its database by ?db=N before connecting, so that database is never claimed", async () => {
+    const server = new FakeRedis();
+    const r = lifecycle(server, { url: "redis://:pw@localhost:6379?db=3" });
+    await expect(r.claim()).rejects.toThrow(/query string/);
+    expect(server.clients.size).toBe(0);
+    expect(server.db(3).size).toBe(0);
+  });
+
   it("claims a database other than the one REDIS_URL names, points REDIS_URL at it, and flushes it on release", async () => {
     const server = new FakeRedis();
     const r = lifecycle(server);

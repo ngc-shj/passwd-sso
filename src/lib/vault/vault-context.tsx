@@ -703,6 +703,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
   const setup = useCallback(async (passphrase: string) => {
     const lockEpoch = lockEpochRef.current;
+    const startUserId = sessionUserIdRef.current;
     const setupVerdictsAtStart = setupVerdictCountRef.current;
     // Every write below is bound to the state the setup started under. Once
     // the vault was locked (page hide, unmount) or the session ended or
@@ -791,8 +792,15 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // proxy's 502/504 page, the 500 for an uncaught throw), may follow that
       // commit: the vault may now exist with this passphrase, so the status is
       // asked again and decides, and the caller is told the outcome is unknown.
+      // A same-user lock while the POST was in flight (page hide and bfcache
+      // restore, auto-lock) does not change that: the setup may have committed
+      // for this user. Only a session that ended or moved to another user is
+      // refused as an interruption, as this provider may now serve someone else.
       const outcomeUnknown = () => {
-        refuseIfInterrupted();
+        if (sessionMovedFrom(startUserId)) {
+          if (sessionStatusRef.current !== "unauthenticated") requestStatusCheck();
+          return installRefusedError();
+        }
         requestStatusCheck();
         return new VaultUnlockError(VAULT_SETUP_OUTCOME_UNKNOWN);
       };
@@ -864,7 +872,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       ecdhPrivBytes?.fill(0);
       authKeyBytes?.fill(0);
     }
-  }, [installKeyMaterial, installRefusedError, lockedSince, requestStatusCheck]);
+  }, [installKeyMaterial, installRefusedError, lockedSince, requestStatusCheck, sessionMovedFrom]);
 
   // ─── Unlock ───────────────────────────────────────────────────
 
@@ -1820,7 +1828,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         sent = true;
         try {
           res = await fetchApi(API_PATH.VAULT_ROTATE_KEY, {
-          method: "POST",
+            method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               currentAuthHash,

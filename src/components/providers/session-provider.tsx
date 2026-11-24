@@ -31,12 +31,13 @@ function SessionSync() {
   return null;
 }
 
-// Names the page's user on every fetchApi request (see url-helpers). Updated
-// only when the session names a user: a refetch keeps the last one, and an
-// ended session keeps it too, so nothing this page still holds is sent under
-// the next cookie. A passive effect, so it runs after VaultProvider's layout
-// effect has dropped the keys and moved the lock epoch on a user switch — the
-// binding never names the new user while the old user's keys still count.
+// Binds the page to the first user useSession names (see setExpectedUser in
+// url-helpers). A refetch naming the same user, or no user, changes nothing; a
+// different user reloads the page rather than re-binding it, so a flow still
+// holding the first user's keys never gets a header naming the second. The
+// binding guards fetchApi requests only; a flow's own checks between its
+// awaits (the vault's lock epoch, which a user switch moves) still decide
+// whether it may continue.
 export function ExpectedUserSync() {
   const userId = useSession().data?.user?.id;
 

@@ -3,10 +3,13 @@
  * specifier load module X" analysis shared by check-crypto-domains (Check E)
  * and check-mutation-response-read. Specifiers are decided by resolution, so
  * each case resolves against a fixture tree (tsconfig with the repo's `@/`
- * mapping, a package under node_modules) written to a temp directory.
+ * mapping, a package under node_modules) written to a temp directory. The
+ * split fixtures (a package linked into the repo, a nested package.json whose
+ * `types` and `main` or whose `exports` conditions disagree) were checked
+ * against esbuild, which loads the `main`/`default` file TypeScript skips.
  */
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Project, SyntaxKind } from "ts-morph";
@@ -25,7 +28,10 @@ const INDEX = "src/lib/constants/index.ts";
 const FROM = "src/components/a.ts";
 
 const TREE = {
-  "tsconfig.json": JSON.stringify({ compilerOptions: { module: "esnext", moduleResolution: "bundler", allowJs: true, resolveJsonModule: true, paths: { "@/*": ["./src/*"] } } }),
+  "tsconfig.json": JSON.stringify({
+    compilerOptions: { module: "esnext", moduleResolution: "bundler", allowJs: true, resolveJsonModule: true, paths: { "@/*": ["./src/*"], "@alt/*": ["./gen/*", "./src/*"] } },
+  }),
+  "package.json": JSON.stringify({ name: "repo", private: true, scripts: {}, dependencies: {} }),
   [TARGET]: "export const fetchApi = 1;\n",
   "src/lib/url-helpers-x.ts": "export {};\n",
   "src/lib/urls/x.ts": "export {};\n",
@@ -39,6 +45,30 @@ const TREE = {
   "src/app/api/r/route.ts": "export * from '@/lib/url-helpers';\n",
   "node_modules/@scope/pkg/package.json": JSON.stringify({ name: "@scope/pkg", types: "index.d.ts" }),
   "node_modules/@scope/pkg/index.d.ts": "export {};\n",
+  // TypeScript follows `types`, a bundler loads `main`.
+  "src/pkg-split/package.json": JSON.stringify({ name: "pkg-split", types: "./decoy.ts", main: "./runner.js" }),
+  "src/pkg-split/decoy.ts": "export const y = 1;\n",
+  "src/pkg-split/runner.js": "export * from '../lib/url-helpers';\n",
+  "src/pkg-split/sub/a.ts": "export {};\n",
+  // Self-reference through `exports`: TypeScript takes `types`, a bundler `default`.
+  "src/pkg-exports/package.json": JSON.stringify({ name: "pkg-exports", exports: { ".": { types: "./decoy.ts", default: "./runner.js" } } }),
+  "src/pkg-exports/decoy.ts": "export const y = 1;\n",
+  "src/pkg-exports/runner.js": "export * from '../lib/url-helpers';\n",
+  "src/pkg-exports/sub/a.ts": "export {};\n",
+  "src/pkg-imports/package.json": JSON.stringify({ name: "pkg-imports", imports: { "#x": { types: "./decoy.ts", default: "./runner.js" } } }),
+  "src/pkg-imports/decoy.ts": "export const y = 1;\n",
+  "src/pkg-imports/runner.js": "export * from '../lib/url-helpers';\n",
+  "src/pkg-imports/sub/a.ts": "export {};\n",
+  "src/pkg-inert/package.json": JSON.stringify({ name: "pkg-inert", private: true, type: "module", scripts: {}, devDependencies: {} }),
+  "src/pkg-inert/a.ts": "export {};\n",
+  "src/pkg-junk/package.json": "{ not json\n",
+  "src/pkg-junk/a.ts": "export {};\n",
+  "src/suffix/tsconfig.json": JSON.stringify({ extends: "../../tsconfig.json", compilerOptions: { moduleSuffixes: [".ios", ""] } }),
+  "src/suffix/m.ios.ts": "export {};\n",
+  "src/suffix/m.ts": "export * from '../lib/url-helpers';\n",
+  // An installed package whose `main` goes through a symlink into the repo.
+  "node_modules/escape-pkg/package.json": JSON.stringify({ name: "escape-pkg", types: "./index.d.ts", main: "./lib/url-helpers.ts" }),
+  "node_modules/escape-pkg/index.d.ts": "export {};\n",
 };
 
 let base;
@@ -55,6 +85,9 @@ beforeAll(() => {
     mkdirSync(dirname(join(root, rel)), { recursive: true });
     writeFileSync(join(root, rel), content);
   }
+  // A package linked into the repo, as a `file:` dependency or workspace is.
+  symlinkSync("../src/lib", join(root, "node_modules/linked"));
+  symlinkSync("../../src/lib", join(root, "node_modules/escape-pkg/lib"));
   resolver = createModuleResolver({ root, isScanned });
 });
 afterAll(() => rmSync(base, { recursive: true, force: true }));
@@ -110,6 +143,40 @@ describe("createModuleResolver: a specifier that resolves elsewhere names nothin
   it.each([["@scope/pkg"], ["node:module"], ["fs"], ["@/lib/data.json"]])("%s (a package, builtin or data file)", (spec) => {
     expect(resolver.resolve(spec, FROM)).toEqual({ kind: "none" });
     expect(resolver.mayName(spec, FROM, [TARGET])).toBe(false);
+  });
+
+  it("a file under a package.json with only fields no resolver reads is decided", () => {
+    expect(resolver.resolve("@/pkg-inert/a", FROM)).toEqual({ kind: "file", rel: "src/pkg-inert/a.ts" });
+  });
+});
+
+describe("createModuleResolver: where the compiler and the bundler may load different files, nothing is decided", () => {
+  it.each([
+    ["a package linked into the repo", "linked/url-helpers", FROM],
+    ["a nested package.json whose types and main differ", "@/pkg-split", FROM],
+    ["the same package reached by a relative directory", "../pkg-split", FROM],
+    ["the same package reached from inside it", "..", "src/pkg-split/sub/a.ts"],
+    ["a nested package.json whose exports conditions differ", "pkg-exports", "src/pkg-exports/sub/a.ts"],
+    ["an unreadable nested package.json", "@/pkg-junk/a", FROM],
+    ["an installed package whose main leaves node_modules", "escape-pkg", FROM],
+    ["a package imports specifier whose conditions differ", "#x", "src/pkg-imports/sub/a.ts"],
+    ["moduleSuffixes", "./m", "src/suffix/from.ts"],
+    ["a paths pattern with fallback targets (the first misses, TypeScript takes the second)", "@alt/lib/other", FROM],
+  ])("%s: %s", (_label, spec, from) => {
+    expect(resolver.resolve(spec, from).kind).toBe("opaque");
+    expect(resolver.mayName(spec, from, [TARGET])).toBe(true);
+    expect(resolver.names(spec, from, [TARGET])).toBe(false);
+  });
+
+  it("decides a linked package by its real location, not by how it was reached", () => {
+    expect(resolver.resolve("linked/url-helpers", FROM)).toEqual({
+      kind: "opaque",
+      why: "resolves to src/lib/url-helpers.ts through a package linked into the repository",
+    });
+  });
+
+  it("names the package.json field a runtime may resolve by", () => {
+    expect(resolver.resolve("@/pkg-split", FROM).why).toMatch(/src\/pkg-split\/package\.json has "types"/);
   });
 });
 

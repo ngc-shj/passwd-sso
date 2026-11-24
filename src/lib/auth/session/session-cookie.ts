@@ -157,9 +157,30 @@ export function presentedSessionTokens(
  * client that happens to hold one down the session path to a 401.
  */
 export function hasAnySessionCookie(header: string): boolean {
-  return parseCookiePairs(header).some(
-    (pair) =>
-      pair.value !== "" &&
-      ALL_KNOWN_SESSION_COOKIE_NAMES.some((name) => pair.key.startsWith(name)),
-  );
+  return parseCookiePairs(header).some((pair) => pair.value !== "" && isSessionCookieKey(pair.key));
+}
+
+/**
+ * True when Auth.js could read a session from a cookie with this key: each
+ * known name, prefix-matched as its `SessionStore` matches, so chunks
+ * (`<name>.0`) count too.
+ */
+export function isSessionCookieKey(key: string): boolean {
+  return ALL_KNOWN_SESSION_COOKIE_NAMES.some((name) => key.startsWith(name));
+}
+
+/**
+ * The headers with every session cookie removed, empty-valued ones included,
+ * and every other cookie kept. The Cookie header is dropped when nothing is
+ * left.
+ */
+export function withoutSessionCookies(headers: Headers): Headers {
+  const forwarded = new Headers(headers);
+  const kept = parseCookiePairs(headers.get("cookie") ?? "").filter((pair) => !isSessionCookieKey(pair.key));
+  if (kept.length > 0) {
+    forwarded.set("cookie", kept.map((pair) => `${pair.key}=${pair.value}`).join("; "));
+  } else {
+    forwarded.delete("cookie");
+  }
+  return forwarded;
 }

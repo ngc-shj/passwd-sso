@@ -55,11 +55,15 @@ try {
   }
   // The same for Redis: the suite drives rate-limit buckets and session-cache
   // entries the live instance on the dev Redis reads, so only the logical
-  // database the runner claimed for this run (scripts/run-integration-tests.mjs).
+  // database the runner claimed for this run (scripts/run-integration-tests.mjs),
+  // recognised by the marker the runner exports in REDIS_CLAIM_ENV: another
+  // run's claimed database is its keyspace, not this one's.
   const redisUrl = process.env.REDIS_URL;
   if (redisUrl) {
     const { default: IORedis } = await import("ioredis");
-    const { REDIS_CLAIM_KEY, scratchRedisRefusal } = await import("../../../scripts/lib/integration-scratch-db.mjs");
+    const { REDIS_CLAIM_ENV, REDIS_CLAIM_KEY, scratchRedisRefusal } = await import(
+      "../../../scripts/lib/integration-scratch-db.mjs"
+    );
     const redis = new IORedis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1, retryStrategy: () => null });
     let claim: string | null = null;
     try {
@@ -68,7 +72,10 @@ try {
     } finally {
       redis.disconnect();
     }
-    const redisRefusal = scratchRedisRefusal(claim, { sentinel: process.env.REDIS_SENTINEL === "true" });
+    const redisRefusal = scratchRedisRefusal(claim, {
+      sentinel: process.env.REDIS_SENTINEL === "true",
+      expected: process.env[REDIS_CLAIM_ENV],
+    });
     if (redisRefusal) {
       throw new Error(
         [

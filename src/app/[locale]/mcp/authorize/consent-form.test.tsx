@@ -90,6 +90,7 @@ import { ConsentForm } from "./consent-form";
 const baseProps = {
   clientName: "Claude Desktop",
   clientId: "mcpc_abc123",
+  expectedUserId: "user-rendered-for",
   isDcr: false,
   scopes: ["credentials:list", "passwords:write"],
   redirectUri: "http://localhost:7777/callback",
@@ -215,6 +216,39 @@ describe("ConsentForm — submit handlers", () => {
       expect(fields.code_challenge).toBe("challenge-abc");
       expect(fields.code_challenge_method).toBe("S256");
       expect(fields.state).toBe("state-xyz");
+    } finally {
+      (captured as unknown as { _restore?: () => void })._restore?.();
+    }
+  });
+
+  // The binding the consent route checks against the session: a native form
+  // POST cannot carry the expected-user header, so the field is the only thing
+  // that ties a submission to the user the page was rendered for.
+  it("Allow click submits the id of the user the page was rendered for", () => {
+    const captured = captureSubmittedForm();
+    try {
+      render(<ConsentForm {...baseProps} />);
+      fireEvent.click(screen.getByText("allow"));
+
+      const fields = Object.fromEntries(
+        Array.from(captured[0]?.querySelectorAll("input") ?? []).map((i) => [i.name, i.value]),
+      );
+      expect(fields.expected_user_id).toBe("user-rendered-for");
+    } finally {
+      (captured as unknown as { _restore?: () => void })._restore?.();
+    }
+  });
+
+  it("Deny click submits the id of the user the page was rendered for", () => {
+    const captured = captureSubmittedForm();
+    try {
+      render(<ConsentForm {...baseProps} />);
+      fireEvent.click(screen.getByText("deny"));
+
+      const fields = Object.fromEntries(
+        Array.from(captured[0]?.querySelectorAll("input") ?? []).map((i) => [i.name, i.value]),
+      );
+      expect(fields.expected_user_id).toBe("user-rendered-for");
     } finally {
       (captured as unknown as { _restore?: () => void })._restore?.();
     }

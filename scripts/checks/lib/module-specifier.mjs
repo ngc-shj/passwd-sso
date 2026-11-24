@@ -17,16 +17,23 @@
  * resolution ends. A specifier
  *   - resolving to a target names it;
  *   - resolving into node_modules, or a Node builtin, names none (a package is
- *     not repo code);
+ *     not repo code) — judged by where the file really is: a package linked
+ *     into the repo (`file:`, a workspace) is repo code the runtime reaches by
+ *     package rules, and an installed package whose package.json names a path
+ *     leaving node_modules may load repo code; both may name any target;
  *   - resolving to a JSON file names none (data cannot re-export);
  *   - resolving to another repo source file the gate scans names none: that
  *     file is held to the same rule, so a re-export of a target in it is
  *     refused there;
  *   - anything else may name any target — unresolvable, outside the repo, a
  *     declaration file (the runtime loads some other file), a source file the
- *     gate does not scan (it could re-export a target unchecked), or a file a
+ *     gate does not scan (it could re-export a target unchecked), a file a
  *     sibling of the same stem shadows (TypeScript prefers `x.ts`, the bundler
- *     may load `x.js`).
+ *     may load `x.js`), and every resolution where the compiler and the
+ *     bundler may pick different files: a file under a package.json holding a
+ *     field some resolver selects an entry by (`types` vs `main`, `exports`
+ *     or `imports` conditions; the repo root's own package.json included),
+ *     `moduleSuffixes`, or a `paths` pattern with fallback targets.
  *
  * A template literal with a substitution may name any module: a bundler bounds
  * it to the files under its literal head, but Node resolves the substituted
@@ -34,7 +41,7 @@
  * and this gate cannot know which runs it. The tree's legitimate ones are
  * named, with reasons, in the gate's template allowlist (templateAllowlist).
  */
-import { realpathSync, readdirSync, existsSync } from "node:fs";
+import { realpathSync, readdirSync, readFileSync, existsSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { dirname, join, posix, relative, sep } from "node:path";
 import { SyntaxKind, ts } from "ts-morph";
@@ -47,6 +54,25 @@ const isStringLiteral = (e) =>
 const RUNTIME_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs", ".json"];
 
 const toPosix = (p) => p.split(sep).join("/");
+
+// package.json fields no resolver selects a file by. Any other field may be one
+// (`main`, `module`, `browser`, `types`, `typesVersions`, `exports`, `imports`,
+// and whatever a bundler reads next), so a package.json holding it makes the
+// files under it undecided: TypeScript may follow `types` while the bundler
+// loads `main`.
+const INERT_PACKAGE_FIELDS = new Set([
+  "name", "version", "private", "description", "license", "author", "contributors", "repository",
+  "homepage", "bugs", "keywords", "funding", "engines", "packageManager", "type", "bin", "files",
+  "publishConfig", "scripts", "dependencies", "devDependencies", "peerDependencies",
+  "optionalDependencies", "overrides",
+]);
+
+/** Every string in a package.json value (an `exports` map nests them under conditions). */
+function stringsIn(value) {
+  if (typeof value === "string") return [value];
+  if (value !== null && typeof value === "object") return Object.values(value).flatMap(stringsIn);
+  return [];
+}
 
 /** The stem of a runtime module file name, or null for a declaration or non-module file. */
 function runtimeStem(name) {
@@ -69,6 +95,8 @@ export function createModuleResolver({ root, isScanned }) {
   const configs = new Map(); // directory → { options, cache } | Error
   const resolutions = new Map(); // `${dir}\0${spec}` → result
   const siblings = new Map(); // directory → Map<stem, count>
+  const packages = new Map(); // directory → why its package.json may redirect, or null
+  const escapes = new Map(); // installed package directory → why it may load repo code, or null
 
   function configFor(dir) {
     if (configs.has(dir)) return configs.get(dir);
@@ -109,14 +137,92 @@ export function createModuleResolver({ root, isScanned }) {
     return (stems.get(runtimeStem(abs.slice(dir.length + 1))) ?? 0) > 1;
   }
 
+  /** Why the package.json in `dir` may make a resolver pick a file TypeScript did not, or null. */
+  function packageRedirect(dir) {
+    if (packages.has(dir)) return packages.get(dir);
+    const file = join(dir, "package.json");
+    let why = null;
+    if (existsSync(file)) {
+      try {
+        const fields = Object.keys(JSON.parse(readFileSync(file, "utf-8")));
+        const field = fields.find((f) => !INERT_PACKAGE_FIELDS.has(f));
+        if (field !== undefined) why = `${toPosix(relative(realRoot, file))} has "${field}"`;
+      } catch {
+        why = `${toPosix(relative(realRoot, file))} is unreadable`;
+      }
+    }
+    packages.set(dir, why);
+    return why;
+  }
+
+  /**
+   * Why the installed package holding `abs` (a real path under node_modules)
+   * may load a file outside node_modules, or null. Any field may name the
+   * entry a runtime takes (`main`, an `exports` condition TypeScript skips),
+   * so every path its non-inert fields can name is followed: a symlink inside
+   * the package, or a `..` target, reaches repo code TypeScript never saw.
+   */
+  function packageEscape(abs) {
+    const segments = abs.split(sep);
+    const at = segments.lastIndexOf("node_modules");
+    const depth = segments[at + 1]?.startsWith("@") ? 3 : 2;
+    if (at + depth >= segments.length) return null; // a loose file in node_modules
+    const pkgDir = segments.slice(0, at + depth).join(sep);
+    if (escapes.has(pkgDir)) return escapes.get(pkgDir);
+    const file = join(pkgDir, "package.json");
+    let why = null;
+    if (existsSync(file)) {
+      const name = toPosix(relative(realRoot, file));
+      try {
+        const manifest = JSON.parse(readFileSync(file, "utf-8"));
+        const targets = Object.entries(manifest).flatMap(([field, value]) => (INERT_PACKAGE_FIELDS.has(field) ? [] : stringsIn(value)));
+        for (const target of targets) {
+          // A pattern or an extensionless target loads a file under the
+          // deepest directory it names that exists.
+          let p = join(pkgDir, target.split("*")[0]);
+          while (!existsSync(p) && p !== pkgDir) p = dirname(p);
+          const real = toPosix(relative(realRoot, realpathSync(p)));
+          if (!real.split("/").includes("node_modules")) {
+            why = `${name} names ${JSON.stringify(target)}, which leaves node_modules`;
+            break;
+          }
+        }
+      } catch {
+        why = `${name} is unreadable or names a path that cannot be followed`;
+      }
+    }
+    escapes.set(pkgDir, why);
+    return why;
+  }
+
+  // A `paths` pattern with several targets: TypeScript takes the first that
+  // resolves, a bundler need not try them in that order or at all.
+  function pathsFallback(spec, options) {
+    for (const [pattern, targets] of Object.entries(options.paths ?? {})) {
+      if (targets.length < 2) continue;
+      const star = pattern.indexOf("*");
+      const matches =
+        star === -1
+          ? spec === pattern
+          : spec.length >= pattern.length - 1 && spec.startsWith(pattern.slice(0, star)) && spec.endsWith(pattern.slice(star + 1));
+      if (matches) return pattern;
+    }
+    return null;
+  }
+
   function decide(spec, dir) {
     const { options, cache } = configFor(dir);
+    // TypeScript tries `x.ios.ts` before `x.ts`; no runtime does.
+    if ((options.moduleSuffixes ?? []).some((s) => s !== "")) return { kind: "opaque", why: "moduleSuffixes is set" };
+    const fallback = pathsFallback(spec, options);
+    if (fallback !== null) return { kind: "opaque", why: `paths pattern ${fallback} has several targets` };
     // The containing file need not exist; resolution reads only its directory.
     const { resolvedModule } = ts.resolveModuleName(spec, join(dir, "__from__.ts"), options, ts.sys, cache);
     if (!resolvedModule) {
       return isBuiltin(spec) ? { kind: "none" } : { kind: "opaque", why: "does not resolve" };
     }
-    if (resolvedModule.isExternalLibraryImport) return { kind: "none" };
+    // Where the file really is decides, not how it was reached: a package
+    // linked into the repo resolves through node_modules to repo code.
     let abs = resolvedModule.resolvedFileName;
     try {
       abs = realpathSync(abs);
@@ -125,7 +231,18 @@ export function createModuleResolver({ root, isScanned }) {
     }
     const rel = toPosix(relative(realRoot, abs));
     if (rel.startsWith("../") || rel === ".." || posix.isAbsolute(rel)) return { kind: "opaque", why: "resolves outside the repository" };
-    if (rel.split("/").includes("node_modules")) return { kind: "none" };
+    if (rel.split("/").includes("node_modules")) {
+      const why = packageEscape(abs);
+      return why === null ? { kind: "none" } : { kind: "opaque", why: `resolves into a package, but ${why}` };
+    }
+    // Reached by package rules (exports, conditions, symlink handling) that the
+    // bundler applies itself.
+    if (resolvedModule.isExternalLibraryImport) return { kind: "opaque", why: `resolves to ${rel} through a package linked into the repository` };
+    for (let d = dirname(abs); ; d = dirname(d)) {
+      const why = packageRedirect(d);
+      if (why !== null) return { kind: "opaque", why: `resolves to ${rel}, but ${why}: a runtime may pick another entry` };
+      if (d === realRoot) break;
+    }
     if (rel.endsWith(".json")) return { kind: "none" };
     if (runtimeStem(rel) === null) return { kind: "opaque", why: `resolves to ${rel}, which is not the module that runs` };
     if (shadowed(abs)) return { kind: "opaque", why: `resolves to ${rel}, which a same-stem sibling may shadow` };

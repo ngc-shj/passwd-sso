@@ -11,6 +11,11 @@ import {
 import { renderHook } from "@testing-library/react";
 import { useBeforeUnloadGuard } from "./use-before-unload-guard";
 
+const { reloadPending } = vi.hoisted(() => ({ reloadPending: { value: false } }));
+vi.mock("@/lib/url-helpers", () => ({
+  isSessionChangedReloadPending: () => reloadPending.value,
+}));
+
 describe("useBeforeUnloadGuard", () => {
   let addSpy: MockInstance<typeof window.addEventListener>;
   let removeSpy: MockInstance<typeof window.removeEventListener>;
@@ -21,6 +26,7 @@ describe("useBeforeUnloadGuard", () => {
   });
 
   afterEach(() => {
+    reloadPending.value = false;
     addSpy.mockRestore();
     removeSpy.mockRestore();
   });
@@ -78,6 +84,29 @@ describe("useBeforeUnloadGuard", () => {
     window.dispatchEvent(event);
 
     expect(preventSpy).toHaveBeenCalled();
+    unmount();
+  });
+
+  // The page's user is gone: its form cannot be saved, and a cancel would
+  // strand the page refusing every request.
+  it("does not hold fetchApi's session-changed reload", () => {
+    const { unmount } = renderHook(() => useBeforeUnloadGuard(true));
+    reloadPending.value = true;
+
+    const event = new Event("beforeunload", { cancelable: true }) as BeforeUnloadEvent;
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(false);
+    unmount();
+  });
+
+  it("still holds a reload that is not the session-changed one", () => {
+    const { unmount } = renderHook(() => useBeforeUnloadGuard(true));
+
+    const event = new Event("beforeunload", { cancelable: true }) as BeforeUnloadEvent;
+    window.dispatchEvent(event);
+
+    expect(event.defaultPrevented).toBe(true);
     unmount();
   });
 });

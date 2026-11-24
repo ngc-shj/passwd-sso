@@ -21,6 +21,9 @@ import { MCP_SCOPE_RISK, type McpScope, type ScopeRiskLevel } from "@/lib/consta
 interface ConsentFormProps {
   clientName: string;
   clientId: string;
+  // The user this page was rendered for; the consent route refuses a
+  // submission whose session belongs to anyone else.
+  expectedUserId: string;
   isDcr: boolean;
   scopes: string[];
   redirectUri: string;
@@ -32,6 +35,7 @@ interface ConsentFormProps {
 export function ConsentForm({
   clientName,
   clientId,
+  expectedUserId,
   isDcr,
   scopes,
   redirectUri,
@@ -80,6 +84,7 @@ export function ConsentForm({
     form.action = withBasePath("/api/mcp/authorize/consent");
     const fields: Record<string, string> = {
       client_id: clientId,
+      expected_user_id: expectedUserId,
       redirect_uri: redirectUri,
       scope: scopes.join(" "),
       code_challenge: codeChallenge,
@@ -105,6 +110,7 @@ export function ConsentForm({
     const fields = {
       action: "deny",
       client_id: clientId,
+      expected_user_id: expectedUserId,
       redirect_uri: redirectUri,
       state,
     };

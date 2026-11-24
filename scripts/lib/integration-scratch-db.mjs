@@ -83,15 +83,41 @@ export function scratchDatabaseRefusal(name, comment) {
 export const REDIS_CLAIM_KEY = "passwd-sso:integration-scratch";
 
 /**
- * Why the harness must not use the Redis database it is connected to, or null
- * when the database carries a scratch claim. `claim` is the claim key's value.
+ * The environment variable the runner exports to the suite with the marker
+ * it claimed the Redis database under, so setup.ts can tell this run's claim
+ * from another run's. The marker is no secret: any Redis client on the server
+ * can read the claim key.
  */
-export function scratchRedisRefusal(claim, { sentinel = false } = {}) {
+export const REDIS_CLAIM_ENV = "INTEGRATION_REDIS_CLAIM";
+
+// The claim and release scripts the runner evaluates on the server (here for
+// the same reason as REDIS_CLAIM_KEY: the integration suite runs them against
+// a real Redis, redis-claim-scripts.integration.test.ts).
+// Set the claim only on an empty database. KEYS[1]: claim key, ARGV[1]: marker.
+export const CLAIM_SCRIPT = `if redis.call('DBSIZE') == 0 then redis.call('SET', KEYS[1], ARGV[1]) return 1 end return 0`;
+// Flush only while the claim is still ARGV[1].
+export const RELEASE_SCRIPT = `if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('FLUSHDB') return 1 end return 0`;
+
+/**
+ * Why the harness must not use the Redis database it is connected to, or null
+ * when the database carries this run's claim. `claim` is the claim key's
+ * value, `expected` the marker the runner claimed it under (REDIS_CLAIM_ENV).
+ *
+ * @param {string | null} claim
+ * @param {{ sentinel?: boolean, expected?: string }} [opts]
+ */
+export function scratchRedisRefusal(claim, { sentinel = false, expected } = {}) {
   if (sentinel) {
     return "REDIS_SENTINEL is true: the Sentinel client ignores REDIS_URL's database index, so the suite would share the live keyspace";
   }
   if (!parseScratchMarker(claim)) {
     return `the Redis database REDIS_URL selects does not carry the scratch claim (${REDIS_CLAIM_KEY}); it may be the live instance's`;
+  }
+  if (!expected) {
+    return `${REDIS_CLAIM_ENV} is not set, so the Redis database REDIS_URL selects cannot be shown to carry this run's claim`;
+  }
+  if (claim !== expected) {
+    return `the Redis database REDIS_URL selects carries another run's scratch claim, not this run's (${REDIS_CLAIM_ENV})`;
   }
   return null;
 }

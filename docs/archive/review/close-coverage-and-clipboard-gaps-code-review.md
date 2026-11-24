@@ -752,7 +752,7 @@ Scope: `git diff 577dc810b..e456582b5`, covering review(6) and review(7). All ro
 
 ## Resolution Status (round 7)
 
-All findings were valid and are resolved. Red-proof ledgers live in the session scratchpad (`r8-bind/`, `r8-vault/`, `r8-runner/`, `r8-spec/`). Every mutant listed there turns at least one pin red, and the unmutated copy is green.
+All findings were valid and are resolved. Red-proof ledgers live in the session scratchpad (`r8-bind/`, `r8-vault/`, `r8-runner/`, `r8-spec/`). Every mutant listed there is either killed by at least one pin or recorded as equivalent, and the unmutated copy is green. (Corrected in round 8, T8-4: `vc.notify-rethrows-all` survives because the outer catch in `unlock` decides the same `false`; it is recorded as equivalent.)
 
 ### F7-1 / S7-2 — resolved structurally
 - **Expected-user binding.**
@@ -815,3 +815,72 @@ All findings were valid and are resolved. Red-proof ledgers live in the session 
   - The loader-node walk is shared by both gates as `module-specifier.loaderNodes`, with its own pin.
   - The Redis keeper reuses `SCRATCH_DB_KEEPER`.
 - **Not taken.** A `rethrowSessionChanged` helper and a shared "sessionChanged" UI handler. Each site's comment differs, and four sites do not justify the abstraction.
+
+# Review round 8
+
+Scope: `git diff e456582b5..a62199a20` (review(8)). All round-7 findings were re-verified as resolved. The findings below are new: a false-deny side of the expected-user gate, the one native form post outside the binding, two resolver cases the compiler and the bundler decide differently, and test-evidence gaps.
+
+## Findings
+
+- **S8-1 / T8-2 [Major, escalated] The expected-user gate answers SESSION_CHANGED to a same-user session the proxy cannot resolve.**
+  - **Mechanism.** The proxy decides validity with `resolveUserTenantId`; Auth.js's session callback falls back to `User.tenantId` and still names the user. For a member with no active membership, or during a DB fault, `useSession` names user X and the proxy refuses X's own cookie with 409, and `fetchApi` reloads.
+  - **Effect.** `VaultProvider` calls `fetchApi` on every locale page, including sign-in, so the page reloads on every load. Passkey sign-in, which reaches pre-auth routes that ignored the cookie before, cannot complete. Executed by the security reviewer: 409 on both the null and the throwing resolver.
+  - **Class.** R48 (two session adjudicators) and R52 (the fail-closed refusal of an unresolvable session now reaches every route class).
+- **F8-1 [Minor] The binding re-points to the new user on a switch,** so after `useSession` reports B, a flow still holding A's material passes the gate. The per-flow checks are load-bearing, and the round-7 "defence in depth" wording and the session-provider comment overstate the binding (R49).
+- **T8-3 [Minor] A cancelled reload leaves the page refusing every request.** The reload latch is never cleared, so after a `beforeunload` cancel nothing reloads again.
+- **S8-3 / F8-2 / T8-A1 [Minor] The MCP consent form posts natively and carries no binding.** A consent page rendered for A, submitted after B signed in elsewhere, mints an authorization code on B's account. B's recent sign-in satisfies step-up.
+- **S8-2 [Major] The module-specifier resolver decides two shapes wrongly.**
+  - A symlinked package into the repo (`file:` dependency, workspace link) resolves into repo source but is decided "none", because `isExternalLibraryImport` is read before the real path.
+  - A directory with its own `package.json` under the repo resolves through `types` to one file while the bundler loads `main` or another `exports` condition; it is decided "file".
+  - Executed by the security reviewer on a scratch tree. No instance exists in the tree today.
+- **F8-3 [Minor]** An indentation regression in the rotate-key POST.
+- **F8-4 [Minor]** A setup whose outcome is unknown, after a same-user lock during the POST, is reported as a plain failure.
+- **S8-4 [Minor]** The runner reads the live Redis index from the URL path only; ioredis also honours `?db=N`, so the live index could be claimed and flushed when it is empty and has no client.
+- **T8-1 [Minor]** The fake Redis matches the claim and release scripts by text, so their refusal branches never run on a real Redis.
+- **T8-4 [Minor]** The round-7 resolution said every mutant was killed; one equivalent mutant survives. Corrected above.
+- **T8-5 [Minor]** The harness-refusal test title claims "this run's claim", but `setup.ts` accepts any scratch claim.
+
+
+## Process note — identity is decided apart from validity, and the route sees what the gate decided
+
+- **S8-1 was a second adjudicator (R48).** The gate asked "is this session usable", a question the proxy and Auth.js answer differently. It now asks only "whose session is this", read from the same `/api/auth/session` field `useSession` reads, so the page and the proxy cannot disagree after one reload.
+- **A gate decision must hold at the route.** Auth.js answers a lookup fault exactly as a dead session (200, null body). Rather than inferring which one happened, the gate hands the route a request without the session cookie whenever it decided "nobody", so a later `auth()` cannot resolve it to a user.
+- **The resolver answers "file"/"none" only where the compiler and the runtime provably agree.** Every manifest field that can steer a runtime resolver makes the answer "opaque" (default-deny allowlist of inert fields).
+
+## Resolution Status (round 8)
+
+All findings were valid and are resolved. Red-proof ledgers live in the session scratchpad (`r9-gate/`, `r9-consent/`, `r9-spec/`, `r9-runner/`); every listed mutant is killed and each unmutated control is green.
+
+### S8-1 / T8-2 — resolved by separating identity from validity
+- **Identity.** `getSessionInfo` returns the cookie's identity alongside `valid`: the user `/api/auth/session` named (also when the tenant resolver returns null or throws), nobody, unavailable (non-OK, fetch or parse failure), or ambiguous. `valid` and `gateSession` are unchanged on every path; the identity is never cached.
+- **Gate answers.** Same user → continue. Another user or an empty header → 409 `SESSION_CHANGED` (the only reload trigger). Nobody → continue with every session cookie stripped from the forwarded request. Unavailable → 503 `SERVICE_UNAVAILABLE`. Ambiguous → 401 `UNAUTHORIZED`. Both refusals are in `PROXY_PRE_ROUTE_REFUSALS` and do not reload.
+- **Executed outcome.** A member with no active membership, or a resolver fault, now reaches the pre-auth passkey routes and gets the session gate's 401 on session-required routes; no reload.
+- **Residual noted.** When "nobody" came from an Auth.js lookup fault, a passkey sign-in no longer deletes that old session row (the cookie is stripped); the row lapses at expiry and the browser cookie is replaced.
+
+### F8-1 — resolved
+- `setExpectedUser` keeps the first id of the page load; a different id reloads the page. Every user-changing path was enumerated (passkey and security-key sign-in, magic link, OAuth/SAML, sign-out, reauth, `update()`, another tab); a page that started signed out binds without a reload.
+- The comment and the round-7 "defence in depth" wording overstated the binding. The binding covers `fetchApi` requests only; flows that hold key material across awaits keep their own checks (lock epoch, `ownerId`), which are load-bearing.
+
+### T8-3 — resolved
+- The app's `beforeunload` guard stands down for the session-changed reload. The pending hold lapses after 10 s, so a reload cancelled outside the app (Stop, a foreign handler) is retried by the next 409.
+
+### S8-3 / F8-2 / T8-A1 — resolved
+- The consent page renders the session user's id into both the Allow and the Deny form. The route refuses a missing, over-long or mismatching id with 409 `SESSION_CHANGED` before validation, the DCR claim, the deny record or `createAuthorizationCode`. It answers JSON rather than an OAuth error redirect, because `redirect_uri` is not validated at that point.
+
+### S8-2 — resolved
+- A specifier whose real path is a package linked into the repository is "opaque"; "none" needs a real path under `node_modules`.
+- A package.json between the resolved file and the repository root with any field outside an inert allowlist (`main`, `module`, `browser`, `types`, `exports`, `imports`, unknown fields) makes the answer "opaque"; so does an unreadable manifest. The repository's own manifests hold only inert fields, so `extension/` imports are not flooded.
+- Swept further by execution: an installed package whose runtime entry escapes `node_modules` through a symlink, `moduleSuffixes`, and multi-target `paths` are "opaque"; `customConditions` was ruled out by probe.
+- Both gates exit 0 on the tree with unchanged classification counts.
+
+### Minors
+- **F8-3.** Indentation restored.
+- **F8-4.** A lock during the setup POST reports an unknown outcome unless the session moved; only a moved session is "interrupted".
+- **S8-4.** The runner refuses a `REDIS_URL` with any query string (ioredis copies every query key into its options) and any scheme other than exact `redis://` / `rediss://`.
+- **T8-1.** `redis-claim-scripts.integration.test.ts` runs the production claim and release scripts against the claimed real Redis database and pins each refusal branch; it writes and deletes only its own keys.
+- **T8-4.** The round-7 wording is corrected and the equivalent mutant is recorded in its ledger.
+- **T8-5.** The runner exports its claim marker as `INTEGRATION_REDIS_CLAIM`; `setup.ts` refuses another run's claim and an unset marker, with pins for both and a positive control.
+
+### Simplify pass (round 8 fixes)
+- **Accepted.** The gate's cookie strip and the Auth.js callback wrapper's strip were the same code. Both now use `withoutSessionCookies` and `isSessionCookieKey` in `session-cookie.ts`, which `hasAnySessionCookie` also uses. The strip keeps removing empty-valued session cookies, which `hasAnySessionCookie` does not count; a pin covers that difference.
+- **Checked, no change.** The module-specifier walks are memoised per directory and per package, so the added manifest reads do not repeat per specifier. No shared user-id schema exists for the consent check to reuse.

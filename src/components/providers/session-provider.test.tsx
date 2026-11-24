@@ -76,12 +76,20 @@ describe("ExpectedUserSync", () => {
     return new Headers(init?.headers).get("x-passwd-expected-user");
   };
 
+  const ORIGIN = "https://app.example.com";
+  let location: { origin: string; pathname: string; search: string; href: string };
+  let originalLocation: Location;
+
   beforeEach(() => {
     _resetExpectedUserForTests();
     fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response());
+    originalLocation = window.location;
+    location = { origin: ORIGIN, pathname: "/ja/dashboard", search: "?tab=1", href: "unchanged" };
+    Object.defineProperty(window, "location", { value: location, writable: true, configurable: true });
   });
 
   afterEach(() => {
+    Object.defineProperty(window, "location", { value: originalLocation, writable: true, configurable: true });
     fetchSpy.mockRestore();
     sessionState.status = "unauthenticated";
     sessionState.data = null;
@@ -98,15 +106,30 @@ describe("ExpectedUserSync", () => {
     expect(await sentUser()).toBe("user-a");
   });
 
-  it("follows a switch to another authenticated user", async () => {
+  it("stays bound to the first user and reloads the page when another is named", async () => {
     sessionState.status = "authenticated";
     sessionState.data = { user: { id: "user-a" } };
     const { rerender } = render(<ExpectedUserSync />);
     expect(await sentUser()).toBe("user-a");
+    expect(location.href).toBe("unchanged");
 
     sessionState.data = { user: { id: "user-b" } };
     rerender(<ExpectedUserSync />);
-    expect(await sentUser()).toBe("user-b");
+    expect(await sentUser()).toBe("user-a");
+    expect(location.href).toBe(`${ORIGIN}/ja/dashboard?tab=1`);
+  });
+
+  // A sign-in on a page that started signed out (passkey verify, then a
+  // client-side push) binds; it is not a switch.
+  it("binds a page that started signed out to the user who signs in, without reloading", async () => {
+    const { rerender } = render(<ExpectedUserSync />);
+    expect(await sentUser()).toBeNull();
+
+    sessionState.status = "authenticated";
+    sessionState.data = { user: { id: "user-a" } };
+    rerender(<ExpectedUserSync />);
+    expect(await sentUser()).toBe("user-a");
+    expect(location.href).toBe("unchanged");
   });
 
   // An ended session keeps the last user: what the page still holds must not
@@ -124,5 +147,6 @@ describe("ExpectedUserSync", () => {
     sessionState.data = null;
     rerender(<ExpectedUserSync />);
     expect(await sentUser()).toBe("user-a");
+    expect(location.href).toBe("unchanged");
   });
 });

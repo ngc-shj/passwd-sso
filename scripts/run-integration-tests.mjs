@@ -45,9 +45,10 @@
 //   7. `npm run db:check-drift` against the scratch database;
 //   8. vitest with vitest.integration.config.ts and the arguments given, with
 //      DATABASE_URL, MIGRATION_DATABASE_URL and every *_DATABASE_URL in the
-//      environment pointed at the scratch database and REDIS_URL at the
-//      claimed logical database; a keeper that ended before this point or
-//      during it fails the run;
+//      environment pointed at the scratch database, REDIS_URL at the
+//      claimed logical database and INTEGRATION_REDIS_CLAIM set to the marker
+//      it was claimed under (setup.ts refuses any other claim); a keeper that
+//      ended before this point or during it fails the run;
 //   9. FLUSHDB the claimed Redis database if it still carries this run's
 //      claim, close the keepers, then drop the scratch database (WITH (FORCE),
 //      which terminates its connections) and confirm it is gone — only if
@@ -84,7 +85,10 @@ import pg from "pg";
 import Redis from "ioredis";
 import { applyPrivilegeSequence, loadDeniedPolicy } from "./bootstrap-rds-roles.mjs";
 import {
+  CLAIM_SCRIPT,
+  REDIS_CLAIM_ENV,
   REDIS_CLAIM_KEY,
+  RELEASE_SCRIPT,
   SCRATCH_DB_KEEPER,
   dropScratchDatabase,
   parseScratchMarker,
@@ -321,20 +325,35 @@ export function scratchDatabaseLifecycle({ name, marker, connect, openKeeper, lo
 // database is taken only if it is empty and no other client has it selected
 // (checked, then claimed by a script that sets the claim key only while
 // DBSIZE is 0 — atomic on the server), and it is flushed only by a script
-// that first compares the claim key with the run's own marker. The claiming
+// that first compares the claim key with the run's own marker (CLAIM_SCRIPT
+// and RELEASE_SCRIPT, scripts/lib/integration-scratch-db.mjs). The claiming
 // connection (the keeper) stays selected on the database until the release,
 // so a live run's database always has a client on it, and the sweep of a dead
 // run's database requires none (the same rule as the Postgres scratch
 // database's keeper).
 
-// Set the claim only on an empty database. KEYS[1]: claim key, ARGV[1]: marker.
-export const CLAIM_SCRIPT = `if redis.call('DBSIZE') == 0 then redis.call('SET', KEYS[1], ARGV[1]) return 1 end return 0`;
-// Flush only while the claim is still ARGV[1].
-export const RELEASE_SCRIPT = `if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('FLUSHDB') return 1 end return 0`;
-
-/** The logical database REDIS_URL selects (its path), 0 when it names none. */
+/**
+ * The logical database REDIS_URL selects (its path), 0 when it names none.
+ *
+ * Read as the app's client reads it (ioredis, src/lib/redis.ts, which passes
+ * REDIS_URL with no db option): ioredis also takes connection options from
+ * the query string, `?db=N` among them (and host, port, password, tls, …), so
+ * a URL with a query is refused rather than read as naming the index its
+ * path does. The scheme must be spelled redis:// or rediss://: ioredis turns
+ * TLS on only for the exact lowercase "rediss://", while redisUrlForIndex
+ * (new URL) would lowercase it. Credentials, host and port pass through
+ * redisUrlForIndex unchanged, so the keeper connects to the server the live
+ * instance does.
+ */
 export function redisDatabaseIndex(url) {
-  const path = new URL(url).pathname.replace(/^\//, "");
+  if (!/^rediss?:\/\//.test(url)) throw new Error("REDIS_URL must start with redis:// or rediss://");
+  const parsed = new URL(url);
+  if (parsed.search !== "") {
+    throw new Error(
+      "REDIS_URL has a query string; ioredis reads connection options from it (?db=N selects a database), so the runner cannot tell which database the live instance uses — name the database in the path (redis://host:port/N) instead",
+    );
+  }
+  const path = parsed.pathname.replace(/^\//, "");
   if (path === "") return 0;
   if (!/^\d+$/.test(path)) throw new Error("REDIS_URL's path is not a database index");
   return Number(path);
@@ -635,7 +654,7 @@ async function cli(argv) {
       const env = {
         ...process.env,
         ...scratchDatabaseEnv(process.env, name),
-        ...(redisUrl ? { REDIS_URL: redisUrl } : {}),
+        ...(redisUrl ? { REDIS_URL: redisUrl, [REDIS_CLAIM_ENV]: marker } : {}),
       };
       checkInterrupted();
       const rolesBefore = await withClient(scratchUrl, async (c) => (await c.query(ROLE_STATE_SQL)).rows);

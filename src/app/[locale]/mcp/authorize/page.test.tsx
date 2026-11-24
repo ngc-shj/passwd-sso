@@ -104,6 +104,19 @@ beforeEach(() => {
   );
 });
 
+describe("McpConsentPage user binding", () => {
+  it("passes the session's user id to the form as the user the consent is for", async () => {
+    // The consent route refuses a submission whose session is not this user;
+    // the page is the one place that knows who it was rendered for.
+    seedClient("tenant-1");
+    seedUser("tenant-1", "tenant-1");
+
+    const out = render(await invoke());
+
+    expect(out).toContain('"expectedUserId":"user-1"');
+  });
+});
+
 describe("McpConsentPage tenant check", () => {
   it("admits the user when the client's tenant is their ACTIVE MEMBERSHIP's", async () => {
     // The allow half, and the discriminating one: the column says a different

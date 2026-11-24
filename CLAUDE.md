@@ -73,8 +73,10 @@ limiters are reset, and state a crashed run left behind breaks later runs.
   `bootstrap-rds-roles.mjs`, `prisma migrate deploy`, `--denied-only` and
   `db:check-drift`, and points every `*_DATABASE_URL` at it;
 - with `REDIS_URL` set, claims an empty Redis logical database no client has
-  selected (never the index `REDIS_URL` names; `REDIS_SENTINEL=true` is refused)
-  by setting a claim key on it atomically, and points `REDIS_URL` at it;
+  selected (never the index `REDIS_URL` names; `REDIS_SENTINEL=true` and a
+  `REDIS_URL` with a query string, from which ioredis reads `?db=N`, are refused)
+  by setting a claim key on it atomically, points `REDIS_URL` at it and exports
+  the claim's marker as `INTEGRATION_REDIS_CLAIM`;
 - afterwards FLUSHDBs the Redis database if it still carries this run's claim and
   drops the scratch database, however the run ends. A failed drop or flush, or a
   database present after a CREATE whose reply was lost, prints
@@ -88,7 +90,7 @@ runner fails if a migration changed an existing role's cluster-wide state, or if
 it found no role to compare), the Redis server's memory and eviction, and the
 services tests reach by their own URL (MinIO, Jackson).
 `src/__tests__/db-integration/setup.ts` refuses any database without the name
-and the marker, and any Redis database without the claim, so a bare
+and the marker, and any Redis database without this run's claim, so a bare
 `vitest --config vitest.integration.config.ts` against the dev database fails
 fast (pinned by `harness-scratch-refusal.integration.test.ts` and a CI step). The
 compose workers keep running: nothing points them at the scratch database. CI
@@ -145,7 +147,7 @@ route handlers own application-layer concerns.
 - `cors-gate.ts` — Bearer-bypass route detection + preflight wiring.
 - `csrf-gate.ts` — baseline CSRF (Origin) for cookie-bearing mutating requests. **Request-attribute-based, NOT path-classification-based** — fires whenever cookie + mutating method, regardless of route classification. This is what closes the "did this route call assertOrigin?" gap structurally.
 - `security-headers.ts` — CSP / HSTS / X-Frame-Options application.
-- `expected-user-gate.ts` — expected-user binding. `fetchApi` names the page's user in `x-passwd-expected-user` once `ExpectedUserSync` (in `src/components/providers/session-provider.tsx`) has it from `useSession`; the gate refuses, before any route and for every method, a cookie-bearing request carrying that header unless the cookie resolves to that user's session (409 `SESSION_CHANGED`; `fetchApi` rejects it with `SessionChangedError` and reloads the page). Requests without the header or without a session cookie (Bearer, extension, CLI, SCIM) are not affected.
+- `expected-user-gate.ts` — expected-user binding. `fetchApi` names the page's user in `x-passwd-expected-user`, bound once per page load by `ExpectedUserSync` (in `src/components/providers/session-provider.tsx`) to the first user `useSession` names; a later different user reloads the page instead of re-binding. The gate decides, before any route and for every method, on whose session the cookie is (`getSessionInfo`'s `identity`, from the same `/api/auth/session` field `useSession` reads), not on its validity: another user → 409 `SESSION_CHANGED` (`fetchApi` rejects with `SessionChangedError` and reloads); the named user (even one the session gate will refuse) → continue; no user → continue with every session cookie stripped from the request the route sees (Auth.js also answers "no user" when its own lookup throws, so the route must not re-read the cookie); session read failed → 503; ambiguous cookie → 401. Requests without the header or without a session cookie (Bearer, extension, CLI, SCIM) are not affected. It binds `fetchApi` requests only; a flow's own checks between awaits still decide whether it may continue.
 
 **SSoT principle**: routes do NOT call `assertOrigin` for baseline CSRF — the proxy CSRF gate handles it for any cookie-bearing mutating request. Routes only call `assertOrigin` (or stricter variants) when they receive cookieless requests outside the proxy gate's threat model.
 

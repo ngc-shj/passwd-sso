@@ -3,7 +3,8 @@
  * the way a developer would start it by hand (vitest with the integration
  * config, no runner), exits nonzero with "Refusing to run integration tests"
  * on a database scripts/run-integration-tests.mjs did not create, and on a
- * Redis database it did not claim. The pure predicates are unit-tested in
+ * Redis database it did not claim for this run (unclaimed, or claimed under
+ * another run's marker). The pure predicates are unit-tested in
  * scripts/__tests__; this holds that setup.ts calls them and that a refusal
  * stops the run.
  *
@@ -22,7 +23,13 @@ import { fileURLToPath } from "node:url";
 import type { Client } from "pg";
 import { createClient } from "@/lib/db/pool-factory";
 import { superuserConnectionString } from "./helpers";
-import { REDIS_CLAIM_KEY, scratchDatabaseEnv, scratchDatabaseName } from "../../../scripts/lib/integration-scratch-db.mjs";
+import {
+  REDIS_CLAIM_ENV,
+  REDIS_CLAIM_KEY,
+  scratchDatabaseEnv,
+  scratchDatabaseName,
+  scratchMarker,
+} from "../../../scripts/lib/integration-scratch-db.mjs";
 
 const isChild = process.env.INTEGRATION_REFUSAL_PROBE_CHILD === "1";
 const ROOT = fileURLToPath(new URL("../../..", import.meta.url));
@@ -91,7 +98,7 @@ describe.skipIf(isChild)("integration harness scratch refusal", () => {
     expect(output).toContain(`Refusing to run integration tests: database "${unmarkedName}" does not carry the scratch marker comment`);
   }, CHILD_TIMEOUT_MS);
 
-  it.skipIf(!process.env.REDIS_URL)("refuses a Redis database without this run's claim", async () => {
+  it.skipIf(!process.env.REDIS_URL)("refuses a Redis database that carries no scratch claim", async () => {
     const claimed = process.env.REDIS_URL as string;
     // Any index but the claimed one carries no claim of this run; find one
     // that carries none at all (the dev index among them).
@@ -116,5 +123,25 @@ describe.skipIf(isChild)("integration harness scratch refusal", () => {
     const { code, output } = await runHarness(childEnv(currentDatabase, { REDIS_URL: unclaimed as string }));
     expect(code).not.toBe(0);
     expect(output).toContain("Refusing to run integration tests: the Redis database REDIS_URL selects does not carry the scratch claim");
+  }, CHILD_TIMEOUT_MS);
+
+  // The run's own claimed database, read by a child holding another run's
+  // marker: what a child of run B pointed at run A's database sees. Nothing
+  // is written to any Redis database.
+  it.skipIf(!process.env.REDIS_URL)("refuses a Redis database claimed by another run", async () => {
+    const foreign = scratchMarker({ host: "another-host", pid: 1, createdAt: new Date(0) });
+    const { code, output } = await runHarness(childEnv(currentDatabase, { [REDIS_CLAIM_ENV]: foreign }));
+    expect(code).not.toBe(0);
+    expect(output).toContain(
+      "Refusing to run integration tests: the Redis database REDIS_URL selects carries another run's scratch claim, not this run's",
+    );
+  }, CHILD_TIMEOUT_MS);
+
+  // Positive control for the case above: the same child with this run's own
+  // marker is admitted, so the refusal is the marker's doing.
+  it.skipIf(!process.env.REDIS_URL)("admits this run's claimed Redis database under this run's marker", async () => {
+    const { code, output } = await runHarness(childEnv(currentDatabase));
+    expect(output).not.toContain("Refusing to run integration tests");
+    expect(code).toBe(0);
   }, CHILD_TIMEOUT_MS);
 });

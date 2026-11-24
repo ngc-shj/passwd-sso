@@ -137,7 +137,7 @@ describe("getSessionInfo binds the cache to the session Auth.js resolves", () =>
     stubDeployment(SECURE_BASEPATH);
     // A well-formed token, so only the name keeps it from the cache lookup.
     const result = await getSessionInfo(makeRequest({ cookie: `__Host-authjs.session-token=${SESSION_A}` }));
-    expect(result).toEqual({ valid: false });
+    expect(result).toEqual({ valid: false, identity: { kind: "none" } });
     expect(mockGetCachedSession).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
     // Not configured is "no session", not a refused reading.
@@ -169,7 +169,7 @@ describe("getSessionInfo binds the cache to the session Auth.js resolves", () =>
   ])("is invalid, logged, with no cache lookup and no fetch, for %s", async (_label, cookie) => {
     stubDeployment(PLAIN_HTTP);
     const result = await getSessionInfo(makeRequest({ cookie }));
-    expect(result).toEqual({ valid: false });
+    expect(result).toEqual({ valid: false, identity: { kind: "ambiguous" } });
     expect(mockGetCachedSession).not.toHaveBeenCalled();
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(getLogger().warn).toHaveBeenCalledWith({
@@ -196,14 +196,14 @@ describe("getSessionInfo", () => {
 
   it("returns invalid (no fetch) when cookie header is missing", async () => {
     const result = await getSessionInfo(makeRequest());
-    expect(result).toEqual({ valid: false });
+    expect(result).toEqual({ valid: false, identity: { kind: "none" } });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(mockGetCachedSession).not.toHaveBeenCalled();
   });
 
   it("returns invalid (no fetch) when cookie has no session token", async () => {
     const result = await getSessionInfo(makeRequest({ cookie: "foo=bar" }));
-    expect(result).toEqual({ valid: false });
+    expect(result).toEqual({ valid: false, identity: { kind: "none" } });
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
@@ -215,7 +215,7 @@ describe("getSessionInfo", () => {
       makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
-    expect(result).toEqual(cached);
+    expect(result).toEqual({ ...cached, identity: { kind: "user", userId: "u-1" } });
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(mockSetCachedSession).not.toHaveBeenCalled();
   });
@@ -247,8 +247,39 @@ describe("getSessionInfo", () => {
     expect(result.userId).toBe("u-2");
     expect(result.tenantId).toBe("t-2");
     expect(result.hasPasskey).toBe(true);
+    expect(result.identity).toEqual({ kind: "user", userId: "u-2" });
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockSetCachedSession).toHaveBeenCalledTimes(1);
+    // The identity is the proxy's own reading; it never enters the cache.
+    expect(mockSetCachedSession.mock.calls[0][1]).not.toHaveProperty("identity");
+  });
+
+  // A negative entry is written only for an answer that named no user id, so
+  // a hit names nobody, as the fresh read it was written from did.
+  it("reads a negative cache hit as no user", async () => {
+    mockGetCachedSession.mockResolvedValueOnce({ valid: false });
+
+    const result = await getSessionInfo(
+      makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
+    );
+
+    expect(result).toEqual({ valid: false, identity: { kind: "none" } });
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["no id", {}],
+    ["an empty id", { id: "" }],
+    ["a non-string id", { id: 42 }],
+  ])("names no user for a session user with %s", async (_label, user) => {
+    mockGetCachedSession.mockResolvedValueOnce(null);
+    fetchSpy.mockResolvedValueOnce(new Response(JSON.stringify({ user }), { status: 200 }));
+
+    const result = await getSessionInfo(
+      makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
+    );
+
+    expect(result.identity).toEqual({ kind: "none" });
   });
 
   // C4: full-shape response (all four passkey fields present) must pass
@@ -420,7 +451,7 @@ describe("getSessionInfo", () => {
       makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
-    expect(result).toEqual({ valid: false });
+    expect(result).toEqual({ valid: false, identity: { kind: "unavailable" } });
     expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockSetCachedSession).not.toHaveBeenCalled();
@@ -436,7 +467,7 @@ describe("getSessionInfo", () => {
       makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
-    expect(result).toEqual({ valid: false });
+    expect(result).toEqual({ valid: false, identity: { kind: "unavailable" } });
     expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockSetCachedSession).not.toHaveBeenCalled();
@@ -452,7 +483,7 @@ describe("getSessionInfo", () => {
       makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
-    expect(result).toEqual({ valid: false });
+    expect(result).toEqual({ valid: false, identity: { kind: "unavailable" } });
     expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockSetCachedSession).not.toHaveBeenCalled();
@@ -470,6 +501,7 @@ describe("getSessionInfo", () => {
 
     expect(result.valid).toBe(false);
     expect(result.tenantId).toBeUndefined();
+    expect(result.identity).toEqual({ kind: "none" });
     // Reached the Auth.js read: the verdict is the null user, not a refused cookie.
     expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
@@ -501,7 +533,9 @@ describe("getSessionInfo", () => {
       makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
-    expect(result).toEqual({ valid: false });
+    // Invalid, but still u-err's cookie: the expected-user gate decides on
+    // the identity, the session gate on `valid`.
+    expect(result).toEqual({ valid: false, identity: { kind: "user", userId: "u-err" } });
     expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockResolveUserTenantId).toHaveBeenCalledWith("u-err");
@@ -534,7 +568,7 @@ describe("getSessionInfo", () => {
       makeRequest({ cookie: `authjs.session-token=${TEST_SESSION_TOKEN}` }),
     );
 
-    expect(result).toEqual({ valid: false });
+    expect(result).toEqual({ valid: false, identity: { kind: "user", userId: "u-nomember" } });
     expect(mockGetCachedSession).toHaveBeenCalledWith(TEST_SESSION_TOKEN);
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     expect(mockResolveUserTenantId).toHaveBeenCalledWith("u-nomember");

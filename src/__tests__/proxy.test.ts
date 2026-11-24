@@ -55,6 +55,7 @@ import {
   PASSKEY_BLOCKED,
 } from "./helpers/proxy-session-fixtures";
 import { _resetSessionPasskeyAuditForTests } from "../lib/proxy/session-passkey-gate";
+import { getCachedSession } from "../lib/auth/session/session-cache";
 
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
 
@@ -1229,14 +1230,213 @@ describe("proxy — expected-user gate", () => {
     expect(reachedRoute(res)).toBe(true);
   });
 
-  it("refuses when the cookie no longer resolves to a session (signed out, expired)", async () => {
-    fetchSpy.mockImplementation(dispatchFetch(sessionRoute({})));
+  // The gate asks whose cookie this is, not whether the session is usable. A
+  // user whose tenant the proxy cannot resolve is still that user: the session
+  // gate refuses where it did, and nothing reloads the page.
+  describe.each([
+    ["has no active membership", () => mockResolveUserTenantId.mockResolvedValue(null)],
+    ["cannot be resolved (the resolver throws)", () =>
+      mockResolveUserTenantId.mockRejectedValue(new Error("MULTI_TENANT_MEMBERSHIP_NOT_SUPPORTED"))],
+  ])("the named user's cookie, whose tenant %s", (_label, arrange) => {
+    beforeEach(() => {
+      arrange();
+    });
+
+    it("is not a changed session: a session-required route gets the session gate's 401", async () => {
+      const res = await proxy(
+        request("/api/emergency-access/grant-1/confirm", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-b" }),
+        dummyOptions,
+      );
+      expect(res.status).toBe(401);
+      expect((await res.json()).error).toBe("UNAUTHORIZED");
+    });
+
+    it("reaches a pre-auth passkey route", async () => {
+      const res = await proxy(
+        request("/api/auth/passkey/options", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-b" }),
+        dummyOptions,
+      );
+      expect(reachedRoute(res)).toBe(true);
+    });
+
+    it("is still refused as a changed session when the header names another user", async () => {
+      const res = await proxy(
+        request("/api/auth/passkey/options", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-a" }),
+        dummyOptions,
+      );
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("SESSION_CHANGED");
+    });
+  });
+
+  // What the route receives as its Cookie header: undefined when the proxy
+  // forwards the request's headers untouched, null when it removed the header.
+  const forwardedCookie = (res: Response): string | null | undefined => {
+    const overridden = res.headers.get("x-middleware-override-headers");
+    if (overridden === null) return undefined;
+    return overridden.split(",").includes("cookie") ? res.headers.get("x-middleware-request-cookie") : null;
+  };
+
+  // A session read that names nobody: Auth.js answers this way both for a
+  // session that ended and when its own session lookup throws, so the route
+  // must not get to resolve the cookie again.
+  describe("a cookie the session read names nobody for", () => {
+    beforeEach(() => {
+      fetchSpy.mockImplementation(dispatchFetch(sessionRoute(null)));
+    });
+
+    it.each([
+      ["the passkey sign-in challenge", "/api/auth/passkey/options"],
+      ["the passkey sign-in verification", "/api/auth/passkey/verify"],
+    ])("reaches %s", async (_label, path) => {
+      const res = await proxy(
+        request(path, "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-a" }),
+        dummyOptions,
+      );
+      expect(reachedRoute(res)).toBe(true);
+    });
+
+    // An api-default own-gate route: the session gate passes an invalid
+    // session to it, and it calls auth() itself.
+    it("hands a route that reads the session itself no session cookie, and keeps the others", async () => {
+      const res = await proxy(
+        request("/api/mobile/authorize", "GET", {
+          Cookie: `theme=dark; ${cookie()}; __Secure-authjs.session-token=e0e0-aaaa; next-auth.session-token=e0e0-bbbb; lang=ja`,
+          "x-passwd-expected-user": "user-a",
+        }),
+        dummyOptions,
+      );
+      expect(reachedRoute(res)).toBe(true);
+      expect(forwardedCookie(res)).toBe("theme=dark; lang=ja");
+    });
+
+    it("removes the Cookie header when it held only the session cookie", async () => {
+      const res = await proxy(
+        request("/api/mobile/authorize", "GET", { Cookie: cookie(), "x-passwd-expected-user": "user-a" }),
+        dummyOptions,
+      );
+      expect(reachedRoute(res)).toBe(true);
+      expect(forwardedCookie(res)).toBeNull();
+    });
+
+    it("leaves a session-required route to the session gate's 401", async () => {
+      const res = await proxy(
+        request("/api/emergency-access/grant-1/confirm", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-a" }),
+        dummyOptions,
+      );
+      expect(res.status).toBe(401);
+      expect((await res.json()).error).toBe("UNAUTHORIZED");
+    });
+
+    it("forwards the cookie untouched when the page names no user", async () => {
+      const res = await proxy(
+        request("/api/mobile/authorize", "GET", { Cookie: `theme=dark; ${cookie()}` }),
+        dummyOptions,
+      );
+      expect(reachedRoute(res)).toBe(true);
+      expect(forwardedCookie(res)).toBeUndefined();
+    });
+  });
+
+  it("forwards the cookie untouched when it is the named user's", async () => {
     const res = await proxy(
-      request("/api/vault/unlock/data", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-a" }),
+      request("/api/mobile/authorize", "GET", { Cookie: `theme=dark; ${cookie()}`, "x-passwd-expected-user": "user-b" }),
+      dummyOptions,
+    );
+    expect(reachedRoute(res)).toBe(true);
+    expect(forwardedCookie(res)).toBeUndefined();
+  });
+
+  it("forwards the cookie untouched for the named user whose tenant the proxy cannot resolve", async () => {
+    mockResolveUserTenantId.mockResolvedValue(null);
+    const res = await proxy(
+      request("/api/mobile/authorize", "GET", { Cookie: cookie(), "x-passwd-expected-user": "user-b" }),
+      dummyOptions,
+    );
+    expect(reachedRoute(res)).toBe(true);
+    expect(forwardedCookie(res)).toBeUndefined();
+  });
+
+  it.each([
+    ["answers non-OK", () => fetchSpy.mockResolvedValue(new Response("upstream", { status: 502 }))],
+    ["throws", () => fetchSpy.mockRejectedValue(new Error("ECONNREFUSED"))],
+    ["answers a body that is not JSON", () => fetchSpy.mockResolvedValue(new Response("<html>", { status: 200 }))],
+  ])("refuses with 503, not SESSION_CHANGED, when the session read %s", async (_label, arrange) => {
+    arrange();
+    const res = await proxy(
+      request("/api/auth/passkey/options", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-b" }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(503);
+    expect((await res.json()).error).toBe("SERVICE_UNAVAILABLE");
+    expect(res.headers.get("Cache-Control")).toBe("no-store");
+    expect(reachedRoute(res)).toBe(false);
+  });
+
+  it("passes the same unreadable session on when the page names no user", async () => {
+    fetchSpy.mockRejectedValue(new Error("ECONNREFUSED"));
+    const res = await proxy(request("/api/auth/passkey/options", "POST", { Cookie: cookie() }), dummyOptions);
+    expect(reachedRoute(res)).toBe(true);
+  });
+
+  // A chunk beside the cookie: Auth.js could join it into another token, so
+  // the proxy cannot say whose session this is. A reload resends it unchanged.
+  it("refuses an ambiguous cookie with 401 before a route the session gate would pass", async () => {
+    const res = await proxy(
+      request("/api/auth/passkey/options", "POST", {
+        Cookie: `${cookie()}; authjs.session-token.0=e0e0-ffff`,
+        "x-passwd-expected-user": "user-b",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(401);
+    expect((await res.json()).error).toBe("UNAUTHORIZED");
+    expect(reachedRoute(res)).toBe(false);
+  });
+
+  it("passes the same ambiguous cookie to that route when the page names no user", async () => {
+    const res = await proxy(
+      request("/api/auth/passkey/options", "POST", { Cookie: `${cookie()}; authjs.session-token.0=e0e0-ffff` }),
+      dummyOptions,
+    );
+    expect(reachedRoute(res)).toBe(true);
+  });
+
+  it("refuses an empty header as another user", async () => {
+    const res = await proxy(
+      request("/api/vault/unlock/data", "POST", { Cookie: cookie(), "x-passwd-expected-user": "" }),
       dummyOptions,
     );
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe("SESSION_CHANGED");
+  });
+
+  it("decides on a cached session like on a fresh read", async () => {
+    vi.mocked(getCachedSession).mockResolvedValueOnce(cachedSessionInfo("user-b", "tenant1"));
+    const refused = await proxy(
+      request("/api/vault/unlock/data", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-a" }),
+      dummyOptions,
+    );
+    expect(refused.status).toBe(409);
+
+    vi.mocked(getCachedSession).mockResolvedValueOnce(cachedSessionInfo("user-b", "tenant1"));
+    const passed = await proxy(
+      request("/api/vault/unlock/data", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-b" }),
+      dummyOptions,
+    );
+    expect(reachedRoute(passed)).toBe(true);
+    expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(0);
+  });
+
+  it("passes a negatively cached session (one that named no user) on, without its cookie", async () => {
+    vi.mocked(getCachedSession).mockResolvedValueOnce({ valid: false });
+    const res = await proxy(
+      request("/api/auth/passkey/options", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-a" }),
+      dummyOptions,
+    );
+    expect(reachedRoute(res)).toBe(true);
+    expect(forwardedCookie(res)).toBeNull();
+    expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(0);
   });
 
   it("reads the session once for a request both gates decide on", async () => {

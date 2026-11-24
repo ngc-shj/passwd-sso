@@ -190,6 +190,7 @@ const VALID_CODE_CHALLENGE = "A".repeat(43);
 
 const VALID_FORM_FIELDS = {
   client_id: "mcpc_testclient",
+  expected_user_id: VALID_SESSION.user.id,
   redirect_uri: "https://example.com/callback",
   scope: "credentials:list credentials:use",
   code_challenge: VALID_CODE_CHALLENGE,
@@ -296,6 +297,85 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(url.searchParams.get("code")).toBe("auth-code-abc123");
     expect(url.searchParams.get("state")).toBe("random-state-value");
     expect(url.searchParams.has("error")).toBe(false);
+  });
+
+  // S8-3: the consent form is a native POST and cannot carry the expected-user
+  // header, so it echoes the user the page was rendered for. A page rendered
+  // for A and submitted after B signed in elsewhere must change nothing on B's
+  // account. Each refusal arm arranges an unclaimed DCR client, so a request
+  // that got past the binding would claim it as well as mint.
+  describe("expected-user binding", () => {
+    // Persistent rather than Once: a refusal never reads the client, and an
+    // unconsumed Once would leak into the next test.
+    const arrangeUnclaimed = () =>
+      mockFindFirst.mockResolvedValue({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+    const consentAs = (fields: Record<string, string>) =>
+      POST(
+        createFormRequest("http://localhost/api/mcp/authorize/consent", fields) as unknown as import("next/server").NextRequest,
+      );
+    const expectNothingWritten = () => {
+      expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+      expect(mockMcpClientUpdateMany).not.toHaveBeenCalled();
+      expect(mockTxDelete).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    };
+    const expectSessionChangedRefusal = async (res: Response) => {
+      expect(res.status).toBe(409);
+      expect(res.headers.get("location")).toBeNull();
+      expect((await res.json()).error).toBe("SESSION_CHANGED");
+    };
+
+    it("mints a code when the form names the session's user", async () => {
+      arrangeUnclaimed();
+      const res = await consentAs(VALID_FORM_FIELDS);
+
+      expect(res.status).toBe(302);
+      expect(new URL(res.headers.get("location") ?? "").searchParams.get("code")).toBe("auth-code-abc123");
+      expect(mockCreateAuthorizationCode).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: VALID_SESSION.user.id }),
+      );
+    });
+
+    it("refuses an Allow rendered for another user: no claim, no code, no audit", async () => {
+      arrangeUnclaimed();
+      const res = await consentAs({ ...VALID_FORM_FIELDS, expected_user_id: "user-the-page-was-for" });
+
+      await expectSessionChangedRefusal(res);
+      expectNothingWritten();
+    });
+
+    it("refuses an Allow that names no user", async () => {
+      arrangeUnclaimed();
+      const { expected_user_id: _removed, ...fields } = VALID_FORM_FIELDS;
+      const res = await consentAs(fields);
+
+      await expectSessionChangedRefusal(res);
+      expectNothingWritten();
+    });
+
+    it("refuses a Deny rendered for another user: no denial recorded, no redirect to the client", async () => {
+      const res = await consentAs({
+        action: "deny",
+        client_id: "mcpc_testclient",
+        expected_user_id: "user-the-page-was-for",
+        redirect_uri: "https://example.com/callback",
+        state: "random-state-value",
+      });
+
+      await expectSessionChangedRefusal(res);
+      expectNothingWritten();
+    });
+
+    it("refuses a mismatch on a stale session instead of bouncing it to the authorize GET", async () => {
+      mockRequireRecentCurrentAuthMethod.mockResolvedValue(Response.json(
+        { error: "SESSION_STEP_UP_REQUIRED" },
+        { status: 403 },
+      ));
+      const res = await consentAs({ ...VALID_FORM_FIELDS, expected_user_id: "user-the-page-was-for" });
+
+      await expectSessionChangedRefusal(res);
+      expectNothingWritten();
+    });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -650,6 +730,7 @@ describe("POST /api/mcp/authorize/consent", () => {
       {
         action: "deny",
         client_id: "mcpc_testclient",
+        expected_user_id: VALID_SESSION.user.id,
         redirect_uri: "https://example.com/callback",
         state: "random-state-value",
         code_challenge: "too-short",
@@ -884,6 +965,7 @@ describe("POST /api/mcp/authorize/consent", () => {
       {
         action: "deny",
         client_id: "mcpc_testclient",
+        expected_user_id: VALID_SESSION.user.id,
         redirect_uri: "https://example.com/callback",
         state: "random-state-value",
       },
@@ -927,7 +1009,7 @@ describe("POST /api/mcp/authorize/consent", () => {
 
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",
-      VALID_FORM_FIELDS,
+      { ...VALID_FORM_FIELDS, expected_user_id: userBSession.user.id },
     );
     const res = await POST(req as unknown as import("next/server").NextRequest);
 

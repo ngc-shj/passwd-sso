@@ -10,15 +10,14 @@ import { extractClientIp } from "@/lib/auth/policy/ip-access";
 import { checkIpRateLimit } from "@/lib/security/ip-rate-limit";
 import { checkRateLimitOrFail } from "@/lib/security/rate-limit-audit";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { configuredSessionCookieName } from "@/lib/auth/session/cookie-name";
 import {
-  ALL_KNOWN_SESSION_COOKIE_NAMES,
-  configuredSessionCookieName,
-} from "@/lib/auth/session/cookie-name";
-import {
+  isSessionCookieKey,
   parseCookiePairs,
   presentedSessionTokens,
   readSessionCookie,
   SESSION_COOKIE_READ,
+  withoutSessionCookies,
 } from "@/lib/auth/session/session-cookie";
 import {
   deleteOtherSessionCookieVariantFirst,
@@ -234,33 +233,21 @@ function withMagicLinkIpRateLimit<H extends RouteHandler>(handler: H): H {
 // the adapter's createSession deletes those sessions in the transaction that
 // creates the new one — only once a sign-in succeeds, and before the
 // concurrent-session cap counts them. An ambiguous header names none.
-function isSessionCookieKey(key: string): boolean {
-  return ALL_KNOWN_SESSION_COOKIE_NAMES.some((name) => key.startsWith(name));
-}
-
 function withoutSessionCookieOnCallback<H extends RouteHandler>(handler: H): H {
   const wrapped = async (request: NextRequest, ...rest: unknown[]) => {
     const cookie = request.headers.get("cookie");
     if (!cookie || !isCallbackRoute(request.nextUrl.pathname)) {
       return handler(request, ...rest);
     }
-    const pairs = parseCookiePairs(cookie);
-    const kept = pairs.filter((pair) => !isSessionCookieKey(pair.key));
-    if (kept.length === pairs.length) {
+    if (!parseCookiePairs(cookie).some((pair) => isSessionCookieKey(pair.key))) {
       return handler(request, ...rest);
     }
     const replacedTokens =
       readSessionCookie(cookie).kind === SESSION_COOKIE_READ.TOKEN
         ? presentedSessionTokens(cookie, [configuredSessionCookieName()])
         : [];
-    const headers = new Headers(request.headers);
-    if (kept.length > 0) {
-      headers.set("cookie", kept.map((pair) => `${pair.key}=${pair.value}`).join("; "));
-    } else {
-      headers.delete("cookie");
-    }
     const stripped = new NextRequest(request.url, {
-      headers,
+      headers: withoutSessionCookies(request.headers),
       method: request.method,
       body: request.body,
       duplex: "half",

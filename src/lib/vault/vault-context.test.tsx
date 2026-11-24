@@ -506,6 +506,96 @@ describe("VaultProvider — setup whose outcome is unknown", () => {
   );
 });
 
+// F8-4: a lock while the setup POST is in flight moves the lock epoch. Only a
+// session that ended or moved to another user makes that an interruption; a
+// same-user lock (page hide and bfcache restore, auto-lock) leaves the outcome
+// unknown, since the setup may have committed for this user.
+describe("VaultProvider — setup whose outcome is unknown after a lock during the POST", () => {
+  /**
+   * Run setup whose POST commits on the server and then gets `response`, with
+   * `during` run while the POST is held. Counts the vault status requests sent
+   * after the POST.
+   */
+  async function setupLockedDuringPost(
+    during: (rerender: () => void) => void,
+    response: MockFetchResponse | Error,
+  ) {
+    const { fetchMock } = makeFetchEnv(null);
+    const baseHandler = fetchMock.getMockImplementation();
+    if (!baseHandler) throw new Error("fetch env has no base handler");
+    const reached = deferred();
+    const gate = deferred();
+    const counts = { posted: false, statusAfterPost: 0 };
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/vault/setup") {
+        counts.posted = true;
+        reached.resolve();
+        await gate.promise;
+        await baseHandler(url, init);
+        if (response instanceof Error) throw response;
+        return response;
+      }
+      if (url === "/api/vault/status" && counts.posted) counts.statusAfterPost += 1;
+      return baseHandler(url, init);
+    }) as unknown as typeof fetch;
+
+    const { result, rerender } = renderHook(() => useVault(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.SETUP_REQUIRED));
+    let settled!: Promise<unknown>;
+    act(() => {
+      settled = result.current.setup(PASSPHRASE).then(
+        () => undefined,
+        (caught: unknown) => caught,
+      );
+    });
+    await act(async () => {
+      await reached.promise;
+    });
+    act(() => {
+      during(rerender);
+    });
+    gate.resolve();
+    let caught: unknown;
+    await act(async () => {
+      caught = await settled;
+    });
+    return { result, caught, counts };
+  }
+
+  const pageHidden = () => window.dispatchEvent(new Event("pagehide"));
+  const switchedToAnotherUser = (rerender: () => void) => {
+    mockUseSession.mockReturnValue({
+      data: { user: { id: "user-2", email: "u2@example.com" } },
+      status: "authenticated",
+      update: vi.fn(),
+    });
+    rerender();
+  };
+
+  it.each([
+    ["a POST rejected in transit", new TypeError("Failed to fetch")],
+    ["a 500 INTERNAL_ERROR", { ok: false, status: 500, json: async () => ({ error: API_ERROR.INTERNAL_ERROR }) }],
+  ] as const)(
+    "reports %s after a same-user lock as an unknown outcome, not an interruption",
+    async (_kind, response) => {
+      const { result, caught, counts } = await setupLockedDuringPost(pageHidden, response);
+
+      expect((caught as VaultUnlockError).code).toBe(VAULT_SETUP_OUTCOME_UNKNOWN);
+      await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.LOCKED));
+      expect(counts.statusAfterPost).toBeGreaterThan(0);
+      expect(result.current.getSecretKey()).toBeNull();
+    },
+    30_000,
+  );
+
+  it("reports a POST rejected in transit after a switch to another user as an interruption", async () => {
+    const { result, caught } = await setupLockedDuringPost(switchedToAnotherUser, new TypeError("Failed to fetch"));
+
+    expect((caught as VaultUnlockError).code).toBe(VAULT_UNLOCK_INTERRUPTED);
+    expect(result.current.getSecretKey()).toBeNull();
+  }, 30_000);
+});
+
 describe("VaultProvider — setup zeroizes its local key material", () => {
   /**
    * Pass-through spies (crypto stays real) capturing the secret key and the

@@ -708,15 +708,28 @@ describe("fetchApi expected-user binding", () => {
     expect(init.body).toBe("{}");
   });
 
-  it("names the latest user it was given", async () => {
+  it("stays bound to the first user and reloads when another is named", async () => {
     const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response());
     const { fetchApi, setExpectedUser } = await loadHelpers();
     setExpectedUser("user-a");
-    setExpectedUser("user-b");
+    location.href = "before";
 
+    setExpectedUser("user-b");
     await fetchApi("/api/vault/status");
 
-    expect(headerOf(spy)).toBe("user-b");
+    expect(headerOf(spy)).toBe("user-a");
+    expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
+  });
+
+  it("does not reload when the bound user is named again", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response());
+    const { setExpectedUser } = await loadHelpers();
+    setExpectedUser("user-a");
+    location.href = "before";
+
+    setExpectedUser("user-a");
+
+    expect(location.href).toBe("before");
   });
 
   it("does not send the header to another origin", async () => {
@@ -738,7 +751,7 @@ describe("fetchApi expected-user binding", () => {
     it.each([
       ["a vault unlock read", "/api/vault/unlock/data", undefined],
       ["a generic mutation", "/api/passwords", { method: "POST", body: "{}" }],
-    ])("rejects %s with SessionChangedError and reloads the page once", async (_label, path, init) => {
+    ])("rejects %s with SessionChangedError and reloads the page", async (_label, path, init) => {
       vi.spyOn(globalThis, "fetch").mockImplementation(async () => sessionChanged());
       const { fetchApi, setExpectedUser, SessionChangedError } = await loadHelpers();
       setExpectedUser("user-a");
@@ -764,6 +777,82 @@ describe("fetchApi expected-user binding", () => {
       expect(res.status).toBe(409);
       expect(location.href).toBe("before");
       expect((await res.json()).error).toBe("CONFLICT");
+    });
+
+    describe("while a reload is pending", () => {
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date("2026-11-24T00:00:00Z"));
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("starts one reload for two refusals", async () => {
+        vi.spyOn(globalThis, "fetch").mockImplementation(async () => sessionChanged());
+        const { fetchApi, setExpectedUser, SessionChangedError, isSessionChangedReloadPending } =
+          await loadHelpers();
+        setExpectedUser("user-a");
+
+        location.href = "before";
+        await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+        expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
+        expect(isSessionChangedReloadPending()).toBe(true);
+
+        location.href = "unchanged";
+        await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+        expect(location.href).toBe("unchanged");
+      });
+
+      it("counts a user switch and a refusal as the same reload", async () => {
+        vi.spyOn(globalThis, "fetch").mockImplementation(async () => sessionChanged());
+        const { fetchApi, setExpectedUser, SessionChangedError } = await loadHelpers();
+        setExpectedUser("user-a");
+        setExpectedUser("user-b");
+
+        location.href = "unchanged";
+        await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+        expect(location.href).toBe("unchanged");
+      });
+
+      // The page outlived the reload (a stop, a handler outside the app
+      // cancelled it): the next refusal must reload again, not wedge the page.
+      it("reloads again on a refusal after a reload that never unloaded the page", async () => {
+        vi.spyOn(globalThis, "fetch").mockImplementation(async () => sessionChanged());
+        const {
+          fetchApi,
+          setExpectedUser,
+          SessionChangedError,
+          SESSION_CHANGED_RELOAD_PENDING_MS,
+          isSessionChangedReloadPending,
+        } = await loadHelpers();
+        setExpectedUser("user-a");
+        await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+
+        vi.setSystemTime(Date.now() + SESSION_CHANGED_RELOAD_PENDING_MS);
+        expect(isSessionChangedReloadPending()).toBe(false);
+        location.href = "cancelled";
+        await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+        expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
+      });
+    });
+
+    // The gate's answer when it could not read the session: a fault, which a
+    // reload would not fix.
+    it("returns a pre-route 503 without reloading", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        async () => new Response(JSON.stringify({ error: "SERVICE_UNAVAILABLE" }), { status: 503 }),
+      );
+      const { fetchApi, setExpectedUser, isSessionChangedReloadPending } = await loadHelpers();
+      setExpectedUser("user-a");
+      location.href = "before";
+
+      const res = await fetchApi("/api/vault/status");
+
+      expect(res.status).toBe(503);
+      expect(location.href).toBe("before");
+      expect(isSessionChangedReloadPending()).toBe(false);
     });
   });
 });

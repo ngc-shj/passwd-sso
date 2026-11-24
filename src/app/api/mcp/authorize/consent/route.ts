@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
@@ -38,6 +39,9 @@ import {
 // spread into that array one identifier away.
 const MAX_REQUESTED_SCOPES = MCP_SCOPES.length + 3;
 
+// The user the consent page was rendered for, echoed by the form.
+const EXPECTED_USER_ID_SCHEMA = z.string().min(1).max(128);
+
 export async function POST(req: NextRequest) {
   // Origin presence guard (early return / defense-in-depth).
   // Primary CSRF protection happens in the proxy CSRF gate at
@@ -75,6 +79,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   const formData = new URLSearchParams(read.text);
+
+  // The consent form is a native form POST, so it cannot carry the
+  // expected-user header the proxy gate binds fetchApi requests with. It
+  // carries the id of the user the page was rendered for instead: a page
+  // rendered for A and submitted after B signed in elsewhere must neither mint
+  // a code on B's account nor record B's denial. Refused before anything else
+  // runs, as a JSON 409 rather than an OAuth error redirect: redirect_uri is
+  // not validated yet, and the client is waiting on A's decision, which B
+  // cannot give.
+  const expectedUserId = EXPECTED_USER_ID_SCHEMA.safeParse(formData.get("expected_user_id"));
+  if (!expectedUserId.success || expectedUserId.data !== session.user.id) {
+    return errorResponse(API_ERROR.SESSION_CHANGED);
+  }
+
   const clientId = formData.get("client_id") ?? "";
   const redirectUri = formData.get("redirect_uri") ?? "";
   const state = formData.get("state") ?? "";

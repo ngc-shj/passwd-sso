@@ -7,7 +7,7 @@ import {
   releaseScratchRedis,
   sweepStaleRedis,
 } from "../run-integration-tests.mjs";
-import { REDIS_CLAIM_KEY, scratchMarker, scratchRedisRefusal } from "../lib/integration-scratch-db.mjs";
+import { REDIS_CLAIM_ENV, REDIS_CLAIM_KEY, scratchMarker, scratchRedisRefusal } from "../lib/integration-scratch-db.mjs";
 import { FakeRedis } from "./fake-redis.mjs";
 
 const NOW = new Date("2026-11-23T12:34:56.789Z");
@@ -26,8 +26,31 @@ describe("redisDatabaseIndex / redisUrlForIndex", () => {
     expect(() => redisDatabaseIndex("redis://localhost:6379/x")).toThrow(/not a database index/);
   });
 
+  it("refuses a query naming the database, which ioredis honours", () => {
+    expect(() => redisDatabaseIndex("redis://localhost:6379?db=3")).toThrow(/query string/);
+    expect(() => redisDatabaseIndex("redis://localhost:6379/0?db=3")).toThrow(/query string/);
+  });
+
+  it("refuses any other query, from which ioredis reads connection options", () => {
+    expect(() => redisDatabaseIndex("redis://localhost:6379/2?password=x")).toThrow(/query string/);
+    expect(() => redisDatabaseIndex("rediss://localhost:6379?tls=x")).toThrow(/query string/);
+  });
+
+  it("refuses a URL ioredis would read as other than redis:// or rediss://", () => {
+    expect(() => redisDatabaseIndex("localhost:6379")).toThrow(/must start with redis:\/\/ or rediss:\/\//);
+    expect(() => redisDatabaseIndex("REDISS://localhost:6379")).toThrow(/must start with/);
+  });
+
+  it("reads a rediss:// URL's path like a redis:// one", () => {
+    expect(redisDatabaseIndex("rediss://u:pw@cache.example:6380/5")).toBe(5);
+  });
+
   it("replaces the index, keeping the credentials", () => {
     expect(redisUrlForIndex("redis://:pw@localhost:6379/0", 3)).toBe("redis://:pw@localhost:6379/3");
+  });
+
+  it("keeps the scheme, user, encoded password, host and port the live client connects with", () => {
+    expect(redisUrlForIndex("rediss://app:p%40ss@cache.example:6380", 2)).toBe("rediss://app:p%40ss@cache.example:6380/2");
   });
 });
 
@@ -41,17 +64,26 @@ describe("parseClientList", () => {
 });
 
 describe("scratchRedisRefusal", () => {
-  it("accepts a database carrying a scratch claim", () => {
-    expect(scratchRedisRefusal(MARKER)).toBeNull();
+  it("accepts a database carrying this run's claim", () => {
+    expect(scratchRedisRefusal(MARKER, { expected: MARKER })).toBeNull();
   });
 
   it("refuses a database without the claim (the live instance's)", () => {
-    expect(scratchRedisRefusal(null)).toMatch(/does not carry the scratch claim/);
-    expect(scratchRedisRefusal("something else")).toMatch(/does not carry the scratch claim/);
+    expect(scratchRedisRefusal(null, { expected: MARKER })).toMatch(/does not carry the scratch claim/);
+    expect(scratchRedisRefusal("something else", { expected: MARKER })).toMatch(/does not carry the scratch claim/);
+  });
+
+  it("refuses a database carrying another run's claim", () => {
+    expect(scratchRedisRefusal(DEAD, { expected: MARKER })).toMatch(/carries another run's scratch claim/);
+  });
+
+  it("refuses a scratch claim when this run's marker is not known", () => {
+    expect(scratchRedisRefusal(MARKER)).toMatch(new RegExp(`${REDIS_CLAIM_ENV} is not set`));
+    expect(scratchRedisRefusal(MARKER, { expected: "" })).toMatch(new RegExp(`${REDIS_CLAIM_ENV} is not set`));
   });
 
   it("refuses Sentinel mode whatever the claim", () => {
-    expect(scratchRedisRefusal(MARKER, { sentinel: true })).toMatch(/REDIS_SENTINEL/);
+    expect(scratchRedisRefusal(MARKER, { sentinel: true, expected: MARKER })).toMatch(/REDIS_SENTINEL/);
   });
 });
 

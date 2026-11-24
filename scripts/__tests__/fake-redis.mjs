@@ -2,7 +2,15 @@
 // claim sends, for its unit tests: logical databases, connected clients and
 // their selected database, and the claim/release scripts evaluated as the
 // server would (each runs atomically, as here).
-import { CLAIM_SCRIPT, RELEASE_SCRIPT } from "../run-integration-tests.mjs";
+//
+// The scripts are recognised by their exact text and their behaviour is
+// restated here, not interpreted: a fake Lua evaluator would be a second
+// implementation to get wrong. What keeps the restatement honest is that
+// any other script text throws, so an edited script fails these tests until
+// this file is updated, and that the production scripts' refusal branches
+// run on a real server in
+// src/__tests__/db-integration/redis-claim-scripts.integration.test.ts.
+import { CLAIM_SCRIPT, RELEASE_SCRIPT } from "../lib/integration-scratch-db.mjs";
 
 export class FakeRedis {
   constructor({ databases = 16 } = {}) {
