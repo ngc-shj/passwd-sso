@@ -22,7 +22,6 @@ scripts/checks/check-test-hygiene.sh  # reason: non-security scope, test debt
 scripts/checks/check-doc-paths.mjs  # reason: non-security scope, test debt
 scripts/checks/check-dynamic-import-specifiers.mjs  # reason: non-security scope, test debt
 scripts/checks/check-mjs-imports.mjs  # reason: non-security scope, test debt
-scripts/checks/check-vitest-coverage-include.mjs  # reason: non-security scope, test debt
 
 # check-security-matrices.sh shells out to the matrix generator, which makes
 # it awkward to fixture in isolation without duplicating the generator's own

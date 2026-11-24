@@ -3,13 +3,15 @@
  * CI guard: validate vitest.config.ts coverage paths.
  *
  * Usage:
- *   node scripts/check-vitest-coverage-include.mjs [--enforce-rename-parity]
+ *   node scripts/checks/check-vitest-coverage-include.mjs [--enforce-rename-parity]
  *
  * --enforce-rename-parity  When set, also check that every new coverage.include
  *                          entry and threshold key added vs main corresponds to
  *                          a git mv rename in the same PR.
  *
  * Checks:
+ *   0. coverage.include and coverage.thresholds parse to non-empty literals
+ *      (VITEST_COVERAGE_* tokens otherwise).
  *   1. Every coverage.include glob/path resolves to >= 1 file on disk.
  *   2. Every coverage.thresholds key that is a file path (not a global key like
  *      "lines") must exist on disk.
@@ -22,9 +24,26 @@ import { execSync } from "node:child_process";
 import { readdirSync, existsSync } from "node:fs";
 import { resolve, join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ts } from "ts-morph";
 
 // PR 2: moved from scripts/ to scripts/checks/ — bump one extra level up.
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+// VITEST_COVERAGE_INCLUDE_ROOT overrides the root (self-test fixtures only).
+const ROOT =
+  process.env.VITEST_COVERAGE_INCLUDE_ROOT || resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+
+// The override exists for the self-test; left set in CI it would silently
+// point the gate at another tree.
+if (
+  process.env.CI === "true" &&
+  process.env.VITEST_COVERAGE_INCLUDE_ROOT &&
+  process.env.VITEST_COVERAGE_INCLUDE_FIXTURE_MODE !== "1"
+) {
+  console.error(
+    "check-vitest-coverage-include: VITEST_COVERAGE_INCLUDE_ROOT must not be set in CI. " +
+      "Set VITEST_COVERAGE_INCLUDE_FIXTURE_MODE=1 only from the self-test.",
+  );
+  process.exit(1);
+}
 
 // ---------------------------------------------------------------------------
 // CLI args
@@ -32,84 +51,91 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const enforceRenameParity = process.argv.includes("--enforce-rename-parity");
 
 // ---------------------------------------------------------------------------
-// Extract coverage.include and coverage.thresholds from vitest.config.ts
-// using a regex-based parser (the config is stable in structure).
-//
-// Strategy: locate the coverage: { ... } block first, then parse its
-// include array and thresholds object. This avoids confusing test.include
-// with coverage.include.
+// Extract coverage.include and coverage.thresholds from vitest.config.ts with
+// the TypeScript parser. Only literal shapes are read — a string array for
+// include, an object literal (optionally one arm of a conditional, as in
+// `isCoverageShard ? undefined : { ... }`) for thresholds. Anything else
+// throws a VITEST_COVERAGE_* token: a list the parser cannot read would
+// otherwise check nothing and pass.
 // ---------------------------------------------------------------------------
+function propertyName(prop) {
+  const { name } = prop;
+  if (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)) return name.text;
+  return undefined;
+}
+
+function findProperty(obj, key) {
+  return obj.properties.find((p) => ts.isPropertyAssignment(p) && propertyName(p) === key);
+}
+
 function readVitestConfig(source) {
-  const includes = [];
+  const sf = ts.createSourceFile("vitest.config.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+  const coverageBlocks = [];
+  (function visit(node) {
+    if (
+      ts.isPropertyAssignment(node) &&
+      propertyName(node) === "coverage" &&
+      ts.isObjectLiteralExpression(node.initializer)
+    ) {
+      coverageBlocks.push(node.initializer);
+    }
+    ts.forEachChild(node, visit);
+  })(sf);
+  if (coverageBlocks.length === 0) {
+    throw new Error("VITEST_COVERAGE_BLOCK_MISSING: no `coverage: { ... }` object literal");
+  }
+  if (coverageBlocks.length > 1) {
+    throw new Error(`VITEST_COVERAGE_BLOCK_AMBIGUOUS: ${coverageBlocks.length} \`coverage: { ... }\` object literals`);
+  }
+  const coverage = coverageBlocks[0];
+
+  const includeProp = findProperty(coverage, "include");
+  if (!includeProp) throw new Error("VITEST_COVERAGE_INCLUDE_MISSING: coverage has no include");
+  if (!ts.isArrayLiteralExpression(includeProp.initializer)) {
+    throw new Error("VITEST_COVERAGE_INCLUDE_UNPARSEABLE: coverage.include is not an array literal");
+  }
+  const includes = includeProp.initializer.elements.map((el) => {
+    if (!ts.isStringLiteral(el) && !ts.isNoSubstitutionTemplateLiteral(el)) {
+      throw new Error(`VITEST_COVERAGE_INCLUDE_UNPARSEABLE: entry \`${el.getText(sf)}\` is not a string literal`);
+    }
+    return el.text;
+  });
+  if (includes.length === 0) throw new Error("VITEST_COVERAGE_INCLUDE_EMPTY: coverage.include is empty");
+
+  const thresholdsProp = findProperty(coverage, "thresholds");
+  if (!thresholdsProp) throw new Error("VITEST_COVERAGE_THRESHOLDS_MISSING: coverage has no thresholds");
+  let thresholdsObj = thresholdsProp.initializer;
+  if (ts.isConditionalExpression(thresholdsObj)) {
+    const arms = [thresholdsObj.whenTrue, thresholdsObj.whenFalse].filter(ts.isObjectLiteralExpression);
+    thresholdsObj = arms.length === 1 ? arms[0] : thresholdsObj;
+  }
+  if (!ts.isObjectLiteralExpression(thresholdsObj)) {
+    throw new Error("VITEST_COVERAGE_THRESHOLDS_UNPARSEABLE: coverage.thresholds is not an object literal");
+  }
   const thresholds = {};
-
-  // Locate coverage: { ... } block by finding "coverage:" and then
-  // bracket-counting to extract the full object body.
-  const coverageStart = source.indexOf("coverage:");
-  if (coverageStart === -1) return { includes, thresholds };
-
-  let depth = 0;
-  let bodyStart = -1;
-  let bodyEnd = -1;
-  for (let i = coverageStart; i < source.length; i++) {
-    if (source[i] === "{") {
-      if (depth === 0) bodyStart = i + 1;
-      depth++;
-    } else if (source[i] === "}") {
-      depth--;
-      if (depth === 0) {
-        bodyEnd = i;
-        break;
-      }
+  for (const prop of thresholdsObj.properties) {
+    const key = ts.isPropertyAssignment(prop) ? propertyName(prop) : undefined;
+    if (key === undefined) {
+      throw new Error(`VITEST_COVERAGE_THRESHOLDS_UNPARSEABLE: entry \`${prop.getText(sf)}\` has no literal key`);
     }
+    thresholds[key] = prop.initializer.getText(sf);
   }
-  if (bodyStart === -1 || bodyEnd === -1) return { includes, thresholds };
-
-  const coverageBody = source.slice(bodyStart, bodyEnd);
-
-  // Extract include: [ ... ] within coverage body (first occurrence only)
-  const includeMatch = coverageBody.match(/\binclude:\s*\[([\s\S]*?)\]/);
-  if (includeMatch) {
-    const block = includeMatch[1];
-    const entryRe = /["']([^"']+)["']/g;
-    let m;
-    while ((m = entryRe.exec(block)) !== null) {
-      includes.push(m[1]);
-    }
-  }
-
-  // Extract thresholds: { ... } within coverage body
-  const threshIdx = coverageBody.indexOf("thresholds:");
-  if (threshIdx !== -1) {
-    let td = 0;
-    let ts = -1;
-    let te = -1;
-    for (let i = threshIdx; i < coverageBody.length; i++) {
-      if (coverageBody[i] === "{") {
-        if (td === 0) ts = i + 1;
-        td++;
-      } else if (coverageBody[i] === "}") {
-        td--;
-        if (td === 0) { te = i; break; }
-      }
-    }
-    if (ts !== -1 && te !== -1) {
-      const block = coverageBody.slice(ts, te);
-      // Path-keyed entries: "src/lib/foo.ts": { lines: 80 }
-      const pathKeyRe = /"([^"]+)":\s*\{([^}]*)\}/g;
-      let m;
-      while ((m = pathKeyRe.exec(block)) !== null) {
-        thresholds[m[1]] = m[2].trim();
-      }
-      // Global numeric thresholds: lines: 60
-      const globalKeyRe = /^\s*(lines|branches|functions|statements):\s*(\d+)/gm;
-      while ((m = globalKeyRe.exec(block)) !== null) {
-        thresholds[m[1]] = m[2];
-      }
-    }
+  if (Object.keys(thresholds).length === 0) {
+    throw new Error("VITEST_COVERAGE_THRESHOLDS_EMPTY: coverage.thresholds has no keys");
   }
 
   return { includes, thresholds };
+}
+
+function readVitestConfigOrExit(source, label) {
+  try {
+    return readVitestConfig(source);
+  } catch (err) {
+    console.error(`[check-vitest-coverage-include] FAILED (${label}):`);
+    console.error(`  - ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -179,8 +205,9 @@ function resolveGlob(pattern) {
   return matches;
 }
 
-// Global threshold keys (not file paths)
-const GLOBAL_THRESHOLD_KEYS = new Set(["lines", "branches", "functions", "statements"]);
+// Threshold keys that configure the run rather than name files (vitest's
+// resolveThresholds skips the same set).
+const GLOBAL_THRESHOLD_KEYS = new Set(["lines", "branches", "functions", "statements", "perFile", "autoUpdate", "100"]);
 
 // ---------------------------------------------------------------------------
 // Read vitest.config.ts
@@ -194,7 +221,7 @@ try {
   process.exit(1);
 }
 
-const { includes, thresholds } = readVitestConfig(vitestSource);
+const { includes, thresholds } = readVitestConfigOrExit(vitestSource, "vitest.config.ts");
 
 const errors = [];
 let resolvedIncludes = 0;
@@ -218,13 +245,20 @@ for (const entry of includes) {
   }
 }
 
-// Check 2: coverage.thresholds file-path keys must exist
+// Check 2: coverage.thresholds path keys must exist; glob keys must match a file
 for (const [key] of Object.entries(thresholds)) {
   if (GLOBAL_THRESHOLD_KEYS.has(key)) {
     resolvedThresholds++;
     continue;
   }
-  // Treat as file path
+  if (key.includes("*")) {
+    if (resolveGlob(key).length === 0) {
+      errors.push(`coverage.thresholds glob "${key}" matches no files`);
+    } else {
+      resolvedThresholds++;
+    }
+    continue;
+  }
   if (!existsSync(resolve(ROOT, key))) {
     errors.push(`coverage.thresholds key "${key}" is a file path that does not exist`);
   } else {
@@ -242,7 +276,7 @@ if (enforceRenameParity) {
     console.error("Cannot read main:vitest.config.ts for rename parity check");
     process.exit(1);
   }
-  const { includes: mainIncludes, thresholds: mainThresholds } = readVitestConfig(mainSource);
+  const { includes: mainIncludes, thresholds: mainThresholds } = readVitestConfigOrExit(mainSource, "main:vitest.config.ts");
   const mainIncludeSet = new Set(mainIncludes);
   const currentIncludeSet = new Set(includes);
   const addedIncludes = [...currentIncludeSet].filter((e) => !mainIncludeSet.has(e));

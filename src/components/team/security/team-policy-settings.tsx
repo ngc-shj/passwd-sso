@@ -17,6 +17,7 @@ import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { fetchApi } from "@/lib/url-helpers";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
@@ -33,6 +34,7 @@ import {
 } from "@/lib/validations";
 
 import { bindRangeNullableInput } from "@/lib/ui/input-range";
+import { parseLines } from "@/lib/format/parse-lines";
 
 interface PolicyData {
   minPasswordLength: number;
@@ -124,6 +126,7 @@ const ERROR_MESSAGE_ARGS: Record<string, Record<string, number>> = {
   passwordHistoryCountRange: { min: 0, max: PASSWORD_HISTORY_COUNT_MAX },
   sessionIdleTimeoutRange: { min: SESSION_IDLE_TIMEOUT_MIN, max: SESSION_IDLE_TIMEOUT_MAX },
   sessionAbsoluteTimeoutRange: { min: SESSION_ABSOLUTE_TIMEOUT_MIN, max: SESSION_ABSOLUTE_TIMEOUT_MAX },
+  teamAllowedCidrsMax: { max: MAX_CIDRS },
 };
 
 interface TeamPolicySettingsProps {
@@ -189,25 +192,27 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
 
     setSaving(true);
     try {
-      const teamAllowedCidrs = teamCidrsText
-        .split("\n")
-        .map((line) => line.trim())
-        .filter((line) => line.length > 0);
-      const payload = { ...policy, teamAllowedCidrs };
       // @stepup id:team-policy-put
       const res = await fetchApi(`/api/teams/${teamId}/policy`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: JSON.stringify(policy),
       });
       if (res.ok) {
-        const saved = await res.json();
-        const savedCidrsText = (saved.teamAllowedCidrs ?? []).join("\n");
-        setTeamCidrsText(savedCidrsText);
-        setPolicy({ ...DEFAULT_POLICY, ...saved });
-        setInitialPolicy({ ...DEFAULT_POLICY, ...saved });
+        // The policy is saved from here on: nothing below may be reported as
+        // a failed save.
         setFieldErrors({});
         toast.success(t("saveSuccess"));
+        const saved = await parseJsonBodyOnce(res);
+        if (typeof saved !== "object" || saved === null) {
+          // The echo could not be read; what was sent is what was saved.
+          setInitialPolicy(policy as unknown as Record<string, unknown>);
+          return;
+        }
+        const next: PolicyData = { ...DEFAULT_POLICY, ...(saved as Partial<PolicyData>) };
+        setTeamCidrsText((next.teamAllowedCidrs ?? []).join("\n"));
+        setPolicy(next);
+        setInitialPolicy(next as unknown as Record<string, unknown>);
       } else if (res.status === 400) {
         toast.error(t("validationError"));
       } else {
@@ -467,11 +472,24 @@ export function TeamPolicySettings({ teamId, section }: TeamPolicySettingsProps)
             <Textarea
               rows={4}
               value={teamCidrsText}
-              onChange={(e) => setTeamCidrsText(e.target.value)}
+              onChange={(e) => {
+                // The parsed list lives in policy so the dirty check and
+                // validate() see what Save will send.
+                const text = e.target.value;
+                setTeamCidrsText(text);
+                setPolicy((p) => ({ ...p, teamAllowedCidrs: parseLines(text) }));
+                setFieldErrors((prev) => {
+                  const { teamAllowedCidrs: _, ...rest } = prev;
+                  return rest;
+                });
+              }}
               placeholder={t("teamAllowedCidrsPlaceholder")}
               className="font-mono text-sm"
             />
             <p className="text-xs text-muted-foreground">{t("teamAllowedCidrsHelp", { max: MAX_CIDRS })}</p>
+            {fieldErrors.teamAllowedCidrs && (
+              <p className="text-sm text-destructive">{fieldErrors.teamAllowedCidrs}</p>
+            )}
           </div>
         </div>
         )}

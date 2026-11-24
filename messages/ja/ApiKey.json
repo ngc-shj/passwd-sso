@@ -12,6 +12,7 @@
   "expiry365": "365 日",
   "created": "API キーを作成しました。",
   "createError": "API キーの作成に失敗しました。",
+  "createdTokenUnavailable": "API キーは作成されましたが、表示できませんでした。このキーを取り消して、新しく作成してください。",
   "validationError": "入力内容に誤りがあります。",
   "tokenReady": "API キー（一度だけ表示されます）:",
   "tokenOnce": "今すぐコピーしてください。再表示はできません。",

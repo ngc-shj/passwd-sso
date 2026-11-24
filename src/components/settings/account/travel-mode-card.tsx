@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
+import { toast } from "sonner";
 import { useTravelMode } from "@/hooks/use-travel-mode";
 import { useVault } from "@/lib/vault/vault-context";
 import { computePassphraseVerifier } from "@/lib/crypto/crypto-client";
@@ -29,9 +30,16 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Plane, AlertTriangle } from "lucide-react";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { formatLockedUntil } from "@/components/vault/vault-lock-screen";
+import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
 
 export function TravelModeCard() {
   const t = useTranslations("TravelMode");
+  // The disable route shares the vault-unlock lockout, so its lockout copy
+  // comes from the Vault namespace that formatLockedUntil reads; so do its
+  // rate-limit and retry-later copies, as on the vault lock screen.
+  const tVault = useTranslations("Vault");
+  const tAuth = useTranslations("Auth");
   const travelMode = useTravelMode();
   const { active, loading, enable } = travelMode;
   const { getAccountSalt } = useVault();
@@ -40,14 +48,19 @@ export function TravelModeCard() {
   const [passphrase, setPassphrase] = useState("");
   const [disableError, setDisableError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   const handleEnable = async () => {
     setBusy(true);
-    const ok = await enable();
+    const result = await enable();
     setBusy(false);
     setShowEnableConfirm(false);
-    if (!ok) {
-      // toast or inline error could be added here
+    if (result.success) return;
+    if (result.error === API_ERROR.UNAUTHORIZED) {
+      // The session expired: retrying cannot succeed without a fresh sign-in.
+      setSessionExpired(true);
+    } else {
+      toast.error(t("enableFailed"));
     }
   };
 
@@ -73,6 +86,19 @@ export function TravelModeCard() {
         setPassphrase("");
       } else if (result.error === API_ERROR.INVALID_PASSPHRASE) {
         setDisableError(t("passphraseIncorrect"));
+      } else if (result.error === API_ERROR.ACCOUNT_LOCKED) {
+        setDisableError(formatLockedUntil(result.lockedUntil, tVault));
+      } else if (result.error === API_ERROR.RATE_LIMIT_EXCEEDED) {
+        setDisableError(tVault("rateLimited"));
+      } else if (result.error === API_ERROR.SERVICE_UNAVAILABLE) {
+        // The server could not check the passphrase (e.g. its verifier pepper
+        // is not configured): the same passphrase may succeed on a retry.
+        setDisableError(tVault("retryLater"));
+      } else if (result.error === API_ERROR.UNAUTHORIZED) {
+        // The session expired: no passphrase can succeed, so leave the
+        // dialog for a fresh sign-in.
+        handleDisableDialogChange(false);
+        setSessionExpired(true);
       } else {
         setDisableError(t("disableFailed"));
       }
@@ -80,6 +106,16 @@ export function TravelModeCard() {
       setDisableError(t("disableFailed"));
     } finally {
       setBusy(false);
+    }
+  };
+
+  // Cancel calls this too: a controlled open change does not fire
+  // onOpenChange, so a direct setter would keep the typed passphrase.
+  const handleDisableDialogChange = (open: boolean) => {
+    setShowDisableDialog(open);
+    if (!open) {
+      setPassphrase("");
+      setDisableError(null);
     }
   };
 
@@ -138,13 +174,7 @@ export function TravelModeCard() {
       </AlertDialog>
 
       {/* Disable Dialog with passphrase */}
-      <Dialog open={showDisableDialog} onOpenChange={(open) => {
-        setShowDisableDialog(open);
-        if (!open) {
-          setPassphrase("");
-          setDisableError(null);
-        }
-      }}>
+      <Dialog open={showDisableDialog} onOpenChange={handleDisableDialogChange}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{t("disableTitle")}</DialogTitle>
@@ -171,7 +201,7 @@ export function TravelModeCard() {
             <div className="flex justify-end gap-2">
               <Button
                 variant="outline"
-                onClick={() => setShowDisableDialog(false)}
+                onClick={() => handleDisableDialogChange(false)}
               >
                 {t("cancel")}
               </Button>
@@ -182,6 +212,15 @@ export function TravelModeCard() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <RecentSessionRequiredDialog
+        actionLabel={tAuth("recentSessionAction")}
+        cancelLabel={t("cancel")}
+        description={tAuth("reauthSessionExpired")}
+        onOpenChange={setSessionExpired}
+        open={sessionExpired}
+        title={tAuth("recentSessionTitle")}
+      />
     </>
   );
 }

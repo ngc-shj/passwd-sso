@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { toastApiError } from "@/lib/http/toast-api-error";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
 import { useVault } from "@/lib/vault/vault-context";
 import {
   encryptBinary,
@@ -62,6 +63,18 @@ interface AttachmentSectionProps {
   onAttachmentsChange: (attachments: AttachmentMeta[]) => void;
   readOnly?: boolean;
   keyVersion?: number;
+}
+
+function isAttachmentMeta(value: unknown): value is AttachmentMeta {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.filename === "string" &&
+    typeof v.contentType === "string" &&
+    typeof v.sizeBytes === "number" &&
+    typeof v.createdAt === "string"
+  );
 }
 
 function formatFileSize(bytes: number): string {
@@ -242,9 +255,18 @@ export function AttachmentSection({
         return;
       }
 
-      const newAttachment: AttachmentMeta = await res.json();
-      onAttachmentsChange([newAttachment, ...attachments]);
+      // The attachment exists from here on: nothing below may be reported as a
+      // failed upload.
       toast.success(t("uploaded"));
+      const newAttachment = await parseJsonBodyOnce(res);
+      if (isAttachmentMeta(newAttachment)) {
+        onAttachmentsChange([newAttachment, ...attachments]);
+        return;
+      }
+      // The created row could not be read: reload the list instead.
+      const listRes = await fetchApi(apiPath.passwordAttachments(entryId)).catch(() => null);
+      const list = listRes?.ok ? await parseJsonBodyOnce(listRes) : null;
+      if (Array.isArray(list)) onAttachmentsChange(list.filter(isAttachmentMeta));
     } catch {
       toast.error(t("uploadError"));
     } finally {

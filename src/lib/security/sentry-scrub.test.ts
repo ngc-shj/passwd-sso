@@ -110,9 +110,13 @@ describe("scrubObject", () => {
     for (let i = 0; i < 15; i++) {
       obj = { nested: obj };
     }
-    const result = scrubObject(obj) as Record<string, unknown>;
-    // Should not throw — deeply nested parts become "[Redacted]"
-    expect(result).toBeDefined();
+    // Levels 0..10 are walked; the value at depth 11 is replaced wholesale.
+    let node: unknown = scrubObject(obj);
+    for (let depth = 0; depth < 11; depth++) {
+      expect(node).toEqual(expect.objectContaining({ nested: expect.anything() }));
+      node = (node as Record<string, unknown>).nested;
+    }
+    expect(node).toBe("[Redacted]");
   });
 
   it("does not mutate input", () => {

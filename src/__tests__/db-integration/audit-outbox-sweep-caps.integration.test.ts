@@ -94,9 +94,8 @@ describe("audit-outbox sweep caps (C8)", () => {
   //   2. The production sweep is a GLOBAL sweep (no tenant scoping, by design).
   //      If any other tenant's committed eligible rows happen to be caught by
   //      the sweep here, the rollback undoes those writes — the test has zero
-  //      side effects on shared data. (Such rows can still consume the `LIMIT`
-  //      on a shared dev DB, which would make an assertion FAIL loudly, never
-  //      pass a broken cap; CI runs against a fresh DB with no other rows.)
+  //      side effects on shared data. (Such rows would still consume the
+  //      `LIMIT`, so each cap test first moves them out of its sweep: AMBIENT.)
   // A vitest assertion failure inside `body` propagates out (the tx still
   // rolls back), so failures are reported normally.
   // `setGucs` defaults to the audit-write bypass the production wrappers set;
@@ -117,6 +116,27 @@ describe("audit-outbox sweep caps (C8)", () => {
     }
   }
 
+  // The sweeps are global, so another tenant's committed eligible row would
+  // take a share of the cap and the exact counts below would fail for it. Each
+  // statement moves every such row out of one sweep's predicate through the
+  // holding tx, which the rollback restores; run it before seeding.
+  const AMBIENT = {
+    stuckOutbox: `UPDATE audit_outbox SET processing_started_at = now()
+                  WHERE status = 'PROCESSING' AND processing_started_at < now()`,
+    stuckDeliveries: `UPDATE audit_deliveries SET processing_started_at = now()
+                      WHERE status = 'PROCESSING' AND processing_started_at < now()`,
+    sentAgedOutbox: `UPDATE audit_outbox SET sent_at = now() WHERE status = 'SENT' AND sent_at < now()`,
+    failedAgedOutbox: `UPDATE audit_outbox SET created_at = now() WHERE status = 'FAILED' AND created_at < now()`,
+    agedDeliveries: `UPDATE audit_deliveries SET created_at = now()
+                     WHERE status IN ('SENT', 'FAILED') AND created_at < now()`,
+    agedWebhookDeliveries: `UPDATE webhook_deliveries SET created_at = now()
+                            WHERE status IN ('SENT', 'FAILED') AND created_at < now()`,
+  } as const;
+
+  async function neutraliseAmbient(tx: PrismaTx, ...statements: string[]): Promise<void> {
+    for (const statement of statements) await tx.$executeRawUnsafe(statement);
+  }
+
   // ─── reapStuckRows ──────────────────────────────────────────────
 
   describe("reapStuckRows", () => {
@@ -130,6 +150,7 @@ describe("audit-outbox sweep caps (C8)", () => {
       const timeoutSeconds = AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS / 1000;
 
       await runInRolledBackTx(async (txH) => {
+        await neutraliseAmbient(txH, AMBIENT.stuckOutbox);
         for (let i = 0; i < 3; i++) {
           await txH.$executeRawUnsafe(
             `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, processing_started_at, created_at, next_retry_at)
@@ -164,6 +185,7 @@ describe("audit-outbox sweep caps (C8)", () => {
       const processingStartedAt = new Date(Date.now() - AUDIT_OUTBOX.PROCESSING_TIMEOUT_MS - 60_000);
 
       await runInRolledBackTx(async (txH) => {
+        await neutraliseAmbient(txH, AMBIENT.stuckDeliveries);
         const targetId = randomUUID();
         await txH.$executeRawUnsafe(
           `INSERT INTO audit_delivery_targets (
@@ -237,6 +259,7 @@ describe("audit-outbox sweep caps (C8)", () => {
     // SENT branch's own `LIMIT` is asserted exactly.
     it("purges exactly `limit` of 3 SENT-aged rows per call, draining the remainder next call", async () => {
       await runInRolledBackTx(async (txH) => {
+        await neutraliseAmbient(txH, AMBIENT.sentAgedOutbox);
         for (let i = 0; i < 3; i++) await insertSentAgedRow(txH);
 
         // First call: exactly `limit` (2) of the 3 SENT-aged rows. Broken LIMIT ⇒ 3.
@@ -256,6 +279,7 @@ describe("audit-outbox sweep caps (C8)", () => {
     // the FAILED branch even when the SENT branch saturates its cap".)
     it("S1: the FAILED-aged branch purges its own row despite a SENT backlog exceeding the cap", async () => {
       await runInRolledBackTx(async (txH) => {
+        await neutraliseAmbient(txH, AMBIENT.sentAgedOutbox, AMBIENT.failedAgedOutbox);
         for (let i = 0; i < 3; i++) await insertSentAgedRow(txH);
         await insertFailedAgedRow(txH);
 
@@ -420,6 +444,8 @@ describe("audit-outbox sweep caps (C8)", () => {
     // Moves every ambient eligible row out of the member's predicate by
     // updating its eligibility column only — no delete, no status change —
     // through the holding tx, so the rollback restores it.
+    // processing_started_at is timestamptz(3): now() stored there can round
+    // DOWN below now(), so it is moved past now() rather than onto it.
     neutralise: string;
     countEligible: string;
     insertTied: TiedInserter;
@@ -469,7 +495,7 @@ describe("audit-outbox sweep caps (C8)", () => {
     },
     {
       name: "M4 reapStuckRowsInTx",
-      neutralise: `UPDATE audit_outbox SET processing_started_at = now()
+      neutralise: `UPDATE audit_outbox SET processing_started_at = now() + interval '1 hour'
                    WHERE status = 'PROCESSING' AND processing_started_at < now()`,
       countEligible: `SELECT count(*)::int AS n FROM audit_outbox
                       WHERE status = 'PROCESSING' AND processing_started_at < now()`,
@@ -479,7 +505,7 @@ describe("audit-outbox sweep caps (C8)", () => {
     },
     {
       name: "M5 reapStuckDeliveriesInTx",
-      neutralise: `UPDATE audit_deliveries SET processing_started_at = now()
+      neutralise: `UPDATE audit_deliveries SET processing_started_at = now() + interval '1 hour'
                    WHERE status = 'PROCESSING' AND processing_started_at < now()`,
       countEligible: `SELECT count(*)::int AS n FROM audit_deliveries
                       WHERE status = 'PROCESSING' AND processing_started_at < now()`,
@@ -489,7 +515,7 @@ describe("audit-outbox sweep caps (C8)", () => {
     },
     {
       name: "M6 reapStuckWebhookDeliveriesInTx",
-      neutralise: `UPDATE webhook_deliveries SET processing_started_at = now()
+      neutralise: `UPDATE webhook_deliveries SET processing_started_at = now() + interval '1 hour'
                    WHERE status = 'PROCESSING' AND processing_started_at < now()`,
       countEligible: `SELECT count(*)::int AS n FROM webhook_deliveries
                       WHERE status = 'PROCESSING' AND processing_started_at < now()`,
@@ -539,12 +565,12 @@ describe("audit-outbox sweep caps (C8)", () => {
 
   describe("delivery retention purge caps", () => {
     // Lock-free deletes, so no forced plan. Like the outbox purge tests above,
-    // aged terminal rows already on a shared dev DB make the remainder steps
-    // fail loudly; they cannot pass a broken cap, and CI starts empty.
+    // ambient aged terminal rows are moved out of the purge first.
     const agedSent = () => new Date(sentCutoff().getTime() - MS_PER_HOUR);
 
     it("M7 purgeDeliveryRetentionInTx: exactly `limit` of 3 SENT-aged deliveries per call", async () => {
       await runInRolledBackTx(async (txH) => {
+        await neutraliseAmbient(txH, AMBIENT.agedDeliveries);
         await insertSentAgedDeliveries(txH, 3, agedSent());
 
         expect(await purgeDeliveryRetentionInTx(txH, sentCutoff(), failedCutoff(), 2)).toBe(2);
@@ -555,6 +581,7 @@ describe("audit-outbox sweep caps (C8)", () => {
 
     it("M8 purgeWebhookDeliveryRetentionInTx: exactly `limit` of 3 SENT-aged webhook deliveries per call", async () => {
       await runInRolledBackTx(async (txH) => {
+        await neutraliseAmbient(txH, AMBIENT.agedWebhookDeliveries);
         await insertSentAgedWebhookDeliveries(txH, 3, agedSent());
 
         expect(await purgeWebhookDeliveryRetentionInTx(txH, sentCutoff(), failedCutoff(), 2)).toBe(2);

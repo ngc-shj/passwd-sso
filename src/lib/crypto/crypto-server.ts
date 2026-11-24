@@ -338,8 +338,9 @@ export function verifyPassphraseVerifier(
     } catch {
       // Any error from getVerifierPepper(storedVersion) means the pepper for that
       // version is not configured (env var missing, KMS fetch failure, invalid hex,
-      // etc.). All such errors classify as MISSING_PEPPER_VERSION — the route
-      // emits a VERIFIER_PEPPER_MISSING audit and returns generic 401 to the user.
+      // etc.). All such errors classify as MISSING_PEPPER_VERSION — an operator
+      // fault, not a wrong passphrase: the caller emits a VERIFIER_PEPPER_MISSING
+      // audit and answers 503 SERVICE_UNAVAILABLE without counting a failure.
       return { ok: false, reason: "MISSING_PEPPER_VERSION" };
     }
 

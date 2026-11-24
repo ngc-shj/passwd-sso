@@ -975,8 +975,10 @@ it("2", async () => { await assertRedisFailClosed({ limiter: onlyLimiter, failur
     it("passes cleanly with the tranche-3 legacy burndown applied", () => {
       // The real-repo run classifies the whole src/app/api sibling-test set
       // PLUS every *.test.ts(x) under src for the C6 stub scan (~2 batched
-      // ts-morph invocations over hundreds of files) — slower than the
-      // isolated-fixture cases above; raised timeout accordingly.
+      // ts-morph invocations over every test file). This case is the gate's only
+      // CI enforcement, and its time grows with the number of test files and the
+      // machine's load (about 15 s alone, over 60 s inside a loaded full run).
+      // The timeout is a hang guard, not a budget.
       const r = spawnSync("bash", [GUARD], { encoding: "utf8" });
       expect(r.stdout + r.stderr).not.toContain("FAIL");
       expect(r.stdout).not.toContain("MANIFEST_MISSING_ROUTE:");
@@ -990,6 +992,6 @@ it("2", async () => { await assertRedisFailClosed({ limiter: onlyLimiter, failur
       expect(r.stdout).not.toContain("STUB_CONFIG_SEAM:");
       expect(r.stdout).not.toContain("DANGLING_ENTRY:");
       expect(r.status).toBe(0);
-    }, 60_000);
+    }, 300_000);
   });
 });

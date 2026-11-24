@@ -36,9 +36,7 @@ describe("logger module", () => {
   it("uses AUDIT_LOG_APP_NAME env var as app name when set", async () => {
     vi.stubEnv("AUDIT_LOG_APP_NAME", "custom-app");
     const mod = await import("@/lib/logger");
-    // Logger is already created with the env var at module load time.
-    // The module exports are not recreated; just assert the module loads cleanly.
-    expect(mod.default).toBeDefined();
+    expect(mod.default.bindings()).toMatchObject({ name: "custom-app", _app: "custom-app" });
   });
 
   it("uses LOG_LEVEL env var to control minimum log level", async () => {

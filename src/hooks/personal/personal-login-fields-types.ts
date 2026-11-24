@@ -1,5 +1,3 @@
-"use client";
-
 import type { ComponentProps } from "react";
 import { EntryLoginMainFields } from "@/components/passwords/entry/entry-login-main-fields";
 import type { PersonalLoginFormTranslations } from "@/hooks/form/entry-form-translations";

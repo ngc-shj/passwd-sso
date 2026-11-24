@@ -49,6 +49,8 @@ import { PasskeyReauthDialog } from "@/components/auth/passkey-reauth-dialog";
 import { useInlineReauth } from "@/hooks/auth/use-inline-reauth";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { readNonEmptyStringField } from "@/lib/http/read-body-field";
 
 interface ApiKeyEntry {
   id: string;
@@ -85,6 +87,8 @@ export function ApiKeyManager() {
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newToken, setNewToken] = useState<string | null>(null);
+  // The key was created but its one-time token could not be read.
+  const [tokenUnavailable, setTokenUnavailable] = useState(false);
   const [name, setName] = useState("");
   const [selectedScopes, setSelectedScopes] = useState<Set<ApiKeyScope>>(
     new Set([API_KEY_SCOPE.PASSWORDS_READ]),
@@ -134,6 +138,7 @@ export function ApiKeyManager() {
     setCreateOpen(false);
     setCreating(false);
     setNewToken(null);
+    setTokenUnavailable(false);
     setName("");
     setSelectedScopes(new Set([API_KEY_SCOPE.PASSWORDS_READ]));
     setExpiryDays("90");
@@ -160,23 +165,26 @@ export function ApiKeyManager() {
       });
 
       if (res.ok) {
-        const data = await res.json();
-        setNewToken(data.token);
+        // The key exists from here on: nothing below may be reported as a
+        // failed creation.
         setName("");
         setSelectedScopes(new Set([API_KEY_SCOPE.PASSWORDS_READ]));
         setExpiryDays("90");
         toast.success(t("created"));
         fetchKeys();
+        const token = readNonEmptyStringField(await parseJsonBodyOnce(res), "token");
+        if (token) setNewToken(token);
+        else setTokenUnavailable(true);
       } else {
-        const err = await res.json().catch(() => ({}));
-        if (err.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
+        const err = await readApiErrorBody(res);
+        if (err?.error === API_ERROR.SESSION_STEP_UP_REQUIRED) {
           await inlineReauth.triggerOnStaleError({ type: "create" });
-        } else if (err.error === API_ERROR.API_KEY_LIMIT_EXCEEDED) {
+        } else if (err?.error === API_ERROR.API_KEY_LIMIT_EXCEEDED) {
           toast.error(t("limitExceeded", { max: MAX_API_KEYS_PER_USER }));
         } else if (res.status === 400) {
           toast.error(t("validationError"));
         } else {
-          const apiKey = tokenMintApiErrorKey(err.error);
+          const apiKey = tokenMintApiErrorKey(err?.error);
           toast.error(apiKey ? tApi(apiKey) : t("createError"));
         }
       }
@@ -275,6 +283,13 @@ export function ApiKeyManager() {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">{t("tokenOnce")}</p>
+              <Button variant="outline" size="sm" onClick={closeCreateDialog}>
+                OK
+              </Button>
+            </div>
+          ) : tokenUnavailable ? (
+            <div className="space-y-4 py-2">
+              <p role="alert" className="text-sm">{t("createdTokenUnavailable")}</p>
               <Button variant="outline" size="sm" onClick={closeCreateDialog}>
                 OK
               </Button>

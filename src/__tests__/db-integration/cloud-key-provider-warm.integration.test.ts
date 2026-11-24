@@ -220,11 +220,10 @@ describe("cloud KEY_PROVIDER: out-of-app processes warm the keys they use", () =
       );
     });
 
-    const stats = await migrateWebhookSecrets(ctx.app.prisma, { dryRun: false });
-
-    expect(stats.teamRowsMigrated).toBeGreaterThan(0);
-    expect(stats.teamRowsSkipped).toBe(0);
-    expect(stats.tenantRowsSkipped).toBe(0);
+    // The migration sweeps every v1 row on the database, so its counters are
+    // not this case's: a row another run left behind counts as skipped. A cold
+    // key shows up on this case's own row, which stays at v1 when skipped.
+    await migrateWebhookSecrets(ctx.app.prisma, { dryRun: false });
 
     const [row] = await ctx.su.prisma.$transaction(async (tx) => {
       await setBypassRlsGucs(tx);

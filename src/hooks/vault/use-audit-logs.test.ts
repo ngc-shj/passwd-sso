@@ -198,9 +198,9 @@ describe("useAuditLogs — URL parameter building (buildFilterParams)", () => {
     expect(params.get("teamId")).toBe("team-123");
   });
 
-  it("extra params do not clobber filter params", async () => {
+  it("extra params override a filter param of the same key", async () => {
     const { fetchApi } = await import("@/lib/url-helpers");
-    // buildExtraParams tries to set "from"; should be overwritten by the filter value
+    // buildExtraParams sets "from" too; the extra value is merged last and wins.
     const buildExtraParams = () => {
       const p = new URLSearchParams();
       p.set("from", "extra-from");
@@ -217,9 +217,7 @@ describe("useAuditLogs — URL parameter building (buildFilterParams)", () => {
 
     const url: string = vi.mocked(fetchApi).mock.calls[0][0] as string;
     const params = new URLSearchParams(url.split("?")[1] ?? "");
-    // The filter param sets "from" first; extra merges afterwards, so extra wins.
-    // This test documents actual behavior: extra params overwrite filter params.
-    expect(params.get("from")).toBeTruthy();
+    expect(params.getAll("from")).toEqual(["extra-from"]);
   });
 });
 

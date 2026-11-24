@@ -274,6 +274,43 @@ describe("TeamAttachmentSection", () => {
     });
   });
 
+  describe("upload success", () => {
+    const created = {
+      id: "att-new",
+      filename: "doc.pdf",
+      contentType: "application/pdf",
+      sizeBytes: 3,
+      createdAt: "2026-01-01T00:00:00Z",
+    };
+
+    function uploadOne(onAttachmentsChange: (list: unknown[]) => void) {
+      const { container } = render(
+        <TeamAttachmentSection teamId="team-1" entryId="entry-1" attachments={[]} onAttachmentsChange={onAttachmentsChange} />,
+      );
+      const input = container.querySelector('input[type="file"]') as HTMLInputElement;
+      fireEvent.change(input, { target: { files: [new File(["abc"], "doc.pdf", { type: "application/pdf" })] } });
+    }
+
+    it("prepends the created attachment from the response", async () => {
+      mockUpload.mockResolvedValue(new Response(JSON.stringify(created), { status: 201 }));
+      const onAttachmentsChange = vi.fn();
+      uploadOne(onAttachmentsChange);
+      await waitFor(() => expect(onAttachmentsChange).toHaveBeenCalledWith([created]));
+      expect(mockToast.success).toHaveBeenCalledWith("uploaded");
+    });
+
+    it("reports an upload whose response body cannot be read as uploaded and reloads the list", async () => {
+      mockUpload.mockResolvedValue(new Response("<html>gateway</html>", { status: 201 }));
+      mockFetch.mockResolvedValue(new Response(JSON.stringify([created]), { status: 200 }));
+      const onAttachmentsChange = vi.fn();
+      uploadOne(onAttachmentsChange);
+      await waitFor(() => expect(onAttachmentsChange).toHaveBeenCalledWith([created]));
+      expect(mockToast.success).toHaveBeenCalledWith("uploaded");
+      expect(mockToast.error).not.toHaveBeenCalled();
+      expect(mockFetch).toHaveBeenCalledWith("/api/teams/team-1/passwords/entry-1/attachments");
+    });
+  });
+
   describe("upload refusals", () => {
     async function uploadOne() {
       const { container } = render(

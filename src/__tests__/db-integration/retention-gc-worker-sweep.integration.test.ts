@@ -29,6 +29,7 @@ import {
 } from "./helpers";
 import { sweepOnce } from "@/workers/retention-gc-worker/sweep";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
+import { assertNoForeignRows } from "./foreign-rows";
 
 // ─── mcp_clients boundary matrix ─────────────────────────────────────────────
 
@@ -221,6 +222,19 @@ describe("retention-gc sweepOnce: verification_tokens composite-key matrix (T12)
     });
   });
 
+  /**
+   * Both cells assert the verification_tokens count, which the sweep takes over
+   * every expired token; tokens carry no tenant, so no teardown sweep removes
+   * one another file left.
+   */
+  async function assertNoForeignExpiredTokens(): Promise<void> {
+    await assertNoForeignRows(
+      ctx.su,
+      "sweepOnce deletes and counts every expired verification token",
+      `SELECT identifier || '/' || token AS ref FROM verification_tokens WHERE expires < now()`,
+    );
+  }
+
   async function insertVerificationToken(opts: {
     identifier: string;
     token: string;
@@ -240,6 +254,7 @@ describe("retention-gc sweepOnce: verification_tokens composite-key matrix (T12)
   }
 
   it("deletes only expired composite rows; unexpired same-identifier row survives (T12)", async () => {
+    await assertNoForeignExpiredTokens();
     const sharedIdentifier = `test-ident-${randomUUID().slice(0, 12)}`;
     const distinctIdentifier = `test-ident-${randomUUID().slice(0, 12)}`;
 
@@ -305,6 +320,7 @@ describe("retention-gc sweepOnce: verification_tokens composite-key matrix (T12)
   });
 
   it("batchSize caps composite-row deletion (T12c)", async () => {
+    await assertNoForeignExpiredTokens();
     const identifier = `test-ident-batch-${randomUUID().slice(0, 12)}`;
 
     // Insert 5 expired rows under the same identifier

@@ -69,14 +69,18 @@ function setSessionUser(user: Record<string, unknown>) {
 
 /** A fetch mock serving setup, status and delegation, enough for setup() to unlock. */
 function makeFetchMock() {
-  return vi.fn(async (url: string) => {
+  // Setup asks the status again when a setup-required verdict arrived while
+  // its POST was in flight, so the status reflects a committed setup.
+  let setUp = false;
+  return vi.fn(async (url: string, init?: RequestInit) => {
     if (url === VAULT_STATUS_PATH) {
       return {
         ok: true,
         status: 200,
-        json: async () => ({ setupRequired: true, vaultAutoLockMinutes: null }),
+        json: async () => ({ setupRequired: !setUp, vaultAutoLockMinutes: null }),
       };
     }
+    if (url === "/api/vault/setup" && init?.method === "POST") setUp = true;
     return { ok: true, status: 200, json: async () => ({}) };
   });
 }

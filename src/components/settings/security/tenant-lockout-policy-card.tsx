@@ -98,12 +98,12 @@ export function TenantLockoutPolicyCard() {
     const t3 = threshold3 !== "" ? Number(threshold3) : null;
     const d3 = duration3 !== "" ? Number(duration3) : null;
 
-    if (t1 !== null && (t1 < LOCKOUT_THRESHOLD_MIN || t1 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange", { min: LOCKOUT_THRESHOLD_MIN, max: LOCKOUT_THRESHOLD_MAX });
-    if (d1 !== null && (d1 < LOCKOUT_DURATION_MIN || d1 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange", { min: LOCKOUT_DURATION_MIN, max: LOCKOUT_DURATION_MAX });
-    if (t2 !== null && (t2 < LOCKOUT_THRESHOLD_MIN || t2 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange", { min: LOCKOUT_THRESHOLD_MIN, max: LOCKOUT_THRESHOLD_MAX });
-    if (d2 !== null && (d2 < LOCKOUT_DURATION_MIN || d2 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange", { min: LOCKOUT_DURATION_MIN, max: LOCKOUT_DURATION_MAX });
-    if (t3 !== null && (t3 < LOCKOUT_THRESHOLD_MIN || t3 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange", { min: LOCKOUT_THRESHOLD_MIN, max: LOCKOUT_THRESHOLD_MAX });
-    if (d3 !== null && (d3 < LOCKOUT_DURATION_MIN || d3 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange", { min: LOCKOUT_DURATION_MIN, max: LOCKOUT_DURATION_MAX });
+    if (t1 !== null && (!Number.isInteger(t1) || t1 < LOCKOUT_THRESHOLD_MIN || t1 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange", { min: LOCKOUT_THRESHOLD_MIN, max: LOCKOUT_THRESHOLD_MAX });
+    if (d1 !== null && (!Number.isInteger(d1) || d1 < LOCKOUT_DURATION_MIN || d1 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange", { min: LOCKOUT_DURATION_MIN, max: LOCKOUT_DURATION_MAX });
+    if (t2 !== null && (!Number.isInteger(t2) || t2 < LOCKOUT_THRESHOLD_MIN || t2 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange", { min: LOCKOUT_THRESHOLD_MIN, max: LOCKOUT_THRESHOLD_MAX });
+    if (d2 !== null && (!Number.isInteger(d2) || d2 < LOCKOUT_DURATION_MIN || d2 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange", { min: LOCKOUT_DURATION_MIN, max: LOCKOUT_DURATION_MAX });
+    if (t3 !== null && (!Number.isInteger(t3) || t3 < LOCKOUT_THRESHOLD_MIN || t3 > LOCKOUT_THRESHOLD_MAX)) return t("lockoutThresholdRange", { min: LOCKOUT_THRESHOLD_MIN, max: LOCKOUT_THRESHOLD_MAX });
+    if (d3 !== null && (!Number.isInteger(d3) || d3 < LOCKOUT_DURATION_MIN || d3 > LOCKOUT_DURATION_MAX)) return t("lockoutDurationRange", { min: LOCKOUT_DURATION_MIN, max: LOCKOUT_DURATION_MAX });
 
     // Thresholds must be ascending
     if (t1 !== null && t2 !== null && t2 <= t1) return t("lockoutThresholdAscending");

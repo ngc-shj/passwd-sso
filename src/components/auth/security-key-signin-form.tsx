@@ -17,6 +17,8 @@ import { fetchApi } from "@/lib/url-helpers";
 import { useCallbackUrl } from "@/hooks/use-callback-url";
 import { callbackUrlToHref, isApiCallbackUrl } from "@/lib/auth/session/callback-url";
 import { stashPrf } from "@/lib/auth/prf-handoff";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
+import { readPasskeyOptions, readPrfData } from "@/lib/auth/webauthn/passkey-response";
 
 export function SecurityKeySignInForm() {
   const t = useTranslations("Auth");
@@ -63,12 +65,17 @@ export function SecurityKeySignInForm() {
         return;
       }
 
-      const { options, challengeId, prfSalt } = await optionsRes.json();
+      const signInOptions = readPasskeyOptions(await parseJsonBodyOnce(optionsRes));
+      if (!signInOptions) {
+        setError(t("securityKeySignInFailed"));
+        return;
+      }
+      const { options, challengeId, prfSalt } = signInOptions;
 
       // 2. WebAuthn ceremony (browser matches security key to allowCredentials)
       const result = await startPasskeyAuthentication(
         options,
-        prfSalt || undefined,
+        prfSalt,
       );
       prfOutput = result.prfOutput;
 
@@ -90,19 +97,26 @@ export function SecurityKeySignInForm() {
         return;
       }
 
-      const verifyData = await verifyRes.json();
+      // The session cookie is already set: from here on nothing may report the
+      // sign-in as failed. An unreadable body only forgoes the PRF handoff.
+      const prfData = readPrfData(await parseJsonBodyOnce(verifyRes));
 
       // 4. Hand PRF data to the dashboard in-memory (NOT sessionStorage, which
       // XSS can read) for vault auto-unlock. Survives the client-side router.push
       // below; a full reload drops it → manual unlock. Ownership of the buffer
       // transfers to the handoff: null it out so the finally below does not
       // zeroize what the consumer must still read.
-      if (prfOutput && verifyData.prf) {
-        stashPrf({ prfOutput, prfData: verifyData.prf });
+      if (prfOutput && prfData) {
+        stashPrf({ prfOutput, prfData });
         prfOutput = null;
       }
 
-      sessionStorage.setItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN, "1");
+      try {
+        sessionStorage.setItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN, "1");
+      } catch {
+        // sessionStorage unavailable (e.g. storage blocked) — the vault then
+        // asks for a manual unlock instead of auto-unlocking.
+      }
       // API callbacks (e.g. iOS /api/mobile/authorize) live outside the [locale]
       // segment; the next-intl router would inject the active locale and 404, so
       // navigate to those plainly.

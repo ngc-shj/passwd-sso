@@ -3,8 +3,16 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
-import { useVault } from "@/lib/vault/vault-context";
+import {
+  ROTATION_EFFECTS_UNAVAILABLE,
+  ROTATION_NOT_STARTED_VAULT_LOCKED,
+  useVault,
+  VaultChangedElsewhereError,
+  VaultChangeOutcomeUnknownError,
+  type RotationEffects,
+} from "@/lib/vault/vault-context";
 import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
+import { SessionChangedError } from "@/lib/url-helpers";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { Button } from "@/components/ui/button";
@@ -52,11 +60,37 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
     onOpenChange(nextOpen);
   }
 
+  // Operator banners (#433/P3-F2). Each surfaces only when the corresponding
+  // side-effect actually occurred. Persistent toasts so the user can act on
+  // them rather than dismissing accidentally.
+  function showEffectBanners(effects: RotationEffects | typeof ROTATION_EFFECTS_UNAVAILABLE | null) {
+    if (effects === ROTATION_EFFECTS_UNAVAILABLE) {
+      // The rotation committed, but whether the other sessions and tokens
+      // were revoked is unknown: say so instead of implying they were.
+      toast.warning(t("rotateKeyEffectsUnavailableBanner"), { duration: Infinity });
+      return;
+    }
+    if (effects?.cacheTombstoneFailures && effects.cacheTombstoneFailures > 0) {
+      toast.warning(t("rotateKeyCacheTombstoneFailureBanner"), { duration: Infinity });
+    }
+    if (effects?.invalidationFailed) {
+      toast.warning(t("rotateKeyInvalidationFailedBanner"), { duration: Infinity });
+    }
+    const mcpRevoked =
+      (effects?.invalidatedMcpAccessTokens ?? 0) +
+      (effects?.invalidatedMcpRefreshTokens ?? 0);
+    if (mcpRevoked > 0) {
+      toast.info(t("rotateKeyMcpRevokedBanner", { count: mcpRevoked }), {
+        duration: 10 * MS_PER_SECOND,
+      });
+    }
+  }
+
   async function performRotation() {
     setLoading(true);
     setError("");
     try {
-      const effects = await rotateKey(
+      const result = await rotateKey(
         passphrase,
         ({ phase, current, total }) => {
           setProgressPhase(phase);
@@ -64,30 +98,54 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
           setProgressTotal(total);
         },
       );
+      if (result === ROTATION_NOT_STARTED_VAULT_LOCKED) {
+        // The vault locked before anything was written (this dialog unmounts
+        // with it): the key was not rotated, and the user has to start again.
+        toast.warning(t("rotateKeyNotStartedVaultLocked"), { duration: Infinity });
+        handleOpenChange(false);
+        return;
+      }
+      // Only RotationCommittedVaultLocked (ROTATION_COMMITTED_VAULT_LOCKED)
+      // carries an outcome.
+      if (result !== null && typeof result === "object" && "outcome" in result) {
+        // The vault locked after the rotation was sent, which unmounts this
+        // dialog: say the rotation happened but the vault needs unlocking, and
+        // still report what else the rotation did.
+        toast.warning(t("rotateKeyCommittedVaultLocked"), { duration: Infinity });
+        showEffectBanners(result.effects);
+        handleOpenChange(false);
+        return;
+      }
       toast.success(t("rotateKeySuccess"));
-      // Operator banners (#433/P3-F2). Each surfaces only when the
-      // corresponding side-effect actually occurred. Persistent toasts so the
-      // user can act on them rather than dismissing accidentally.
-      if (effects?.cacheTombstoneFailures && effects.cacheTombstoneFailures > 0) {
-        toast.warning(t("rotateKeyCacheTombstoneFailureBanner"), { duration: Infinity });
-      }
-      if (effects?.invalidationFailed) {
-        toast.warning(t("rotateKeyInvalidationFailedBanner"), { duration: Infinity });
-      }
-      const mcpRevoked =
-        (effects?.invalidatedMcpAccessTokens ?? 0) +
-        (effects?.invalidatedMcpRefreshTokens ?? 0);
-      if (mcpRevoked > 0) {
-        toast.info(t("rotateKeyMcpRevokedBanner", { count: mcpRevoked }), {
-          duration: 10 * MS_PER_SECOND,
-        });
-      }
+      showEffectBanners(result);
       handleOpenChange(false);
     } catch (err: unknown) {
+      // Refused before any route ran (the page is reloading for the session
+      // that replaced this one): nothing changed.
+      if (err instanceof SessionChangedError) {
+        setError(tApi("sessionChanged"));
+        return;
+      }
+      if (err instanceof VaultChangeOutcomeUnknownError) {
+        // The vault is now locked, which unmounts this dialog: a persistent
+        // toast is the only place the user still sees what happened.
+        toast.error(t("rotateKeyOutcomeUnknown"), { duration: Infinity });
+        handleOpenChange(false);
+        return;
+      }
+      if (err instanceof VaultChangedElsewhereError) {
+        // Locked for the same reason: the vault changed in another tab or on
+        // another device, so this one's state is stale.
+        toast.error(t("vaultChangedElsewhere"), { duration: Infinity });
+        handleOpenChange(false);
+        return;
+      }
       const apiErr = err as { error?: string } | undefined;
       const errorCode = apiErr?.error;
 
-      if (errorCode === API_ERROR.INVALID_PASSPHRASE) {
+      if (errorCode === API_ERROR.VERIFIER_NOT_SET) {
+        setError(t("rotateKeyVerifierNotSetHint"));
+      } else if (errorCode === API_ERROR.INVALID_PASSPHRASE) {
         setError(tApi("invalidPassphrase"));
       } else if (errorCode === "RATE_LIMIT_EXCEEDED") {
         setError(tApi("rateLimitExceeded"));

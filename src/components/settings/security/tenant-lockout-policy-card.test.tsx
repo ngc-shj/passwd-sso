@@ -154,4 +154,41 @@ describe("TenantLockoutPolicyCard", () => {
     expect(await screen.findByTestId("recent-session-dialog")).toBeInTheDocument();
     expect(mockToast.error).not.toHaveBeenCalled();
   });
+
+  // The inputs strip non-digits, so a fractional value can only arrive through
+  // the loaded policy; the save-time check must still match the server's
+  // integer-only contract.
+  it("rejects a non-integer threshold on save without sending the PATCH", async () => {
+    setupGet({ lockoutThreshold1: 2.5 });
+    render(<TenantLockoutPolicyCard />);
+    const save = await screen.findByRole("button", { name: "lockoutPolicySave" });
+
+    const d1 = document.getElementById("lockout-duration-1") as HTMLInputElement;
+    fireEvent.change(d1, { target: { value: "15" } });
+    fireEvent.click(save);
+
+    expect(
+      await screen.findByText(
+        `lockoutThresholdRange:${JSON.stringify({ min: LOCKOUT_THRESHOLD_MIN, max: LOCKOUT_THRESHOLD_MAX })}`,
+      ),
+    ).toBeInTheDocument();
+    expect(mockFetch.mock.calls.some(([, init]) => (init as RequestInit | undefined)?.method === "PATCH")).toBe(false);
+  });
+
+  it("sends the PATCH when every loaded value is an in-range integer", async () => {
+    setupGet({ lockoutThreshold1: 3 });
+    render(<TenantLockoutPolicyCard />);
+    const save = await screen.findByRole("button", { name: "lockoutPolicySave" });
+
+    const d1 = document.getElementById("lockout-duration-1") as HTMLInputElement;
+    fireEvent.change(d1, { target: { value: "15" } });
+    fireEvent.click(save);
+
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("lockoutPolicySaved"));
+    const patch = mockFetch.mock.calls.find(([, init]) => (init as RequestInit | undefined)?.method === "PATCH");
+    expect(JSON.parse(String((patch?.[1] as RequestInit).body))).toMatchObject({
+      lockoutThreshold1: 3,
+      lockoutDuration1Minutes: 15,
+    });
+  });
 });

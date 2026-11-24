@@ -38,6 +38,9 @@ const refusal = (over: Record<string, unknown> = {}) =>
   }) as Parameters<typeof handleServerError>[0];
 const UNPARSED_LINE = '{"_logType":"rls.bypass_notice_unparsed"}\n';
 
+// What the pool will hand pg: an accepted config must reach it unchanged.
+const poolOptions = (pool: pg.Pool) => (pool as unknown as { options: pg.PoolConfig }).options;
+
 beforeEach(() => {
   mockWarn.mockReset();
   resetBypassNoticeRateLimit();
@@ -248,8 +251,13 @@ describe("createPool / createClient refuse to silence the reports", () => {
   });
 
   it("accepts connection-string options carrying backslash escapes", async () => {
-    const pool = createPool({ connectionString: "postgresql://u:p@localhost:5432/db?options=-c%20application_name%3Da%5C%20b" });
-    await pool.end();
+    const connectionString = "postgresql://u:p@localhost:5432/db?options=-c%20application_name%3Da%5C%20b";
+    const pool = createPool({ connectionString });
+    try {
+      expect(poolOptions(pool).connectionString).toBe(connectionString);
+    } finally {
+      await pool.end();
+    }
   });
 
   it("rejects a dashed client-min-messages in PGOPTIONS", () => {
@@ -322,22 +330,38 @@ describe("createPool / createClient refuse to silence the reports", () => {
     // The checks must not over-block: a boolean replication, an empty string
     // and an ordinary value carry no NUL.
     const pool = createPool({ connectionString: "postgresql://u:p@localhost:5432/db", ...extra });
-    await pool.end();
+    try {
+      expect(poolOptions(pool)).toMatchObject(extra);
+    } finally {
+      await pool.end();
+    }
   });
 
   it("accepts an ordinary application_name", async () => {
     const pool = createPool({ connectionString: "postgresql://u:p@localhost:5432/db", application_name: "passwd-sso worker 1" });
-    await pool.end();
+    try {
+      expect(poolOptions(pool).application_name).toBe("passwd-sso worker 1");
+    } finally {
+      await pool.end();
+    }
   });
 
   it("accepts other options carrying backslash escapes", async () => {
     const pool = createPool({ connectionString: "postgresql://u:p@localhost:5432/db", options: "-c application_name=a\\ b" });
-    await pool.end();
+    try {
+      expect(poolOptions(pool).options).toBe("-c application_name=a\\ b");
+    } finally {
+      await pool.end();
+    }
   });
 
   it("accepts other options", async () => {
     const pool = createPool({ connectionString: "postgresql://u:p@localhost:5432/db", options: "-c statement_timeout=5000" });
-    await pool.end();
+    try {
+      expect(poolOptions(pool).options).toBe("-c statement_timeout=5000");
+    } finally {
+      await pool.end();
+    }
   });
 });
 
@@ -514,6 +538,8 @@ describe("a sink that throws", () => {
       throw new Error("stderr closed");
     });
     expect(() => handleServerError(refusal())).not.toThrow();
+    // The throwing write was reached: the guard under test actually ran.
+    expect(write).toHaveBeenCalledTimes(1);
   });
 
   it("writes no such line when the sink works", () => {

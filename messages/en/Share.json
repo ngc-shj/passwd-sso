@@ -12,6 +12,7 @@
   "create": "Create Link",
   "createSuccess": "Share link created",
   "createError": "Failed to create share link",
+  "createdLinkUnavailable": "Share link created, but it could not be shown. Revoke it from the list below and create a new one.",
   "createAnother": "Create another link",
   "shareUrl": "Share URL",
   "existingLinks": "Existing Links",
@@ -110,6 +111,7 @@
   "sendDropzone": "Drop a file or click to browse",
   "sendMaxFileSize": "Max 10 MB",
   "sendCreateSuccess": "Send created",
+  "sendCreatedLinkUnavailable": "Send created, but its link could not be shown. Revoke it on the Sharing page and create a new one.",
   "newSend": "New Send",
   "newSendDesc": "Send text or a file securely via a temporary link.",
   "sendEncryptionNotice": "Sends are encrypted in transit and at rest on the server. This differs from vault entries, which use end-to-end encryption.",
@@ -143,5 +145,7 @@
   "unlock": "Unlock",
   "wrongPassword": "Incorrect password. Please try again.",
   "tooManyAttempts": "Too many attempts. Please wait and try again.",
+  "linkUnavailable": "This share link is no longer available.",
+  "verifyRetryLater": "The password could not be checked right now. Please try again later.",
   "contentLoadError": "Failed to load content. Please try again."
 }

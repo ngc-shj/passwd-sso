@@ -23,7 +23,6 @@ interface Grant {
   granteeEmail: string;
   status: EaStatusValue;
   waitDays: number;
-  token?: string;
   requestedAt: string | null;
   waitExpiresAt: string | null;
   createdAt: string;

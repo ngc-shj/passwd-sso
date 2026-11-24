@@ -8,7 +8,12 @@ vi.mock("@/lib/url-helpers", () => ({
   fetchApi: vi.fn(),
 }));
 
-import { TravelModeProvider, useTravelMode } from "@/hooks/use-travel-mode";
+import {
+  TravelModeProvider,
+  useTravelMode,
+  type TravelModeDisableResult,
+  type TravelModeEnableResult,
+} from "@/hooks/use-travel-mode";
 import { fetchApi } from "@/lib/url-helpers";
 
 const fetchApiMock = vi.mocked(fetchApi);
@@ -77,12 +82,12 @@ describe("useTravelMode", () => {
     const { result } = renderHook(() => useTravelMode(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    let ok = false;
+    let outcome: TravelModeEnableResult = { success: false };
     await act(async () => {
-      ok = await result.current.enable();
+      outcome = await result.current.enable();
     });
 
-    expect(ok).toBe(true);
+    expect(outcome).toEqual({ success: true });
     expect(fetchApiMock).toHaveBeenLastCalledWith(
       "/api/travel-mode/enable",
       expect.objectContaining({ method: "POST" }),
@@ -91,7 +96,64 @@ describe("useTravelMode", () => {
     expect(result.current.activatedAt).not.toBeNull();
   });
 
-  it("enable() returns false on non-ok response without throwing", async () => {
+  const unreadable = {
+    ok: true,
+    status: 200,
+    json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+  } as unknown as Response;
+
+  it("enable() reports success and turns travel mode on when the response body cannot be read", async () => {
+    fetchApiMock
+      .mockResolvedValueOnce(mockResponse({ active: false, activatedAt: null }))
+      .mockResolvedValueOnce(unreadable);
+
+    const { result } = renderHook(() => useTravelMode(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let outcome: TravelModeEnableResult = { success: false };
+    await act(async () => {
+      outcome = await result.current.enable();
+    });
+
+    expect(outcome).toEqual({ success: true });
+    expect(result.current.active).toBe(true);
+  });
+
+  it("disable() reports success and turns travel mode off when the response body cannot be read", async () => {
+    fetchApiMock
+      .mockResolvedValueOnce(mockResponse({ active: true, activatedAt: "now" }))
+      .mockResolvedValueOnce(unreadable);
+
+    const { result } = renderHook(() => useTravelMode(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let outcome: TravelModeDisableResult = { success: false };
+    await act(async () => {
+      outcome = await result.current.disable("verifier-hash");
+    });
+
+    expect(outcome).toEqual({ success: true });
+    expect(result.current.active).toBe(false);
+  });
+
+  it("enable() returns the route's error code on a refusal without throwing", async () => {
+    fetchApiMock
+      .mockResolvedValueOnce(mockResponse({ active: false, activatedAt: null }))
+      .mockResolvedValueOnce(mockResponse({ error: "UNAUTHORIZED" }, { ok: false, status: 401 }));
+
+    const { result } = renderHook(() => useTravelMode(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    let outcome: TravelModeEnableResult = { success: true };
+    await act(async () => {
+      outcome = await result.current.enable();
+    });
+
+    expect(outcome).toEqual({ success: false, error: "UNAUTHORIZED" });
+    expect(result.current.active).toBe(false);
+  });
+
+  it("enable() reports the HTTP status when the refusal carries no error code", async () => {
     fetchApiMock
       .mockResolvedValueOnce(mockResponse({ active: false, activatedAt: null }))
       .mockResolvedValueOnce(mockResponse({}, { ok: false, status: 500 }));
@@ -99,16 +161,16 @@ describe("useTravelMode", () => {
     const { result } = renderHook(() => useTravelMode(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    let ok = true;
+    let outcome: TravelModeEnableResult = { success: true };
     await act(async () => {
-      ok = await result.current.enable();
+      outcome = await result.current.enable();
     });
 
-    expect(ok).toBe(false);
+    expect(outcome).toEqual({ success: false, error: "HTTP 500" });
     expect(result.current.active).toBe(false);
   });
 
-  it("enable() returns false on network error", async () => {
+  it("enable() returns NETWORK_ERROR on a network failure", async () => {
     fetchApiMock
       .mockResolvedValueOnce(mockResponse({ active: false, activatedAt: null }))
       .mockRejectedValueOnce(new Error("offline"));
@@ -116,12 +178,12 @@ describe("useTravelMode", () => {
     const { result } = renderHook(() => useTravelMode(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    let ok = true;
+    let outcome: TravelModeEnableResult = { success: true };
     await act(async () => {
-      ok = await result.current.enable();
+      outcome = await result.current.enable();
     });
 
-    expect(ok).toBe(false);
+    expect(outcome).toEqual({ success: false, error: "NETWORK_ERROR" });
   });
 
   it("disable() returns success and clears active on 200", async () => {
@@ -132,7 +194,7 @@ describe("useTravelMode", () => {
     const { result } = renderHook(() => useTravelMode(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    let outcome: { success: boolean; error?: string } = { success: false };
+    let outcome: TravelModeDisableResult = { success: false };
     await act(async () => {
       outcome = await result.current.disable("verifier-hash");
     });
@@ -147,36 +209,51 @@ describe("useTravelMode", () => {
     expect(lastCall?.[1]?.body).toBe(JSON.stringify({ verifierHash: "verifier-hash" }));
   });
 
-  it("disable() maps 401 to INVALID_PASSPHRASE", async () => {
+  async function disableWith(response: Response) {
     fetchApiMock
       .mockResolvedValueOnce(mockResponse({ active: true, activatedAt: "now" }))
-      .mockResolvedValueOnce(mockResponse({ error: "x" }, { ok: false, status: 401 }));
+      .mockResolvedValueOnce(response);
 
     const { result } = renderHook(() => useTravelMode(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    let outcome: { success: boolean; error?: string } = { success: true };
-    await act(async () => {
-      outcome = await result.current.disable("bad");
-    });
-
-    expect(outcome).toEqual({ success: false, error: "INVALID_PASSPHRASE" });
-  });
-
-  it("disable() maps 403 to ACCOUNT_LOCKED", async () => {
-    fetchApiMock
-      .mockResolvedValueOnce(mockResponse({ active: true, activatedAt: "now" }))
-      .mockResolvedValueOnce(mockResponse({}, { ok: false, status: 403 }));
-
-    const { result } = renderHook(() => useTravelMode(), { wrapper });
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    let outcome: { success: boolean; error?: string } = { success: true };
+    let outcome: TravelModeDisableResult = { success: true };
     await act(async () => {
       outcome = await result.current.disable("v");
     });
+    return { outcome, result };
+  }
 
-    expect(outcome).toEqual({ success: false, error: "ACCOUNT_LOCKED" });
+  it("disable() reports a wrong passphrase as INVALID_PASSPHRASE", async () => {
+    const { outcome, result } = await disableWith(
+      mockResponse({ error: "INVALID_PASSPHRASE" }, { ok: false, status: 401 }),
+    );
+
+    expect(outcome).toEqual({ success: false, error: "INVALID_PASSPHRASE" });
+    expect(result.current.active).toBe(true);
+  });
+
+  it("disable() reports a 401 for an expired session as UNAUTHORIZED, not a wrong passphrase", async () => {
+    const { outcome } = await disableWith(
+      mockResponse({ error: "UNAUTHORIZED" }, { ok: false, status: 401 }),
+    );
+
+    expect(outcome).toEqual({ success: false, error: "UNAUTHORIZED" });
+  });
+
+  it("disable() carries lockedUntil with ACCOUNT_LOCKED", async () => {
+    const lockedUntil = "2026-11-22T12:00:00.000Z";
+    const { outcome } = await disableWith(
+      mockResponse({ error: "ACCOUNT_LOCKED", lockedUntil }, { ok: false, status: 403 }),
+    );
+
+    expect(outcome).toEqual({ success: false, error: "ACCOUNT_LOCKED", lockedUntil });
+  });
+
+  it("disable() falls back to the HTTP status when the error body has no code", async () => {
+    const { outcome } = await disableWith(mockResponse({}, { ok: false, status: 502 }));
+
+    expect(outcome).toEqual({ success: false, error: "HTTP 502" });
   });
 
   it("disable() returns NETWORK_ERROR when fetch rejects", async () => {
@@ -187,7 +264,7 @@ describe("useTravelMode", () => {
     const { result } = renderHook(() => useTravelMode(), { wrapper });
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    let outcome: { success: boolean; error?: string } = { success: true };
+    let outcome: TravelModeDisableResult = { success: true };
     await act(async () => {
       outcome = await result.current.disable("v");
     });

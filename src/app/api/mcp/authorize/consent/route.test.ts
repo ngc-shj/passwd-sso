@@ -116,6 +116,15 @@ vi.mock("@/lib/auth/session/recent-current-auth-method", () => ({
   requireRecentCurrentAuthMethod: mockRequireRecentCurrentAuthMethod,
 }));
 
+// The authorize GET (imported below to follow the consent bounce) rate-limits
+// by IP at module load; a limiter that always admits keeps Redis out of it.
+vi.mock("@/lib/security/rate-limit", () => ({
+  createRateLimiter: () => ({
+    check: async () => ({ allowed: true }),
+    clear: async () => {},
+  }),
+}));
+
 vi.mock("@/lib/url-helpers", () => ({
   serverAppUrl: (path: string) => `https://example.test${path}`,
   getAppOrigin: () => "https://example.test",
@@ -130,10 +139,13 @@ vi.mock("@/lib/auth/policy/passkey-enforcement", async (importOriginal) => {
 });
 
 import { POST } from "@/app/api/mcp/authorize/consent/route";
+import { GET as authorizeGET } from "@/app/api/mcp/authorize/route";
+import { NextRequest } from "next/server";
 import { Prisma } from "@prisma/client";
 import { _resetPasskeyAuditForTests } from "@/lib/auth/policy/passkey-enforcement";
 import { MCP_SCOPES } from "@/lib/constants/auth/mcp";
 import { API_PATH } from "@/lib/constants/auth/api-path";
+import { AUDIT_ACTION } from "@/lib/constants/audit/audit";
 import { PKCE_CODE_CHALLENGE_SCHEMA } from "@/lib/validations/common.server";
 import { UserAuthRevokedError } from "@/lib/auth/session/user-auth-serialization";
 import { TEST_SESSION_TOKEN } from "@/__tests__/helpers/fixtures";
@@ -190,6 +202,7 @@ const VALID_CODE_CHALLENGE = "A".repeat(43);
 
 const VALID_FORM_FIELDS = {
   client_id: "mcpc_testclient",
+  expected_user_id: VALID_SESSION.user.id,
   redirect_uri: "https://example.com/callback",
   scope: "credentials:list credentials:use",
   code_challenge: VALID_CODE_CHALLENGE,
@@ -296,6 +309,161 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(url.searchParams.get("code")).toBe("auth-code-abc123");
     expect(url.searchParams.get("state")).toBe("random-state-value");
     expect(url.searchParams.has("error")).toBe(false);
+  });
+
+  // S8-3 / F9-1: the consent form is a native POST and cannot carry the
+  // expected-user header, so it echoes the user the page was rendered for. A
+  // page rendered for A and submitted after B signed in elsewhere must change
+  // nothing on B's account, and must not strand the browser on a JSON page: it
+  // is bounced to the authorize GET, which renders consent for B. Each refusal
+  // arm arranges an unclaimed DCR client, so a request that got past the
+  // binding would claim it as well as mint.
+  describe("expected-user binding", () => {
+    // Persistent rather than Once: the stale-session arm reads the client too,
+    // and an unconsumed Once would leak into the next test.
+    const arrangeUnclaimed = () =>
+      mockFindFirst.mockResolvedValue({ ...VALID_CLIENT, isDcr: true, tenantId: null });
+    const consentAs = (fields: Record<string, string>) =>
+      POST(
+        createFormRequest("http://localhost/api/mcp/authorize/consent", fields) as unknown as import("next/server").NextRequest,
+      );
+    const expectNothingWritten = () => {
+      expect(mockCreateAuthorizationCode).not.toHaveBeenCalled();
+      expect(mockMcpClientUpdateMany).not.toHaveBeenCalled();
+      expect(mockTxDelete).not.toHaveBeenCalled();
+      expect(mockLogAudit).not.toHaveBeenCalled();
+    };
+    const expectAuthorizeBounce = (res: Response, fields: Record<string, string>) => {
+      expect(res.status).toBe(303);
+      const url = new URL(res.headers.get("location") ?? "");
+      expect(url.origin).toBe("https://example.test");
+      expect(url.pathname).toBe(API_PATH.MCP_AUTHORIZE);
+      expect(url.searchParams.get("client_id")).toBe(fields.client_id);
+      expect(url.searchParams.get("redirect_uri")).toBe(fields.redirect_uri);
+      expect(url.searchParams.get("response_type")).toBe("code");
+      expect(url.searchParams.get("state")).toBe(fields.state);
+      expect(url.searchParams.get("code_challenge")).toBe(fields.code_challenge ?? null);
+      expect(url.searchParams.get("code_challenge_method")).toBe(fields.code_challenge_method ?? null);
+      expect(url.searchParams.get("scope")).toBe(fields.scope ?? null);
+      // Nothing of the client's redirect_uri leaks into the bounce target.
+      expect(url.searchParams.get("code")).toBeNull();
+      expect(url.searchParams.get("error")).toBeNull();
+    };
+
+    it("mints a code when the form names the session's user", async () => {
+      arrangeUnclaimed();
+      const res = await consentAs(VALID_FORM_FIELDS);
+
+      expect(res.status).toBe(302);
+      expect(new URL(res.headers.get("location") ?? "").searchParams.get("code")).toBe("auth-code-abc123");
+      expect(mockCreateAuthorizationCode).toHaveBeenCalledWith(
+        expect.objectContaining({ userId: VALID_SESSION.user.id }),
+      );
+    });
+
+    it("bounces an Allow rendered for another user to the authorize GET: no claim, no code, no audit", async () => {
+      arrangeUnclaimed();
+      const fields = { ...VALID_FORM_FIELDS, expected_user_id: "user-the-page-was-for" };
+      const res = await consentAs(fields);
+
+      expectAuthorizeBounce(res, fields);
+      expectNothingWritten();
+    });
+
+    it("bounces an Allow that names no user to the authorize GET", async () => {
+      arrangeUnclaimed();
+      const { expected_user_id: _removed, ...fields } = VALID_FORM_FIELDS;
+      const res = await consentAs(fields);
+
+      expectAuthorizeBounce(res, fields);
+      expectNothingWritten();
+    });
+
+    // What consent-form.tsx posts on Deny: the Allow fields plus action=deny.
+    const denyFields = (expectedUser: string) => ({
+      ...VALID_FORM_FIELDS,
+      action: "deny",
+      expected_user_id: expectedUser,
+    });
+
+    it("bounces a Deny rendered for another user: no denial recorded, no redirect to the client", async () => {
+      arrangeUnclaimed();
+      const fields = denyFields("user-the-page-was-for");
+      const res = await consentAs(fields);
+
+      expectAuthorizeBounce(res, fields);
+      expectNothingWritten();
+    });
+
+    // F10-1: the bounce is only a recovery if the authorize GET accepts it.
+    // Followed through the real GET handler (not a copy of its checks), it must
+    // reach the consent page rather than its JSON 400.
+    it("bounces a Deny for another user to a URL the authorize GET forwards to consent", async () => {
+      arrangeUnclaimed();
+      const bounce = await consentAs(denyFields("user-the-page-was-for"));
+      const bounced = bounce.headers.get("location") ?? "";
+
+      const res = await authorizeGET(new NextRequest(bounced));
+
+      expect(res.status).toBe(307);
+      const consent = new URL(res.headers.get("location") ?? "");
+      expect(consent.pathname).toMatch(/^\/[a-z]{2}\/mcp\/authorize$/);
+      expect(consent.searchParams.get("client_id")).toBe(VALID_FORM_FIELDS.client_id);
+      expect(consent.searchParams.get("code_challenge")).toBe(VALID_FORM_FIELDS.code_challenge);
+      expect(consent.searchParams.get("scope")).toBe(VALID_FORM_FIELDS.scope);
+    });
+
+    it("bounces a Deny on a stale step-up with the authorization-request parameters", async () => {
+      arrangeUnclaimed();
+      mockRequireRecentCurrentAuthMethod.mockResolvedValue(Response.json(
+        { error: "SESSION_STEP_UP_REQUIRED" },
+        { status: 403 },
+      ));
+      const fields = denyFields(VALID_SESSION.user.id);
+      const res = await consentAs(fields);
+
+      expectAuthorizeBounce(res, fields);
+      expectNothingWritten();
+    });
+
+    it("bounces a mismatch on a stale session the same way", async () => {
+      arrangeUnclaimed();
+      mockRequireRecentCurrentAuthMethod.mockResolvedValue(Response.json(
+        { error: "SESSION_STEP_UP_REQUIRED" },
+        { status: 403 },
+      ));
+      const fields = { ...VALID_FORM_FIELDS, expected_user_id: "user-the-page-was-for" };
+      const res = await consentAs(fields);
+
+      expectAuthorizeBounce(res, fields);
+      expectNothingWritten();
+    });
+
+    // The bounce echoes client_id and redirect_uri into a self-origin URL, so
+    // it runs only once both are validated: an unknown client or an
+    // unregistered redirect_uri keeps its own answer.
+    it("keeps invalid_client for an unknown client on a mismatch", async () => {
+      mockFindFirst.mockResolvedValue(null);
+      const res = await consentAs({ ...VALID_FORM_FIELDS, expected_user_id: "user-the-page-was-for" });
+
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_client");
+      expectNothingWritten();
+    });
+
+    it("keeps invalid_request for an unregistered redirect_uri on a mismatch", async () => {
+      arrangeUnclaimed();
+      const res = await consentAs({
+        ...VALID_FORM_FIELDS,
+        expected_user_id: "user-the-page-was-for",
+        redirect_uri: "https://attacker.example/callback",
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.headers.get("location")).toBeNull();
+      expect((await res.json()).error).toBe("invalid_request");
+      expectNothingWritten();
+    });
   });
 
   it("returns 401 when not authenticated", async () => {
@@ -650,6 +818,7 @@ describe("POST /api/mcp/authorize/consent", () => {
       {
         action: "deny",
         client_id: "mcpc_testclient",
+        expected_user_id: VALID_SESSION.user.id,
         redirect_uri: "https://example.com/callback",
         state: "random-state-value",
         code_challenge: "too-short",
@@ -879,14 +1048,10 @@ describe("POST /api/mcp/authorize/consent", () => {
   });
 
   it("redirects with error=access_denied and calls logAuditAsync on deny action", async () => {
+    // The fields consent-form.tsx posts on Deny.
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",
-      {
-        action: "deny",
-        client_id: "mcpc_testclient",
-        redirect_uri: "https://example.com/callback",
-        state: "random-state-value",
-      },
+      { ...VALID_FORM_FIELDS, action: "deny" },
     );
     const res = await POST(req as unknown as import("next/server").NextRequest);
 
@@ -894,10 +1059,15 @@ describe("POST /api/mcp/authorize/consent", () => {
     const location = res.headers.get("location");
     expect(location).toBeTruthy();
     const url = new URL(location!);
+    expect(url.origin + url.pathname).toBe("https://example.com/callback");
     expect(url.searchParams.get("error")).toBe("access_denied");
     expect(url.searchParams.get("state")).toBe("random-state-value");
+    expect(url.searchParams.get("code")).toBeNull();
 
     expect(mockLogAudit).toHaveBeenCalledOnce();
+    expect(mockLogAudit).toHaveBeenCalledWith(
+      expect.objectContaining({ action: AUDIT_ACTION.MCP_CONSENT_DENY }),
+    );
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         userId: VALID_SESSION.user.id,
@@ -927,7 +1097,7 @@ describe("POST /api/mcp/authorize/consent", () => {
 
     const req = createFormRequest(
       "http://localhost/api/mcp/authorize/consent",
-      VALID_FORM_FIELDS,
+      { ...VALID_FORM_FIELDS, expected_user_id: userBSession.user.id },
     );
     const res = await POST(req as unknown as import("next/server").NextRequest);
 

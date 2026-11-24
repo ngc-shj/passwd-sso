@@ -113,6 +113,23 @@ describe("rate-limit fail-closed audit emission (integration)", () => {
   it("pre-auth case (tenantId=null) does NOT write a row", async () => {
     const emitRateLimitFailClosed = await importEmitter();
 
+    // Across ALL tenants, since a row the emit wrongly wrote has no tenant of
+    // this test's to be found under; as a delta, since another file's emit
+    // with this scope may already be there.
+    const countScoped = async () => {
+      const rows = await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        return tx.$queryRawUnsafe<Array<{ n: bigint }>>(
+          `SELECT COUNT(*)::bigint AS n
+           FROM audit_outbox
+           WHERE payload->>'action' = 'RATE_LIMIT_FAIL_CLOSED'
+             AND payload->'metadata'->>'scope' = 'auth.passkey_options'`,
+        );
+      });
+      return Number(rows[0].n);
+    };
+    const before = await countScoped();
+
     await emitRateLimitFailClosed({
       req: makeReq("203.0.113.60"),
       scope: "auth.passkey_options",
@@ -120,20 +137,7 @@ describe("rate-limit fail-closed audit emission (integration)", () => {
       tenantId: null,
     });
 
-    // Query across ALL tenants for the action — there should be zero rows
-    // newly inserted with this scope. (Other tests may have inserted rows
-    // with other scopes; we filter narrowly.)
-    const rows = await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<Array<{ n: bigint }>>(
-        `SELECT COUNT(*)::bigint AS n
-         FROM audit_outbox
-         WHERE payload->>'action' = 'RATE_LIMIT_FAIL_CLOSED'
-           AND payload->'metadata'->>'scope' = 'auth.passkey_options'
-           AND created_at > NOW() - INTERVAL '1 minute'`,
-      );
-    });
-    expect(Number(rows[0].n)).toBe(0);
+    expect(await countScoped()).toBe(before);
   });
 
   it("uses ACTOR_TYPE.ANONYMOUS when userId is null but tenantId resolves", async () => {

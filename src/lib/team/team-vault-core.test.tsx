@@ -88,6 +88,8 @@ describe("team-vault-core", () => {
   function makeWrapper(options?: {
     getBytes?: () => Uint8Array | null;
     getUserId?: () => string | null;
+    getLockEpoch?: () => number;
+    lockedSince?: (epoch: number) => boolean;
     vaultUnlocked?: boolean;
     pollingSuspended?: boolean;
   }) {
@@ -96,6 +98,8 @@ describe("team-vault-core", () => {
         <TeamVaultProvider
           getEcdhPrivateKeyBytes={options?.getBytes ?? (() => new Uint8Array([1, 2, 3, 4]))}
           getUserId={options?.getUserId ?? (() => "user-1")}
+          getLockEpoch={options?.getLockEpoch ?? (() => 0)}
+          lockedSince={options?.lockedSince ?? (() => false)}
           vaultUnlocked={options?.vaultUnlocked ?? false}
           pollingSuspended={options?.pollingSuspended ?? false}
         >
@@ -543,6 +547,8 @@ describe("team-vault-core", () => {
           <TeamVaultProvider
             getEcdhPrivateKeyBytes={() => new Uint8Array([1, 2, 3, 4])}
             getUserId={() => "user-1"}
+            getLockEpoch={() => 0}
+            lockedSince={() => false}
             vaultUnlocked={unlocked}
             pollingSuspended={true}
           >
@@ -781,6 +787,88 @@ describe("team-vault-core", () => {
 
     expect(removeDocSpy).toHaveBeenCalledWith("visibilitychange", expect.any(Function));
     expect(removeWinSpy).toHaveBeenCalledWith("online", expect.any(Function));
+  });
+
+  // The vault's keys were dropped (a lock, a session end or user switch)
+  // while a distribution run was between requests: nothing more is sent.
+  describe("distribution stops once the vault lock epoch moves", () => {
+    function setup(moveEpochOnMemberKey: boolean, confirmResponse?: () => Response) {
+      let epoch = 7;
+      mockUnwrapTeamKey.mockResolvedValue(new Uint8Array([3, 3, 3, 3]));
+      mockCreateTeamKeyEscrow.mockResolvedValue({
+        encryptedTeamKey: "wrapped", teamKeyIv: "iv", teamKeyAuthTag: "tag",
+        ephemeralPublicKey: "pub", hkdfSalt: "salt", keyVersion: 4, wrapVersion: 1,
+        recipientKeyFingerprint: "fp",
+      });
+      const fetchMock = vi.fn(async (url: string) => {
+        if (url === "/api/teams/pending-key-distributions") {
+          return {
+            ok: true,
+            json: async () => [
+              { memberId: "m-1", teamId: "team-1", userId: "user-2", ecdhPublicKey: "pub-2", teamKeyVersion: 4 },
+              { memberId: "m-2", teamId: "team-2", userId: "user-3", ecdhPublicKey: "pub-3", teamKeyVersion: 4 },
+            ],
+          };
+        }
+        if (url.endsWith("/member-key")) {
+          if (moveEpochOnMemberKey) epoch += 1;
+          return {
+            ok: true,
+            json: async () => ({
+              encryptedTeamKey: "c", teamKeyIv: "iv", teamKeyAuthTag: "tag",
+              ephemeralPublicKey: "epk", hkdfSalt: "salt", keyVersion: 4, wrapVersion: 1,
+            }),
+          };
+        }
+        if (confirmResponse) return confirmResponse();
+        return { ok: true, json: async () => ({}) };
+      });
+      globalThis.fetch = fetchMock as unknown as typeof fetch;
+      renderHook(() => useTeamVault(), {
+        wrapper: makeWrapper({
+          getBytes: () => new Uint8Array([5, 6, 7, 8]),
+          getLockEpoch: () => epoch,
+          lockedSince: (e) => e !== epoch,
+          vaultUnlocked: true,
+        }),
+      });
+      return fetchMock;
+    }
+
+    async function flush() {
+      await act(async () => {
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+      });
+    }
+
+    it("sends no confirm-key and reads no further team once the epoch moved mid-run", async () => {
+      const fetchMock = setup(true);
+      await flush();
+      const urls = fetchMock.mock.calls.map((c) => c[0]);
+      expect(urls).toContain("/api/teams/team-1/member-key");
+      expect(urls.filter((u) => u.endsWith("/confirm-key"))).toEqual([]);
+      expect(urls).not.toContain("/api/teams/team-2/member-key");
+    });
+
+    it("stops at a session change instead of trying the remaining teams", async () => {
+      const fetchMock = setup(false, () =>
+        new Response(JSON.stringify({ error: "SESSION_CHANGED" }), { status: 409 }),
+      );
+      await flush();
+      const urls = fetchMock.mock.calls.map((c) => c[0]);
+      expect(urls).toContain("/api/teams/team-1/members/m-1/confirm-key");
+      expect(urls).not.toContain("/api/teams/team-2/member-key");
+    });
+
+    it("confirms every team's pending member while the epoch stays put", async () => {
+      const fetchMock = setup(false);
+      await flush();
+      const urls = fetchMock.mock.calls.map((c) => c[0]);
+      expect(urls.filter((u) => u.endsWith("/confirm-key"))).toEqual([
+        "/api/teams/team-1/members/m-1/confirm-key",
+        "/api/teams/team-2/members/m-2/confirm-key",
+      ]);
+    });
   });
 
   // A passkey-blocked or degraded session is refused by the proxy on every

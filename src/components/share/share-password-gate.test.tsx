@@ -17,10 +17,6 @@ vi.mock("@/lib/url-helpers", () => ({
   withBasePath: (p: string) => p,
 }));
 
-vi.mock("@/lib/http/api-error-codes", () => ({
-  apiErrorToI18nKey: (code: string) => code,
-}));
-
 import { SharePasswordGate } from "./share-password-gate";
 
 const SENTINEL_NOT_A_SECRET_ZJYK = "ZJYKZJYKZJYK_pwgate_secret";
@@ -70,10 +66,53 @@ describe("SharePasswordGate", () => {
     );
   });
 
-  it("§Sec-2: 401-style failure renders wrongPassword key only (sentinel never echoed)", async () => {
+  it("masks the pasted access password", () => {
+    render(<SharePasswordGate token="t1" onVerified={vi.fn()} />);
+    const input = screen.getByPlaceholderText("pasteOnly") as HTMLInputElement;
+    fireEvent.paste(input, pasteEvent("correct-password"));
+
+    expect(input).toHaveValue("correct-password");
+    expect(input).toHaveAttribute("type", "password");
+  });
+
+  it("clears the access password once it is verified", async () => {
+    const onVerified = vi.fn();
+    mockFetch.mockResolvedValueOnce({
+      ok: true,
+      json: () => Promise.resolve({ accessToken: "at-1" }),
+    } as unknown as Response);
+    render(<SharePasswordGate token="t1" onVerified={onVerified} />);
+    const input = screen.getByPlaceholderText("pasteOnly") as HTMLInputElement;
+    fireEvent.paste(input, pasteEvent("correct-password"));
+    expect(input).toHaveValue("correct-password");
+
+    fireEvent.click(screen.getByRole("button", { name: /unlock/ }));
+
+    await waitFor(() => expect(onVerified).toHaveBeenCalledWith("at-1"));
+    expect(input).toHaveValue("");
+  });
+
+  it("keeps a password the server could not check, so the visitor can retry it", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
-      json: () => Promise.resolve({ error: "INVALID_PASSWORD" }),
+      status: 503,
+      json: () => Promise.resolve({ error: "SERVICE_UNAVAILABLE" }),
+    } as unknown as Response);
+    render(<SharePasswordGate token="t1" onVerified={vi.fn()} />);
+    const input = screen.getByPlaceholderText("pasteOnly") as HTMLInputElement;
+    fireEvent.paste(input, pasteEvent("correct-password"));
+
+    fireEvent.click(screen.getByRole("button", { name: /unlock/ }));
+
+    await waitFor(() => expect(screen.getByText("verifyRetryLater")).toBeInTheDocument());
+    expect(input).toHaveValue("correct-password");
+  });
+
+  it("§Sec-2: a refused password renders wrongPassword key only (sentinel never echoed)", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 403,
+      json: () => Promise.resolve({ error: "SHARE_PASSWORD_INCORRECT" }),
     } as unknown as Response);
 
     render(<SharePasswordGate token="t1" onVerified={vi.fn()} />);
@@ -89,6 +128,7 @@ describe("SharePasswordGate", () => {
   it("§Sec-2: 429 (RATE_LIMIT_EXCEEDED) renders tooManyAttempts and never echoes sentinel", async () => {
     mockFetch.mockResolvedValueOnce({
       ok: false,
+      status: 429,
       json: () => Promise.resolve({ error: "RATE_LIMIT_EXCEEDED" }),
     } as unknown as Response);
 
@@ -107,7 +147,8 @@ describe("SharePasswordGate", () => {
     for (let i = 0; i < SHARE_PASSWORD_MAX_ATTEMPTS; i++) {
       mockFetch.mockResolvedValueOnce({
         ok: false,
-        json: () => Promise.resolve({ error: "INVALID_PASSWORD" }),
+        status: 403,
+        json: () => Promise.resolve({ error: "SHARE_PASSWORD_INCORRECT" }),
       } as unknown as Response);
     }
 
@@ -122,5 +163,66 @@ describe("SharePasswordGate", () => {
       await waitFor(() => expect(screen.getByText("wrongPassword")).toBeInTheDocument());
     }
     expect(btn).toBeDisabled();
+  });
+  async function submitUntilSettled(times: number, expectedText: string) {
+    render(<SharePasswordGate token="t1" onVerified={vi.fn()} />);
+    const input = screen.getByPlaceholderText("pasteOnly");
+    const btn = screen.getByRole("button", { name: /unlock/ });
+    for (let i = 0; i < times; i++) {
+      fireEvent.paste(input, pasteEvent(`attempt-${i}`));
+      fireEvent.click(btn);
+      await waitFor(() => expect(mockFetch).toHaveBeenCalledTimes(i + 1));
+      await waitFor(() => expect(screen.getByText(expectedText)).toBeInTheDocument());
+      await waitFor(() => expect(btn).toBeEnabled());
+    }
+    return btn;
+  }
+
+  it("tells the visitor a 404 link is no longer available, not that the password is wrong", async () => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status: 404,
+      json: () => Promise.resolve({ error: "NOT_FOUND" }),
+    } as unknown as Response);
+
+    await submitUntilSettled(1, "linkUnavailable");
+
+    expect(screen.queryByText("wrongPassword")).not.toBeInTheDocument();
+  });
+
+  it.each([503, 500])("asks the visitor to retry later on a %i, not that the password is wrong", async (status) => {
+    mockFetch.mockResolvedValueOnce({
+      ok: false,
+      status,
+      json: () => Promise.resolve({ error: status === 503 ? "SERVICE_UNAVAILABLE" : "INTERNAL_ERROR" }),
+    } as unknown as Response);
+
+    await submitUntilSettled(1, "verifyRetryLater");
+
+    expect(screen.queryByText("wrongPassword")).not.toBeInTheDocument();
+  });
+
+  it("asks the visitor to retry later when the request itself fails", async () => {
+    mockFetch.mockRejectedValueOnce(new Error("offline"));
+
+    await submitUntilSettled(1, "verifyRetryLater");
+  });
+
+  it.each([
+    [404, "NOT_FOUND", "linkUnavailable"],
+    [503, "SERVICE_UNAVAILABLE", "verifyRetryLater"],
+  ])("does not count a %i toward the attempt cap", async (status, error, expectedText) => {
+    for (let i = 0; i < SHARE_PASSWORD_MAX_ATTEMPTS; i++) {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status,
+        json: () => Promise.resolve({ error }),
+      } as unknown as Response);
+    }
+
+    const btn = await submitUntilSettled(SHARE_PASSWORD_MAX_ATTEMPTS, expectedText);
+
+    expect(btn).toBeEnabled();
+    expect(screen.queryByText("tooManyAttempts")).not.toBeInTheDocument();
   });
 });

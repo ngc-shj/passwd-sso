@@ -47,7 +47,8 @@ import {
   OPERATOR_TOKEN_NAME_MAX_LENGTH,
 } from "@/lib/constants/auth/operator-token";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { passkeyReauthDeadEndKey } from "@/lib/auth/webauthn/passkey-reauth-dead-end";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
 import { RecentSessionRequiredDialog } from "@/components/auth/recent-session-required-dialog";
@@ -78,14 +79,11 @@ interface OperatorToken {
   createdBy: { id: string; name: string | null; email: string | null } | null;
 }
 
-interface CreatedToken {
-  id: string;
-  prefix: string;
-  plaintext: string;
-  name: string;
-  scope: string;
-  expiresAt: string;
-  createdAt: string;
+/** The one-time plaintext from a create response, or null when it is not there. */
+function readPlaintext(data: unknown): string | null {
+  if (typeof data !== "object" || data === null || !("plaintext" in data)) return null;
+  const { plaintext } = data;
+  return typeof plaintext === "string" && plaintext !== "" ? plaintext : null;
 }
 
 export function OperatorTokenCard() {
@@ -97,7 +95,9 @@ export function OperatorTokenCard() {
   const [tokens, setTokens] = useState<OperatorToken[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(false);
-  const [createdToken, setCreatedToken] = useState<CreatedToken | null>(null);
+  const [createdPlaintext, setCreatedPlaintext] = useState<string | null>(null);
+  // The token was created but its one-time plaintext could not be read.
+  const [plaintextUnavailable, setPlaintextUnavailable] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [tokenName, setTokenName] = useState("");
   const [expiresInDays, setExpiresInDays] = useState<string>(
@@ -146,9 +146,26 @@ export function OperatorTokenCard() {
 
   const closeCreateDialog = () => {
     setCreateOpen(false);
-    setCreatedToken(null);
+    setCreatedPlaintext(null);
+    setPlaintextUnavailable(false);
     setTokenName("");
     setExpiresInDays(String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS));
+  };
+
+  // The token exists once the create response is ok: nothing here may be
+  // reported as a failed creation.
+  const completeCreate = async (res: Response) => {
+    setTokenName("");
+    setExpiresInDays(String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS));
+    fetchTokens();
+    const plaintext = readPlaintext(await parseJsonBodyOnce(res));
+    if (plaintext) {
+      setCreatedPlaintext(plaintext);
+      toast.success(t("tokenCreated"));
+    } else {
+      // The success toast tells the user to copy the token; there is none.
+      setPlaintextUnavailable(true);
+    }
   };
 
   const handleCreate = async () => {
@@ -157,27 +174,20 @@ export function OperatorTokenCard() {
     try {
       const res = await createToken();
       if (res.ok) {
-        const data = (await res.json()) as CreatedToken;
-        setCreatedToken(data);
-        setTokenName("");
-        setExpiresInDays(String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS));
-        toast.success(t("tokenCreated"));
-        fetchTokens();
+        await completeCreate(res);
       } else {
-        const errBody = (await res.json().catch(() => ({}))) as {
-          error?: string;
-        };
-        if (errBody.error === API_ERROR.OPERATOR_TOKEN_STALE_SESSION) {
+        const errBody = await readApiErrorBody(res);
+        if (errBody?.error === API_ERROR.OPERATOR_TOKEN_STALE_SESSION) {
           setReauthError(null);
           if (await canUsePasskeyRecovery()) {
             setReauthOpen(true);
           } else {
             setRecentSessionOpen(true);
           }
-        } else if (errBody.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
+        } else if (errBody?.error === API_ERROR.OPERATOR_TOKEN_LIMIT_EXCEEDED) {
           toast.error(t("limitExceeded"));
         } else {
-          const apiKey = tokenMintApiErrorKey(errBody.error);
+          const apiKey = tokenMintApiErrorKey(errBody?.error);
           toast.error(apiKey ? tApi(apiKey) : t("networkError"));
         }
       }
@@ -194,20 +204,14 @@ export function OperatorTokenCard() {
     try {
       const result = await reauthenticateWithPasskey();
       if (!result.ok) {
-        // Neither code can ever be resolved by retrying the ceremony (no
-        // binding, the bound credential is gone, or the wrong key was
-        // presented) — staying in this dialog would strand the user, so
-        // route them to a fresh sign-in instead, same as the retry path
-        // below does when it hits a second stale-session response.
-        if (
-          result.error === API_ERROR.PASSKEY_REAUTH_UNAVAILABLE ||
-          result.error === API_ERROR.PASSKEY_REAUTH_CREDENTIAL_MISMATCH
-        ) {
-          toast.error(
-            result.error === API_ERROR.PASSKEY_REAUTH_UNAVAILABLE
-              ? tAuth("reauthUnavailable")
-              : tAuth("reauthCredentialMismatch"),
-          );
+        // None of these can ever be resolved by retrying the ceremony (the
+        // session expired, has no binding, the bound credential is gone, or
+        // the wrong key was presented) — staying in this dialog would strand
+        // the user, so route them to a fresh sign-in instead, same as the
+        // retry path below does when it hits a second stale-session response.
+        const deadEndKey = passkeyReauthDeadEndKey(result.error);
+        if (deadEndKey) {
+          toast.error(tAuth(deadEndKey));
           setReauthOpen(false);
           setRecentSessionOpen(true);
           return;
@@ -239,13 +243,8 @@ export function OperatorTokenCard() {
         return;
       }
 
-      const data = (await retryRes.json()) as CreatedToken;
-      setCreatedToken(data);
-      setTokenName("");
-      setExpiresInDays(String(OPERATOR_TOKEN_DEFAULT_EXPIRES_DAYS));
       setReauthOpen(false);
-      toast.success(t("tokenCreated"));
-      fetchTokens();
+      await completeCreate(retryRes);
     } finally {
       setReauthenticating(false);
     }
@@ -431,20 +430,27 @@ export function OperatorTokenCard() {
             <DialogDescription>{t("createTokenDescription")}</DialogDescription>
           </DialogHeader>
 
-          {createdToken ? (
+          {createdPlaintext ? (
             <div className="space-y-4 py-2">
               <div className="space-y-2">
                 <Label className="text-sm font-medium">{t("tokenCreated")}</Label>
                 <div className="flex items-center gap-2">
                   <Input
-                    value={createdToken.plaintext}
+                    value={createdPlaintext}
                     readOnly
                     className="font-mono text-xs"
                   />
-                  <CopyButton getValue={() => createdToken.plaintext} />
+                  <CopyButton getValue={() => createdPlaintext} />
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">{t("usageHint")}</p>
+              <Button variant="outline" size="sm" onClick={closeCreateDialog}>
+                OK
+              </Button>
+            </div>
+          ) : plaintextUnavailable ? (
+            <div className="space-y-4 py-2">
+              <p role="alert" className="text-sm">{t("tokenCreatedUnavailable")}</p>
               <Button variant="outline" size="sm" onClick={closeCreateDialog}>
                 OK
               </Button>

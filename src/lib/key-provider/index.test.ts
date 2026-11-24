@@ -163,13 +163,15 @@ describe("key-provider index", () => {
     it("lazy-initializes EnvKeyProvider when KEY_PROVIDER is env", () => {
       vi.stubEnv("KEY_PROVIDER", "env");
       const provider = getKeyProviderSync();
-      expect(provider).toBeDefined();
+      expect(provider.name).toBe("env");
+      expect(getKeyProviderSync()).toBe(provider);
     });
 
     it("lazy-initializes EnvKeyProvider when KEY_PROVIDER is unset", () => {
       delete process.env.KEY_PROVIDER;
       const provider = getKeyProviderSync();
-      expect(provider).toBeDefined();
+      expect(provider.name).toBe("env");
+      expect(getKeyProviderSync()).toBe(provider);
     });
 
     it("throws when called before getKeyProvider for cloud providers", () => {
@@ -200,10 +202,11 @@ describe("key-provider index", () => {
 
     it("causes getKeyProviderSync to lazy-reinitialize for env provider after reset", async () => {
       vi.stubEnv("KEY_PROVIDER", "env");
-      await getKeyProvider();
+      const before = await getKeyProvider();
       _resetKeyProvider();
       const provider = getKeyProviderSync();
-      expect(provider).toBeDefined();
+      expect(provider.name).toBe("env");
+      expect(provider).not.toBe(before);
     });
 
     it("causes getKeyProviderSync to throw after reset for cloud provider", async () => {

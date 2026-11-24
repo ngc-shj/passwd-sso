@@ -3,8 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import type { ReactNode } from "react";
 import { fetchApi } from "@/lib/url-helpers";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 
 interface TravelModeState {
   active: boolean;
@@ -13,13 +12,33 @@ interface TravelModeState {
   error: string | null;
 }
 
+/**
+ * `error` is the route's error code (or NETWORK_ERROR / `HTTP <status>` when
+ * the body carries none).
+ */
+export interface TravelModeEnableResult {
+  success: boolean;
+  error?: string;
+}
+
+/** `lockedUntil` accompanies ACCOUNT_LOCKED. */
+export interface TravelModeDisableResult extends TravelModeEnableResult {
+  lockedUntil?: string | null;
+}
+
 interface TravelModeContextValue extends TravelModeState {
-  enable: () => Promise<boolean>;
-  disable: (verifierHash: string) => Promise<{ success: boolean; error?: string }>;
+  enable: () => Promise<TravelModeEnableResult>;
+  disable: (verifierHash: string) => Promise<TravelModeDisableResult>;
   refresh: () => Promise<void>;
 }
 
 const TravelModeContext = createContext<TravelModeContextValue | null>(null);
+
+/** The `active` flag a toggle response echoes, or `fallback` when it has none. */
+function readActive(body: unknown, fallback: boolean): boolean {
+  if (typeof body !== "object" || body === null || !("active" in body)) return fallback;
+  return typeof body.active === "boolean" ? body.active : fallback;
+}
 
 export function TravelModeProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<TravelModeState>({
@@ -53,27 +72,29 @@ export function TravelModeProvider({ children }: { children: ReactNode }) {
     void fetchStatus();
   }, [fetchStatus]);
 
-  const enable = useCallback(async (): Promise<boolean> => {
+  const enable = useCallback(async (): Promise<TravelModeEnableResult> => {
     try {
       const res = await fetchApi("/api/travel-mode/enable", { method: "POST" });
       if (!res.ok) {
-        return false;
+        const body = await readApiErrorBody(res);
+        return { success: false, error: body ? body.error : `HTTP ${res.status}` };
       }
-      const data = await res.json();
+      // Enabled: an unreadable echo means what was asked for.
+      const active = readActive(await parseJsonBodyOnce(res), true);
       setState((prev) => ({
         ...prev,
-        active: data.active,
+        active,
         activatedAt: new Date().toISOString(),
         error: null,
       }));
-      return true;
+      return { success: true };
     } catch {
-      return false;
+      return { success: false, error: "NETWORK_ERROR" };
     }
   }, []);
 
   const disable = useCallback(
-    async (verifierHash: string): Promise<{ success: boolean; error?: string }> => {
+    async (verifierHash: string): Promise<TravelModeDisableResult> => {
       try {
         const res = await fetchApi("/api/travel-mode/disable", {
           method: "POST",
@@ -81,21 +102,19 @@ export function TravelModeProvider({ children }: { children: ReactNode }) {
           body: JSON.stringify({ verifierHash }),
         });
 
+        // Read the code, not the status: 401 is both a wrong passphrase
+        // (INVALID_PASSPHRASE) and an expired session (UNAUTHORIZED).
         if (!res.ok) {
-          if (res.status === 401) {
-            return { success: false, error: API_ERROR.INVALID_PASSPHRASE };
-          }
-          if (res.status === 403) {
-            return { success: false, error: "ACCOUNT_LOCKED" };
-          }
           const body = await readApiErrorBody(res);
-          return { success: false, error: body?.error ?? `HTTP ${res.status}` };
+          if (!body) return { success: false, error: `HTTP ${res.status}` };
+          return { success: false, error: body.error, lockedUntil: body.lockedUntil };
         }
 
-        const data = await res.json();
+        // Disabled: an unreadable echo means what was asked for.
+        const active = readActive(await parseJsonBodyOnce(res), false);
         setState((prev) => ({
           ...prev,
-          active: data.active,
+          active,
           activatedAt: null,
           error: null,
         }));

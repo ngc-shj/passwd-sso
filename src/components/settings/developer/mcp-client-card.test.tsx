@@ -525,6 +525,82 @@ describe("McpClientCard", () => {
     expect(screen.queryByDisplayValue("super_secret_value")).not.toBeInTheDocument();
   });
 
+  describe("when the registered client's response body cannot be read", () => {
+    function setupUnreadableCreate() {
+      setupFetchClients([]);
+      const others = mockFetch.getMockImplementation();
+      mockFetch.mockImplementation((url: string, init?: RequestInit) =>
+        init?.method === "POST"
+          ? Promise.resolve({
+              ok: true,
+              status: 201,
+              json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+            })
+          : others?.(url, init),
+      );
+    }
+
+    async function submitCreate() {
+      await act(async () => {
+        render(<McpClientCard />);
+      });
+      await screen.findByText("noMcpClients");
+      const registerBtn = screen
+        .getAllByRole("button")
+        .find((b) => b.textContent?.includes("registerMcpClient"));
+      if (!registerBtn) throw new Error("register button not rendered");
+      await act(async () => {
+        fireEvent.click(registerBtn);
+      });
+      fireEvent.change(screen.getByPlaceholderText("mcpNamePlaceholder"), {
+        target: { value: "New Client" },
+      });
+      fireEvent.change(screen.getByPlaceholderText("mcpRedirectUrisPlaceholder"), {
+        target: { value: "https://new.example.com/callback" },
+      });
+      fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+      const createBtn = screen.getAllByRole("button").find((b) => b.textContent?.includes("create"));
+      if (!createBtn) throw new Error("create button not rendered");
+      await act(async () => {
+        fireEvent.click(createBtn);
+      });
+    }
+
+    const listCalls = () => mockFetch.mock.calls.filter(([, init]) => !init?.method || init.method === "GET");
+
+    it("says the client was registered but its secret cannot be shown", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      expect(await screen.findByText("mcpCreatedSecretUnavailable")).toBeInTheDocument();
+      expect(mockToast.error).not.toHaveBeenCalled();
+    });
+
+    it("still completes the registration (success toast and list refresh)", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      await screen.findByText("mcpCreatedSecretUnavailable");
+      expect(mockToast.success).toHaveBeenCalledWith("mcpCreated");
+      expect(listCalls()).toHaveLength(2);
+    });
+
+    it("shows no secret and offers nothing to copy", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      await screen.findByText("mcpCreatedSecretUnavailable");
+      expect(screen.queryByText("mcpClientSecret")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("copy-button")).not.toBeInTheDocument();
+    });
+
+    it("shows the secret with its copy button when the body is readable", async () => {
+      setupFetchClients([]);
+      await submitCreate();
+      expect(await screen.findByDisplayValue("super_secret_value")).toBeInTheDocument();
+      const copied = screen.getAllByTestId("copy-button").map((b) => b.getAttribute("data-value"));
+      expect(copied).toContain("super_secret_value");
+      expect(screen.queryByText("mcpCreatedSecretUnavailable")).not.toBeInTheDocument();
+    });
+  });
+
   it("create — shows name error on 409 MCP_CLIENT_NAME_CONFLICT", async () => {
     mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
       if (!init?.method || init.method === "GET") {
@@ -933,5 +1009,278 @@ describe("McpClientCard", () => {
       expect(screen.getByTestId("recent-session-dialog")).toBeInTheDocument();
     });
     expect(mockToast.error).not.toHaveBeenCalled();
+  });
+});
+
+describe("McpClientCard edit, delete and list details", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCanUsePasskeyRecovery.mockResolvedValue(false);
+  });
+
+  type MutationResponse = { ok: boolean; status?: number; body?: unknown };
+
+  // GET returns `clients`; every mutating method answers with `response`.
+  function setupMutation(response: MutationResponse, clients: unknown[] = sampleClients) {
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init?.method || init.method === "GET") {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ clients }) });
+      }
+      return Promise.resolve({
+        ok: response.ok,
+        status: response.status ?? 200,
+        json: () => Promise.resolve(response.body ?? {}),
+      });
+    });
+  }
+
+  function callsWith(method: string) {
+    return mockFetch.mock.calls.filter(
+      (c: unknown[]) => (c[1] as RequestInit | undefined)?.method === method,
+    );
+  }
+
+  function rowOf(name: string): HTMLElement {
+    return screen.getByText(name).closest(".border") as HTMLElement;
+  }
+
+  async function renderLoaded(firstName: string) {
+    await act(async () => {
+      render(<McpClientCard />);
+    });
+    await waitFor(() => expect(screen.getByText(firstName)).toBeInTheDocument());
+  }
+
+  async function openEdit(name: string) {
+    const editButton = within(rowOf(name))
+      .getAllByRole("button")
+      .find((b) => b.closest("[data-testid='alert-trigger']") === null && b.textContent?.trim() === "");
+    if (!editButton) throw new Error(`no edit button for ${name}`);
+    await act(async () => {
+      fireEvent.click(editButton);
+    });
+    await waitFor(() => expect(screen.getByText("editMcpClient")).toBeInTheDocument());
+  }
+
+  async function saveEdit() {
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "save" }));
+    });
+  }
+
+  it("sends the redirect URIs when editing a manually registered client", async () => {
+    setupMutation({ ok: true });
+    await renderLoaded("My MCP Agent");
+    await openEdit("My MCP Agent");
+    fireEvent.change(screen.getByDisplayValue("My MCP Agent"), { target: { value: "  Renamed  " } });
+
+    await saveEdit();
+
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("mcpUpdated"));
+    const [url, init] = callsWith("PUT")[0] as [string, RequestInit];
+    expect(url).toContain("client-1");
+    expect(JSON.parse(String(init.body))).toEqual({
+      name: "Renamed",
+      allowedScopes: ["credentials:read", "credentials:list"],
+      isActive: true,
+      redirectUris: ["https://agent.example.com/callback"],
+    });
+    expect(screen.queryByText("editMcpClient")).not.toBeInTheDocument();
+  });
+
+  it("omits the immutable redirect URIs when editing a DCR client", async () => {
+    setupMutation({ ok: true });
+    await renderLoaded("DCR Agent");
+    await openEdit("DCR Agent");
+    expect(screen.getByText("mcpDcrFieldsReadOnly")).toBeInTheDocument();
+    fireEvent.change(screen.getByDisplayValue("DCR Agent"), { target: { value: "DCR Renamed" } });
+
+    await saveEdit();
+
+    await waitFor(() => expect(callsWith("PUT")).toHaveLength(1));
+    const [, init] = callsWith("PUT")[0] as [string, RequestInit];
+    expect(JSON.parse(String(init.body))).not.toHaveProperty("redirectUris");
+  });
+
+  it("rejects an unacceptable redirect URI on edit without sending it", async () => {
+    setupMutation({ ok: true });
+    await renderLoaded("My MCP Agent");
+    await openEdit("My MCP Agent");
+    fireEvent.change(screen.getByDisplayValue("https://agent.example.com/callback"), {
+      target: { value: "ftp://agent.example.com/callback" },
+    });
+
+    await saveEdit();
+
+    expect(screen.getByText("mcpRedirectUriInvalid")).toBeInTheDocument();
+    expect(callsWith("PUT")).toHaveLength(0);
+  });
+
+  it("requires a name and at least one scope on edit", async () => {
+    setupMutation({ ok: true });
+    await renderLoaded("My MCP Agent");
+    fireEvent.click(screen.getByText(/mcpInactive \(/));
+    await waitFor(() => expect(screen.getByText("Another Agent")).toBeInTheDocument());
+    await openEdit("Another Agent");
+    fireEvent.change(screen.getByDisplayValue("Another Agent"), { target: { value: " " } });
+    // The only granted scope of this client is vault:status; untick it.
+    const vaultStatus = screen
+      .getAllByTestId("checkbox")
+      .find((c) => c.closest("label")?.textContent === "vault:status") as HTMLElement;
+    fireEvent.click(vaultStatus);
+
+    await saveEdit();
+
+    expect(screen.getByText("mcpNameRequired")).toBeInTheDocument();
+    expect(screen.getByText("mcpScopeRequired")).toBeInTheDocument();
+    expect(callsWith("PUT")).toHaveLength(0);
+  });
+
+  it("shows a name conflict inline on a 409 edit response", async () => {
+    setupMutation({ ok: false, status: 409, body: { error: "MCP_CLIENT_NAME_CONFLICT" } });
+    await renderLoaded("My MCP Agent");
+    await openEdit("My MCP Agent");
+    fireEvent.change(screen.getByDisplayValue("My MCP Agent"), { target: { value: "Taken" } });
+
+    await saveEdit();
+
+    await waitFor(() => expect(screen.getByText("mcpNameConflict")).toBeInTheDocument());
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("maps a 400 scope validation error on edit to the inline scope message", async () => {
+    setupMutation({
+      ok: false,
+      status: 400,
+      body: { error: "VALIDATION_ERROR", details: { properties: { allowedScopes: { errors: ["bad"] } } } },
+    });
+    await renderLoaded("My MCP Agent");
+    await openEdit("My MCP Agent");
+    fireEvent.change(screen.getByDisplayValue("My MCP Agent"), { target: { value: "Renamed" } });
+
+    await saveEdit();
+
+    await waitFor(() => expect(screen.getByText("mcpScopeRequired")).toBeInTheDocument());
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
+  it("toasts mcpUpdateFailed for an unrecognized edit failure", async () => {
+    setupMutation({ ok: false, status: 500, body: { error: "BOGUS_NOT_IN_ALLOWLIST" } });
+    await renderLoaded("My MCP Agent");
+    await openEdit("My MCP Agent");
+    fireEvent.change(screen.getByDisplayValue("My MCP Agent"), { target: { value: "Renamed" } });
+
+    await saveEdit();
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("mcpUpdateFailed"));
+    expect(screen.getByText("editMcpClient")).toBeInTheDocument();
+  });
+
+  it("discards unsaved edits when the edit dialog is dismissed", async () => {
+    setupMutation({ ok: true });
+    await renderLoaded("My MCP Agent");
+    await openEdit("My MCP Agent");
+    fireEvent.change(screen.getByDisplayValue("My MCP Agent"), { target: { value: "Draft" } });
+
+    const editDialog = screen
+      .getAllByTestId("dialog")
+      .find((d) => d.getAttribute("data-open") === "true") as HTMLElement;
+    fireEvent.click(editDialog);
+    await openEdit("My MCP Agent");
+
+    expect(screen.getByDisplayValue("My MCP Agent")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Draft")).not.toBeInTheDocument();
+  });
+
+  it("toasts mcpDeleted after a successful delete", async () => {
+    setupMutation({ ok: true });
+    await renderLoaded("My MCP Agent");
+
+    await act(async () => {
+      fireEvent.click(within(rowOf("My MCP Agent")).getByTestId("alert-action"));
+    });
+
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("mcpDeleted"));
+    expect(callsWith("DELETE")[0][0]).toContain("client-1");
+  });
+
+  it("toasts mcpDeleteFailed when the delete is rejected", async () => {
+    setupMutation({ ok: false, status: 500, body: { error: "INTERNAL_ERROR" } });
+    await renderLoaded("My MCP Agent");
+
+    await act(async () => {
+      fireEvent.click(within(rowOf("My MCP Agent")).getByTestId("alert-action"));
+    });
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("mcpDeleteFailed"));
+    expect(mockToast.success).not.toHaveBeenCalled();
+  });
+
+  it("filters clients by name or client ID and reports when nothing matches", async () => {
+    setupMutation({ ok: true });
+    await renderLoaded("My MCP Agent");
+    const search = screen.getByPlaceholderText("mcpSearchPlaceholder");
+
+    fireEvent.change(search, { target: { value: "DCR789" } });
+    expect(screen.getByText("DCR Agent")).toBeInTheDocument();
+    expect(screen.queryByText("My MCP Agent")).not.toBeInTheDocument();
+
+    fireEvent.change(search, { target: { value: "nothing-like-this" } });
+    expect(screen.getByText("mcpNoMatchingClients")).toBeInTheDocument();
+  });
+
+  it("says there are no active clients when only inactive ones exist", async () => {
+    setupMutation({ ok: true }, [sampleClients[1]]);
+    await act(async () => {
+      render(<McpClientCard />);
+    });
+    expect(await screen.findByText("noActiveMcpClients")).toBeInTheDocument();
+  });
+
+  it("lists connected users by name, then email, then a fallback", async () => {
+    setupMutation({ ok: true }, [
+      {
+        ...sampleClients[0],
+        connectedUsers: [
+          { name: "Alice", email: "alice@example.com" },
+          { name: null, email: "bob@example.com" },
+          { name: null, email: null },
+        ],
+      },
+    ]);
+    await renderLoaded("My MCP Agent");
+    expect(screen.getByText("Alice, bob@example.com, mcpUnknownUser")).toBeInTheDocument();
+  });
+
+  it("truncates a long client ID and keeps the full value in the title", async () => {
+    const clientId = "mcpc_0123456789abcdefghij";
+    setupMutation({ ok: true }, [{ ...sampleClients[0], clientId, lastUsedAt: "2025-02-01T00:00:00Z" }]);
+    await renderLoaded("My MCP Agent");
+
+    const shown = screen.getByTitle(clientId);
+    expect(shown).toHaveTextContent(`${clientId.slice(0, 16)}…`);
+    expect(screen.getByText("mcpLastUsed")).toBeInTheDocument();
+  });
+
+  it("toasts mcpLimitReached when the create hits the client limit", async () => {
+    setupMutation({ ok: false, status: 422, body: { error: "MCP_CLIENT_LIMIT_EXCEEDED" } }, []);
+    await act(async () => {
+      render(<McpClientCard />);
+    });
+    await waitFor(() => expect(screen.getByText("noMcpClients")).toBeInTheDocument());
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: /registerMcpClient/ }));
+    });
+    fireEvent.change(screen.getByPlaceholderText("mcpNamePlaceholder"), { target: { value: "One more" } });
+    fireEvent.change(screen.getByPlaceholderText("mcpRedirectUrisPlaceholder"), {
+      target: { value: "https://agent.example.com/cb" },
+    });
+    fireEvent.click(screen.getAllByTestId("checkbox")[0]);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "create" }));
+    });
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("mcpLimitReached"));
   });
 });

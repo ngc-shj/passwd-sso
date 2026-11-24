@@ -116,6 +116,10 @@ async function handlePOST(req: NextRequest) {
 
   const verifyResult = verifyAccessPassword(password, share.accessPasswordHash, share.accessPasswordHashVersion);
   if (!verifyResult.ok) {
+    // A stored version whose pepper is not configured is an operator
+    // misconfiguration, not a wrong password: answer 503 so the visitor is told
+    // to retry later, and write no VERIFY_FAILED row that would read as a
+    // guessing attempt. Every other refusal reason stays a wrong password.
     if (verifyResult.reason === "MISSING_PEPPER_VERSION") {
       await logAuditAsync({
         ...tenantAuditBase(req, ANONYMOUS_ACTOR_ID, share.tenantId),
@@ -125,6 +129,7 @@ async function handlePOST(req: NextRequest) {
         targetId: share.id,
         metadata: { storedVersion: share.accessPasswordHashVersion },
       });
+      return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
     }
 
     await logAuditAsync({

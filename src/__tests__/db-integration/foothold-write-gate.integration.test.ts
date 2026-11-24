@@ -285,9 +285,10 @@ describe("foothold write gate — real-DB integration", () => {
 
   const sharesBy = (actorId: string) => count("password_shares", "created_by_id = $1::uuid", actorId);
 
-  const consentForm = (clientId: string) =>
+  const consentForm = (clientId: string, expectedUserId: string) =>
     new URLSearchParams({
       client_id: clientId,
+      expected_user_id: expectedUserId,
       redirect_uri: "https://example.com/callback",
       scope: "credentials:list",
       code_challenge: "A".repeat(43),
@@ -459,8 +460,8 @@ describe("foothold write gate — real-DB integration", () => {
         const client = await dcrClient();
         return { client: client.id, clientId: client.clientId };
       },
-      invoke: (cookie, _env, s) =>
-        consent(requestWithSession(cookie, `${BASE}/api/mcp/authorize/consent`, { form: consentForm(s.clientId) })),
+      invoke: (cookie, env, s) =>
+        consent(requestWithSession(cookie, `${BASE}/api/mcp/authorize/consent`, { form: consentForm(s.clientId, env.actorId) })),
       // The claim is the write: it sets tenant_id and created_by_id on the unclaimed client.
       assertNoWrite: async (_e, s) =>
         expect(await count("mcp_clients", "id = $1::uuid AND tenant_id IS NULL AND created_by_id IS NULL", s.client)).toBe(1),

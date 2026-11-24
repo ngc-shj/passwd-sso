@@ -1,0 +1,386 @@
+// @vitest-environment jsdom
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { renderHook, act } from "@testing-library/react";
+import type { FormEvent } from "react";
+import { formatRecoveryKey, wrapSecretKeyWithRecovery } from "@/lib/crypto/crypto-recovery";
+
+const { mockFetchApi, mockHardNavigate, mockSetHasRecoveryKey } = vi.hoisted(() => ({
+  mockFetchApi: vi.fn(),
+  mockHardNavigate: vi.fn(),
+  mockSetHasRecoveryKey: vi.fn(),
+}));
+
+vi.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => key,
+  useLocale: () => "en",
+}));
+vi.mock("@/lib/vault/vault-context", () => ({
+  useVault: () => ({ setHasRecoveryKey: mockSetHasRecoveryKey }),
+}));
+vi.mock("@/lib/url-helpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/url-helpers")>()),
+  fetchApi: mockFetchApi,
+  hardNavigate: mockHardNavigate,
+}));
+
+import { useRecoveryFlow } from "./use-recovery-flow";
+import { SessionChangedError } from "@/lib/url-helpers";
+
+// Test-only key material.
+const RECOVERY_KEY = new Uint8Array(32).fill(9);
+const SECRET_KEY = new Uint8Array(32).fill(5);
+const PASSPHRASE = "a long enough passphrase";
+
+function ev(): FormEvent {
+  return { preventDefault: vi.fn() } as unknown as FormEvent;
+}
+
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status });
+}
+
+async function verified() {
+  const wrapped = await wrapSecretKeyWithRecovery(SECRET_KEY, RECOVERY_KEY);
+  mockFetchApi.mockResolvedValueOnce(
+    json({ ...wrapped, accountSalt: "11".repeat(32), keyVersion: 1 }),
+  );
+  const hook = renderHook(() => useRecoveryFlow());
+  const formatted = await formatRecoveryKey(RECOVERY_KEY);
+  act(() => hook.result.current.setRecoveryKeyInput(formatted.toLowerCase()));
+  await act(() => hook.result.current.handleVerify(ev()));
+  return hook;
+}
+
+/**
+ * Records the raw key buffers handed to WebCrypto as HKDF input while still
+ * running the real import. The verifier hash imports the parsed recovery key
+ * itself (toArrayBuffer passes the same view), so the first capture is the
+ * hook's own buffer. The fixture's RECOVERY_KEY, imported by the test's own
+ * wrapSecretKeyWithRecovery, is skipped.
+ */
+function captureHkdfInputs(): Uint8Array[] {
+  const captured: Uint8Array[] = [];
+  const realImportKey = crypto.subtle.importKey.bind(crypto.subtle);
+  vi.spyOn(crypto.subtle, "importKey").mockImplementation(((...args: Parameters<SubtleCrypto["importKey"]>) => {
+    const [format, keyData, algorithm] = args;
+    if (format === "raw" && algorithm === "HKDF" && keyData instanceof Uint8Array && keyData !== RECOVERY_KEY) {
+      captured.push(keyData);
+    }
+    return realImportKey(...args);
+  }) as SubtleCrypto["importKey"]);
+  return captured;
+}
+
+function isZeroed(bytes: Uint8Array | undefined): boolean {
+  if (!bytes) throw new Error("no recovery-key buffer was captured");
+  return bytes.every((b) => b === 0);
+}
+
+describe("useRecoveryFlow", () => {
+  beforeEach(() => {
+    mockFetchApi.mockReset();
+  });
+
+  it("starts on the input step", () => {
+    const { result } = renderHook(() => useRecoveryFlow());
+
+    expect(result.current.step).toBe("input");
+    expect(result.current.isValid).toBe(false);
+  });
+
+  it("accepts a lower-case formatted key and moves to the new-passphrase step", async () => {
+    const { result } = await verified();
+
+    expect(result.current.step).toBe("new-passphrase");
+    expect(result.current.error).toBe("");
+    expect(result.current.loading).toBe(false);
+  });
+
+  it("reports an invalid key for characters outside the Base32 alphabet", async () => {
+    const { result } = renderHook(() => useRecoveryFlow());
+    act(() => result.current.setRecoveryKeyInput("1".repeat(54)));
+
+    await act(() => result.current.handleVerify(ev()));
+
+    expect(result.current.error).toBe("invalidRecoveryKey");
+    expect(result.current.step).toBe("input");
+  });
+
+  it("is valid only with a 10+ character matching confirmation", async () => {
+    const { result } = await verified();
+
+    act(() => {
+      result.current.setNewPassphrase("123456789");
+      result.current.setConfirmPassphrase("123456789");
+    });
+    expect(result.current.isValid).toBe(false);
+
+    act(() => {
+      result.current.setNewPassphrase("1234567890");
+      result.current.setConfirmPassphrase("1234567890");
+    });
+    expect(result.current.isValid).toBe(true);
+  });
+
+  it("does not send a reset while the passphrase is invalid", async () => {
+    const { result } = await verified();
+
+    await act(() => result.current.handleReset(ev()));
+
+    expect(mockFetchApi).toHaveBeenCalledTimes(1);
+  });
+
+  it("navigates to the dashboard after a successful reset", async () => {
+    const { result } = await verified();
+    act(() => {
+      result.current.setNewPassphrase(PASSPHRASE);
+      result.current.setConfirmPassphrase(PASSPHRASE);
+    });
+    mockFetchApi.mockResolvedValueOnce(json({}));
+
+    await act(() => result.current.handleReset(ev()));
+
+    expect(mockSetHasRecoveryKey).toHaveBeenCalledWith(true);
+    expect(mockHardNavigate).toHaveBeenCalledWith("/en/dashboard");
+  }, 15_000);
+
+  it("shows the unknown error for a 4xx reset refusal without a code", async () => {
+    const { result } = await verified();
+    act(() => {
+      result.current.setNewPassphrase(PASSPHRASE);
+      result.current.setConfirmPassphrase(PASSPHRASE);
+    });
+    mockFetchApi.mockResolvedValueOnce(new Response("", { status: 400 }));
+
+    await act(() => result.current.handleReset(ev()));
+
+    expect(result.current.error).toBe("unknownError");
+    expect(result.current.loading).toBe(false);
+    expect(mockHardNavigate).not.toHaveBeenCalled();
+  }, 15_000);
+  it("treats SESSION_INVALIDATE_FAILED as a committed reset and holds navigation for the warning", async () => {
+    const { result } = await verified();
+    act(() => {
+      result.current.setNewPassphrase(PASSPHRASE);
+      result.current.setConfirmPassphrase(PASSPHRASE);
+    });
+    mockSetHasRecoveryKey.mockClear();
+    mockFetchApi.mockResolvedValueOnce(json({ error: "SESSION_INVALIDATE_FAILED" }, 500));
+
+    await act(() => result.current.handleReset(ev()));
+
+    expect(result.current.step).toBe("reset-invalidation-failed");
+    expect(result.current.error).toBe("");
+    expect(mockSetHasRecoveryKey).toHaveBeenCalledWith(true);
+    expect(mockHardNavigate).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it("continues to the dashboard from the invalidation warning", async () => {
+    const { result } = await verified();
+    act(() => {
+      result.current.setNewPassphrase(PASSPHRASE);
+      result.current.setConfirmPassphrase(PASSPHRASE);
+    });
+    mockFetchApi.mockResolvedValueOnce(json({ error: "SESSION_INVALIDATE_FAILED" }, 500));
+    await act(() => result.current.handleReset(ev()));
+
+    act(() => result.current.continueToDashboard());
+
+    expect(mockHardNavigate).toHaveBeenCalledWith("/en/dashboard");
+  }, 15_000);
+
+  // F7-4: the route answers 200 or SESSION_INVALIDATE_FAILED once the reset
+  // committed; every refusal before that is a 4xx or SERVICE_UNAVAILABLE.
+  describe("a reset whose outcome is unknown", () => {
+    async function readyToReset() {
+      const hook = await verified();
+      act(() => {
+        hook.result.current.setNewPassphrase(PASSPHRASE);
+        hook.result.current.setConfirmPassphrase(PASSPHRASE);
+      });
+      return hook;
+    }
+
+    it.each([
+      ["a POST rejected in transit", () => mockFetchApi.mockRejectedValueOnce(new TypeError("Failed to fetch"))],
+      ["a 500 whose body is not JSON", () => mockFetchApi.mockResolvedValueOnce(new Response("", { status: 500 }))],
+      ["a 502 proxy page", () => mockFetchApi.mockResolvedValueOnce(new Response("<html>Bad Gateway</html>", { status: 502 }))],
+      ["a 500 INTERNAL_ERROR", () => mockFetchApi.mockResolvedValueOnce(json({ error: "INTERNAL_ERROR" }, 500))],
+    ])("says the reset may have completed on %s", async (_kind, answer) => {
+      const { result } = await readyToReset();
+      answer();
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.error).toBe("resetOutcomeUnknown");
+      expect(result.current.step).toBe("new-passphrase");
+      expect(mockHardNavigate).not.toHaveBeenCalled();
+    }, 15_000);
+
+    it.each([
+      ["400 VALIDATION_ERROR", json({ error: "VALIDATION_ERROR" }, 400)],
+      ["429 RATE_LIMIT_EXCEEDED", json({ error: "RATE_LIMIT_EXCEEDED" }, 429)],
+      ["503 SERVICE_UNAVAILABLE", json({ error: "SERVICE_UNAVAILABLE" }, 503)],
+      ["409 VAULT_WRAP_CONFLICT", json({ error: "VAULT_WRAP_CONFLICT" }, 409)],
+    ])("reports a %s refusal as a refusal", async (_kind, response) => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockResolvedValueOnce(response);
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.error).not.toBe("resetOutcomeUnknown");
+      expect(result.current.error).not.toBe("resetCompletedEarlier");
+      expect(result.current.error).not.toBe("");
+    }, 15_000);
+
+    // Refused by the proxy before the route ran: nothing was written, so the
+    // reset is not "may have completed", and a later conflict is not ours.
+    it("says the session changed, not that the reset may have completed, when the reset is refused for a changed session", async () => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockRejectedValueOnce(new SessionChangedError());
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.error).toBe("sessionChanged");
+      mockFetchApi.mockResolvedValueOnce(json({ error: "VAULT_WRAP_CONFLICT" }, 409));
+      await act(() => result.current.handleReset(ev()));
+      expect(result.current.error).not.toBe("resetCompletedEarlier");
+    }, 15_000);
+
+    it("says the session changed when verification is refused for a changed session", async () => {
+      mockFetchApi.mockRejectedValueOnce(new SessionChangedError());
+      const { result } = renderHook(() => useRecoveryFlow());
+      const formatted = await formatRecoveryKey(RECOVERY_KEY);
+      act(() => result.current.setRecoveryKeyInput(formatted));
+
+      await act(() => result.current.handleVerify(ev()));
+
+      expect(result.current.error).toBe("sessionChanged");
+    });
+
+    it("says an earlier attempt reset the vault when a retry after an unknown outcome hits VAULT_WRAP_CONFLICT", async () => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      await act(() => result.current.handleReset(ev()));
+      mockFetchApi.mockResolvedValueOnce(json({ error: "VAULT_WRAP_CONFLICT" }, 409));
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.error).toBe("resetCompletedEarlier");
+      expect(mockHardNavigate).not.toHaveBeenCalled();
+    }, 15_000);
+  });
+
+  describe("recovery-key buffer wiping", () => {
+    afterEach(() => {
+      vi.restoreAllMocks();
+    });
+
+    it("wipes the parsed recovery key when the server refuses verification", async () => {
+      const captured = captureHkdfInputs();
+      mockFetchApi.mockResolvedValueOnce(json({ error: "INVALID_RECOVERY_KEY" }, 400));
+      const { result } = renderHook(() => useRecoveryFlow());
+      const formatted = await formatRecoveryKey(RECOVERY_KEY);
+      act(() => result.current.setRecoveryKeyInput(formatted));
+
+      await act(() => result.current.handleVerify(ev()));
+
+      expect(result.current.error).toBe("invalidRecoveryKey");
+      expect(isZeroed(captured[0])).toBe(true);
+    });
+
+    it("keeps the verified recovery key intact for the reset step", async () => {
+      const captured = captureHkdfInputs();
+
+      const { result } = await verified();
+
+      expect(result.current.step).toBe("new-passphrase");
+      expect(captured[0]).toEqual(RECOVERY_KEY);
+    });
+
+    it("wipes the recovery key when the reset committed but invalidation failed", async () => {
+      const captured = captureHkdfInputs();
+      const { result } = await verified();
+      act(() => {
+        result.current.setNewPassphrase(PASSPHRASE);
+        result.current.setConfirmPassphrase(PASSPHRASE);
+      });
+      mockFetchApi.mockResolvedValueOnce(json({ error: "SESSION_INVALIDATE_FAILED" }, 500));
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.step).toBe("reset-invalidation-failed");
+      expect(isZeroed(captured[0])).toBe(true);
+    }, 15_000);
+
+    it("wipes the verified recovery key when the flow is abandoned by unmounting", async () => {
+      const captured = captureHkdfInputs();
+      const { unmount } = await verified();
+
+      unmount();
+
+      expect(isZeroed(captured[0])).toBe(true);
+    });
+  });
+  describe("typed secret strings", () => {
+    async function readyToReset() {
+      const hook = await verified();
+      act(() => {
+        hook.result.current.setNewPassphrase(PASSPHRASE);
+        hook.result.current.setConfirmPassphrase(PASSPHRASE);
+      });
+      return hook;
+    }
+
+    it("clears the typed recovery key once verification hands off to the reset step", async () => {
+      const { result } = await verified();
+
+      expect(result.current.step).toBe("new-passphrase");
+      expect(result.current.recoveryKeyInput).toBe("");
+    });
+
+    it("keeps the typed recovery key when the server refuses verification", async () => {
+      mockFetchApi.mockResolvedValueOnce(json({ error: "INVALID_RECOVERY_KEY" }, 400));
+      const { result } = renderHook(() => useRecoveryFlow());
+      const formatted = await formatRecoveryKey(RECOVERY_KEY);
+      act(() => result.current.setRecoveryKeyInput(formatted));
+
+      await act(() => result.current.handleVerify(ev()));
+
+      expect(result.current.error).toBe("invalidRecoveryKey");
+      expect(result.current.recoveryKeyInput).toBe(formatted);
+    });
+
+    it("clears the new passphrase and its confirmation after a committed reset", async () => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockResolvedValueOnce(json({}));
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(mockHardNavigate).toHaveBeenCalledWith("/en/dashboard");
+      expect(result.current.newPassphrase).toBe("");
+      expect(result.current.confirmPassphrase).toBe("");
+    }, 15_000);
+
+    it("clears the new passphrase and its confirmation when the reset committed but invalidation failed", async () => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockResolvedValueOnce(json({ error: "SESSION_INVALIDATE_FAILED" }, 500));
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.step).toBe("reset-invalidation-failed");
+      expect(result.current.newPassphrase).toBe("");
+      expect(result.current.confirmPassphrase).toBe("");
+    }, 15_000);
+
+    it("keeps the new passphrase and its confirmation when the reset is refused", async () => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockResolvedValueOnce(new Response("", { status: 400 }));
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.error).toBe("unknownError");
+      expect(result.current.newPassphrase).toBe(PASSPHRASE);
+      expect(result.current.confirmPassphrase).toBe(PASSPHRASE);
+    }, 15_000);
+  });
+});

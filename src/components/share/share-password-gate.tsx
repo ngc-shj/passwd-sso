@@ -7,8 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Lock, Loader2, AlertTriangle } from "lucide-react";
-import { apiErrorToI18nKey } from "@/lib/http/api-error-codes";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { SHARE_PASSWORD_MAX_ATTEMPTS } from "@/lib/validations/common";
 import { fetchApi } from "@/lib/url-helpers";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
@@ -24,8 +24,8 @@ export function SharePasswordGate({
   onVerified,
   error: externalError,
 }: SharePasswordGateProps) {
+  // Share only: the public /s/ layout loads no other namespace (NS_PUBLIC_SHARE).
   const t = useTranslations("Share");
-  const tApi = useTranslations("ApiErrors");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,25 +57,42 @@ export function SharePasswordGate({
 
       if (!res.ok) {
         const err = await readApiErrorBody(res);
-        setAttempts((a) => a + 1);
-        if (err?.error === "RATE_LIMIT_EXCEEDED") {
-          setError(t("tooManyAttempts"));
-        } else {
+        // Only a refused password or the rate limit counts toward the cap; a
+        // gone link or a server fault says nothing about the password.
+        if (err?.error === API_ERROR.SHARE_PASSWORD_INCORRECT) {
+          setAttempts((a) => a + 1);
           setError(t("wrongPassword"));
+        } else if (err?.error === API_ERROR.RATE_LIMIT_EXCEEDED) {
+          setAttempts((a) => a + 1);
+          setError(t("tooManyAttempts"));
+        } else if (res.status === 404) {
+          setError(t("linkUnavailable"));
+        } else {
+          setError(t("verifyRetryLater"));
         }
         return;
       }
 
-      const data = await res.json();
+      const data = await parseJsonBodyOnce(res);
+      const accessToken =
+        typeof data === "object" && data !== null && "accessToken" in data ? data.accessToken : null;
+      // Verification wrote nothing worth keeping without its token: retry.
+      if (typeof accessToken !== "string" || accessToken === "") {
+        setError(t("verifyRetryLater"));
+        return;
+      }
       // Persist for potential page refresh recovery
       try {
-        sessionStorage.setItem(`${SESSION_STORAGE_KEY.SHARE_ACCESS_PREFIX}${token}`, data.accessToken);
+        sessionStorage.setItem(`${SESSION_STORAGE_KEY.SHARE_ACCESS_PREFIX}${token}`, accessToken);
       } catch {
         // sessionStorage unavailable (e.g. private browsing) — proceed anyway
       }
-      onVerified(data.accessToken);
+      // The password has done its job. Should loading the content fail, this
+      // gate stays on screen, and it must not keep the password there.
+      setPassword("");
+      onVerified(accessToken);
     } catch {
-      setError(tApi(apiErrorToI18nKey("unknownError")));
+      setError(t("verifyRetryLater"));
     } finally {
       setLoading(false);
     }
@@ -108,7 +125,7 @@ export function SharePasswordGate({
               <Label className="text-xs">{t("accessPasswordLabel")}</Label>
               <Input
                 ref={inputRef}
-                type="text"
+                type="password"
                 value={password}
                 readOnly
                 onPaste={handlePaste}

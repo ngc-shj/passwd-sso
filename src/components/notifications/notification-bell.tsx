@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocale, useTranslations } from "next-intl";
 import { Bell } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -50,6 +50,21 @@ export function NotificationBell() {
   const locale = useLocale();
   const [unreadCount, setUnreadCount] = useState(0);
   const [notifications, setNotifications] = useState<NotificationItem[]>([]);
+  // Write-through copy of the list: every write sets it and the state
+  // together, so a handler reads the list as of the last write, including
+  // one React has not rendered yet.
+  const notificationsRef = useRef<NotificationItem[]>([]);
+  // Ids whose unread state this client has already taken off the badge (by
+  // mark-read, delete or mark-all). Whether a mark-read or delete response
+  // decrements is decided here, per id, not from the list: a list refetch
+  // that commits while the request is in flight already shows the item read
+  // or gone, though nothing has counted it yet; and two requests for one
+  // item (two clicks, mark-read then delete) must decrement once.
+  const accountedRef = useRef(new Set<string>());
+  const writeNotifications = useCallback((next: NotificationItem[]) => {
+    notificationsRef.current = next;
+    setNotifications(next);
+  }, []);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
 
@@ -61,14 +76,14 @@ export function NotificationBell() {
       );
       if (res.ok) {
         const data = await res.json();
-        setNotifications(data.items);
+        writeNotifications(data.items);
       }
     } catch {
       // Silently ignore
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [writeNotifications]);
 
   // Poll unread count (pause when tab is hidden)
   useEffect(() => {
@@ -116,14 +131,17 @@ export function NotificationBell() {
       const res = await fetchApi(API_PATH.NOTIFICATIONS, { method: "PATCH" });
       if (res.ok) {
         setUnreadCount(0);
-        setNotifications((prev) =>
-          prev.map((n) => ({ ...n, isRead: true })),
+        // A request still in flight for one of these must not decrement the
+        // zeroed badge, which a poll may have raised again by then.
+        for (const n of notificationsRef.current) accountedRef.current.add(n.id);
+        writeNotifications(
+          notificationsRef.current.map((n) => ({ ...n, isRead: true })),
         );
       }
     } catch {
       // Silently ignore
     }
-  }, []);
+  }, [writeNotifications]);
 
   const markAsRead = useCallback(async (id: string) => {
     try {
@@ -131,34 +149,36 @@ export function NotificationBell() {
         method: "PATCH",
       });
       if (res.ok) {
-        setUnreadCount((c) => Math.max(0, c - 1));
-        setNotifications((prev) =>
-          prev.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
+        writeNotifications(
+          notificationsRef.current.map((n) => (n.id === id ? { ...n, isRead: true } : n)),
         );
+        if (accountedRef.current.has(id)) return;
+        accountedRef.current.add(id);
+        setUnreadCount((c) => Math.max(0, c - 1));
       }
     } catch {
       // Silently ignore
     }
-  }, []);
+  }, [writeNotifications]);
 
   const deleteNotification = useCallback(async (id: string) => {
+    // Read before the request: a refetch landing meanwhile may drop the item.
+    const wasUnread = notificationsRef.current.some((n) => n.id === id && !n.isRead);
     try {
       const res = await fetchApi(apiPath.notificationById(id), {
         method: "DELETE",
       });
       if (res.ok) {
-        setNotifications((prev) => {
-          const removed = prev.find((n) => n.id === id);
-          if (removed && !removed.isRead) {
-            setUnreadCount((c) => Math.max(0, c - 1));
-          }
-          return prev.filter((n) => n.id !== id);
-        });
+        // Kept out of a state updater, which StrictMode runs twice.
+        writeNotifications(notificationsRef.current.filter((n) => n.id !== id));
+        if (!wasUnread || accountedRef.current.has(id)) return;
+        accountedRef.current.add(id);
+        setUnreadCount((c) => Math.max(0, c - 1));
       }
     } catch {
       // Silently ignore
     }
-  }, []);
+  }, [writeNotifications]);
 
   return (
     <DropdownMenu open={open} onOpenChange={handleOpenChange}>

@@ -10,6 +10,7 @@ import {
   hasAnySessionCookie,
   parseCookiePairs,
   presentedSessionTokens,
+  withoutSessionCookies,
   readSessionCookie,
   SESSION_COOKIE_READ,
 } from "./session-cookie";
@@ -373,4 +374,35 @@ describe("readSessionCookie agrees with Auth.js (differential)", () => {
       }
     });
   }
+});
+
+const cookieOf = (header: string): string | null =>
+  withoutSessionCookies(new Headers({ cookie: header, "x-other": "1" })).get("cookie");
+
+describe("withoutSessionCookies", () => {
+  it.each([
+    "__Host-authjs.session-token",
+    "__Secure-authjs.session-token",
+    "authjs.session-token",
+    "__Secure-next-auth.session-token",
+    "next-auth.session-token",
+  ])("removes %s, its chunks and a whitespace-spelled key, and keeps the other cookies", (name) => {
+    expect(cookieOf(`a=1; ${name}=t1; ${name}.0=c0; ${name}.1=c1;  ${name} =t2; b=2`)).toBe("a=1; b=2");
+  });
+
+  it("removes an empty-valued session cookie, which hasAnySessionCookie does not count", () => {
+    expect(cookieOf("a=1; authjs.session-token=")).toBe("a=1");
+  });
+
+  it("removes the Cookie header when only session cookies were in it", () => {
+    expect(cookieOf("authjs.session-token=t1; authjs.session-token.0=c0")).toBeNull();
+  });
+
+  it("keeps a cookie whose name only contains a session cookie name", () => {
+    expect(cookieOf("my-authjs.session-token=x; authjs.session-token=t1")).toBe("my-authjs.session-token=x");
+  });
+
+  it("leaves the other request headers alone", () => {
+    expect(withoutSessionCookies(new Headers({ cookie: "authjs.session-token=t", "x-other": "1" })).get("x-other")).toBe("1");
+  });
 });

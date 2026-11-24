@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useState } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
@@ -28,8 +29,21 @@ vi.mock("@/lib/http/toast-api-error", () => ({
 
 // Stub heavy UI primitives so child rendering is deterministic in jsdom.
 vi.mock("@/components/ui/dialog", () => ({
-  Dialog: ({ children, open }: { children: React.ReactNode; open: boolean }) =>
-    open ? <div role="dialog">{children}</div> : null,
+  Dialog: ({
+    children,
+    open,
+    onOpenChange,
+  }: {
+    children: React.ReactNode;
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+  }) =>
+    open ? (
+      <div role="dialog">
+        <button type="button" onClick={() => onOpenChange(false)}>dismiss</button>
+        {children}
+      </div>
+    ) : null,
   DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: React.ReactNode }) => <h2>{children}</h2>,
@@ -84,6 +98,9 @@ vi.mock("@/components/ui/switch", () => ({
   ),
 }));
 
+import { toast } from "sonner";
+import { CLIPBOARD_CLEAR_TIMEOUT_MS } from "@/lib/constants";
+import { installClipboard, uninstallClipboard } from "@/__tests__/helpers/mock-clipboard";
 import { ShareDialog } from "./share-dialog";
 
 function okJson(body: unknown): Response {
@@ -325,5 +342,259 @@ describe("ShareDialog — §Sec-1 share-flow crypto invariants", () => {
     await waitFor(() => {
       expect(screen.getByText("sharingDisabledByPolicy")).toBeInTheDocument();
     });
+  });
+});
+
+describe("ShareDialog — copying the created share URL", () => {
+  const SHARE_URL = "https://app.example.com/s/abc123";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    uninstallClipboard();
+  });
+
+  async function createLinkAndFindCopyButton(): Promise<HTMLElement> {
+    mockFetch
+      .mockResolvedValueOnce(okJson({ items: [] }))
+      .mockResolvedValueOnce(okJson({ url: "/s/abc123" }))
+      .mockResolvedValueOnce(okJson({ items: [] }));
+    render(
+      <ShareDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        passwordEntryId="p1"
+        decryptedData={{ title: "x", username: "u", password: "pw" }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /create/ }));
+    const field = await screen.findByDisplayValue(SHARE_URL);
+    return within(field.parentElement as HTMLElement).getByRole("button");
+  }
+
+  it("writes the share URL to the clipboard and blanks it after the clear timeout", async () => {
+    const clip = installClipboard({ readText: vi.fn().mockResolvedValue(SHARE_URL) });
+    const copyButton = await createLinkAndFindCopyButton();
+    vi.useFakeTimers();
+
+    fireEvent.click(copyButton);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(clip.writeText).toHaveBeenCalledWith(SHARE_URL);
+
+    await vi.advanceTimersByTimeAsync(CLIPBOARD_CLEAR_TIMEOUT_MS);
+    expect(clip.writeText).toHaveBeenLastCalledWith("");
+  });
+
+  it("shows the copied tick instead of a toast when the write succeeds", async () => {
+    installClipboard();
+    const copyButton = await createLinkAndFindCopyButton();
+
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(copyButton.querySelector(".lucide-check")).not.toBeNull();
+    });
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("reports a rejected write with the write-failed toast and keeps the copy icon", async () => {
+    installClipboard({
+      writeText: vi.fn().mockRejectedValue(new DOMException("denied", "NotAllowedError")),
+    });
+    const copyButton = await createLinkAndFindCopyButton();
+
+    fireEvent.click(copyButton);
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("copyWriteFailed");
+    });
+    expect(toast.error).not.toHaveBeenCalledWith("createError");
+    expect(copyButton.querySelector(".lucide-check")).toBeNull();
+    expect(copyButton.querySelector(".lucide-copy")).not.toBeNull();
+  });
+});
+
+describe("ShareDialog — reopening after a session", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  function renderOpen(open: boolean) {
+    return (
+      <ShareDialog
+        open={open}
+        onOpenChange={vi.fn()}
+        passwordEntryId="p1"
+        decryptedData={{ title: "x", username: "u", password: "pw" }}
+      />
+    );
+  }
+
+  it("does not show the previous link's access password next to a new link created without one", async () => {
+    mockFetch
+      .mockResolvedValueOnce(okJson({ items: [] }))
+      .mockResolvedValueOnce(okJson({ url: "/s/first", accessPassword: "old-access-pw" }))
+      .mockResolvedValueOnce(okJson({ items: [] }))
+      .mockResolvedValueOnce(okJson({ items: [] }))
+      .mockResolvedValueOnce(okJson({ url: "/s/second" }))
+      .mockResolvedValueOnce(okJson({ items: [] }));
+    const { rerender } = render(renderOpen(true));
+    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.click(screen.getByRole("button", { name: /create/ }));
+    expect(await screen.findByDisplayValue("old-access-pw")).toBeInTheDocument();
+
+    rerender(renderOpen(false));
+    rerender(renderOpen(true));
+    fireEvent.click(screen.getByRole("button", { name: /create/ }));
+
+    expect(await screen.findByDisplayValue("https://app.example.com/s/second")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("old-access-pw")).not.toBeInTheDocument();
+  });
+
+  it("clears the password toggle and max views the previous session set", () => {
+    mockFetch.mockResolvedValue(okJson({ items: [] }));
+    const { rerender } = render(renderOpen(true));
+    fireEvent.click(screen.getByRole("switch"));
+    fireEvent.change(screen.getByPlaceholderText("maxViewsPlaceholder"), { target: { value: "5" } });
+    expect(screen.getByRole("switch")).toBeChecked();
+    expect(screen.getByPlaceholderText("maxViewsPlaceholder")).toHaveValue(5);
+
+    rerender(renderOpen(false));
+    rerender(renderOpen(true));
+
+    expect(screen.getByRole("switch")).not.toBeChecked();
+    expect(screen.getByPlaceholderText("maxViewsPlaceholder")).toHaveValue(null);
+  });
+});
+
+describe("ShareDialog — closing with a created link", () => {
+  const SHARE_URL = "https://app.example.com/s/late";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Owns `open` the way password-card does, so a dismissal really closes.
+  function Host() {
+    const [open, setOpen] = useState(true);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>reopen</button>
+        <ShareDialog
+          open={open}
+          onOpenChange={setOpen}
+          passwordEntryId="p1"
+          decryptedData={{ title: "x", username: "u", password: "pw" }}
+        />
+      </>
+    );
+  }
+
+  /** Lists resolve at once; the create POST waits for the returned resolver. */
+  function pendingCreate() {
+    let resolve: (res: Response) => void = () => {};
+    mockFetch.mockImplementation((_path: string, init?: RequestInit) =>
+      init?.method === "POST"
+        ? new Promise<Response>((r) => {
+            resolve = r;
+          })
+        : Promise.resolve(okJson({ items: [] })),
+    );
+    return (body: unknown) => resolve(okJson(body));
+  }
+
+  async function startCreate() {
+    render(<Host />);
+    fireEvent.click(screen.getByRole("button", { name: /create/ }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /create/ })).toBeDisabled());
+  }
+
+  it("stays open when dismissed while the link is being created", async () => {
+    const resolveCreate = pendingCreate();
+    await startCreate();
+
+    fireEvent.click(screen.getByRole("button", { name: "dismiss" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    resolveCreate({ url: "/s/late", accessPassword: "late-access-pw" });
+    expect(await screen.findByDisplayValue(SHARE_URL)).toBeInTheDocument();
+  });
+
+  it("shows neither the URL nor the access password on reopen after the late result is dismissed", async () => {
+    const resolveCreate = pendingCreate();
+    await startCreate();
+    fireEvent.click(screen.getByRole("button", { name: "dismiss" }));
+    resolveCreate({ url: "/s/late", accessPassword: "late-access-pw" });
+    expect(await screen.findByDisplayValue("late-access-pw")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "dismiss" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "reopen" }));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue(SHARE_URL)).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("late-access-pw")).not.toBeInTheDocument();
+  });
+});
+
+describe("ShareDialog — when the created link's response body cannot be read", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  afterEach(() => {
+    uninstallClipboard();
+  });
+
+  const unreadable = {
+    ok: true,
+    status: 201,
+    json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+  } as unknown as Response;
+
+  function renderAndCreate(createResponse: Response) {
+    mockFetch
+      .mockResolvedValueOnce(okJson({ items: [] })) // initial fetchLinks
+      .mockResolvedValueOnce(createResponse) // create
+      .mockResolvedValueOnce(okJson({ items: [] })); // refetchLinks
+    render(
+      <ShareDialog
+        open={true}
+        onOpenChange={vi.fn()}
+        passwordEntryId="p1"
+        decryptedData={{ title: "x", username: "u", password: "pw" }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /create/ }));
+  }
+
+  it("says the link was created but cannot be shown", async () => {
+    renderAndCreate(unreadable);
+    expect(await screen.findByText("createdLinkUnavailable")).toBeInTheDocument();
+    expect(toast.error).not.toHaveBeenCalled();
+  });
+
+  it("still completes the creation (success toast and link list refresh)", async () => {
+    renderAndCreate(unreadable);
+    await screen.findByText("createdLinkUnavailable");
+    expect(toast.success).toHaveBeenCalledWith("createSuccess");
+    expect(mockFetch).toHaveBeenCalledTimes(3);
+  });
+
+  it("shows no link and copies nothing", async () => {
+    const clip = installClipboard();
+    renderAndCreate(unreadable);
+    await screen.findByText("createdLinkUnavailable");
+    expect(screen.queryByText("shareUrl")).not.toBeInTheDocument();
+    expect(clip.writeText).not.toHaveBeenCalled();
+  });
+
+  it("shows the link when the body is readable", async () => {
+    renderAndCreate(okJson({ url: "/s/abc123" }));
+    expect(await screen.findByDisplayValue("https://app.example.com/s/abc123")).toBeInTheDocument();
+    expect(screen.queryByText("createdLinkUnavailable")).not.toBeInTheDocument();
   });
 });

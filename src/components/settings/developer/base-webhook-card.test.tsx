@@ -195,6 +195,68 @@ describe("BaseWebhookCard", () => {
     expect(screen.getByText("active")).toBeInTheDocument();
   });
 
+  describe("when the created webhook's response body cannot be read", () => {
+    function setupUnreadableCreate() {
+      mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+        if (!init || init.method === undefined || init.method === "GET") {
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({ webhooks: [] }) });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+        });
+      });
+    }
+
+    async function submitCreate() {
+      render(<BaseWebhookCard config={config} />);
+      await screen.findByText("noWebhooks");
+      fireEvent.click(screen.getByRole("button", { name: /addWebhook/ }));
+      fireEvent.change(screen.getByPlaceholderText("urlPlaceholder"), {
+        target: { value: "https://example.com/hook" },
+      });
+      fireEvent.click(screen.getAllByRole("checkbox")[0]);
+      const buttons = screen.getAllByRole("button", { name: /addWebhook/ });
+      await act(async () => {
+        fireEvent.click(buttons[buttons.length - 1]);
+      });
+    }
+
+    const listCalls = () => mockFetch.mock.calls.filter(([, init]) => !init || init.method === undefined);
+
+    it("says the webhook was created but its secret cannot be shown", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      expect(await screen.findByText("createdSecretUnavailable")).toBeInTheDocument();
+      expect(mockToast.error).not.toHaveBeenCalled();
+    });
+
+    it("still completes the creation (success toast and list refresh)", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      await screen.findByText("createdSecretUnavailable");
+      expect(mockToast.success).toHaveBeenCalledWith("created");
+      expect(listCalls()).toHaveLength(2);
+    });
+
+    it("shows no secret and offers nothing to copy", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      await screen.findByText("createdSecretUnavailable");
+      expect(screen.queryByText("secret")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("copy-button")).not.toBeInTheDocument();
+    });
+
+    it("shows the secret with its copy button when the body is readable", async () => {
+      setupList([]);
+      await submitCreate();
+      expect(await screen.findByDisplayValue("secret-xyz")).toBeInTheDocument();
+      expect(screen.getByTestId("copy-button")).toHaveAttribute("data-value", "secret-xyz");
+      expect(screen.queryByText("createdSecretUnavailable")).not.toBeInTheDocument();
+    });
+  });
+
   it("create — opens RecentSessionRequiredDialog when SESSION_STEP_UP_REQUIRED is returned", async () => {
     mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
       if (!init || init.method === undefined || init.method === "GET") {

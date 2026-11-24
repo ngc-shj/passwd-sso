@@ -63,7 +63,7 @@ passwd-sso uses a **zero-knowledge** architecture:
 - **AAD binding** — Additional Authenticated Data ties ciphertext to user and entry IDs
 - Database sessions (not JWT) with 8-hour timeout
 - Vault auto-locks after 15 minutes idle or 5 minutes tab hidden
-- Clipboard auto-clears after 30 seconds
+- The web app attempts to clear copied secrets after 30 seconds; this only takes effect on Chromium (Firefox and Safari keep the value until it is overwritten)
 - Progressive account lockout (5→15 min, 10→1 h, 15→24 h)
 - Tenant-level network access restriction (CIDR allowlist, Tailscale integration)
 

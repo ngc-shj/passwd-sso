@@ -2,17 +2,36 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createRequest } from "@/__tests__/helpers/request-builder";
 import { assertRedisFailClosed, snapshotFactory } from "@/__tests__/helpers/fail-closed";
 
-const { mockAuth, mockPrismaUser, mockRateLimiter, mockCreateRateLimiter, mockLogAudit, mockWithUserTenantRls, mockInvalidateUserSessions } = vi.hoisted(() => {
+const { mockAuth, mockPrismaUser, mockTxUpdateMany, mockTxs, mockRateLimiter, mockCreateRateLimiter, mockLogAudit, mockLogAuditInTx, mockWithUserTenantRls, mockWithTenantRls, mockInvalidateUserSessions } = vi.hoisted(() => {
   const mockRateLimiter = { check: vi.fn() };
+  // The ambient client: only the snapshot read may go through it.
+  const mockPrismaUser = { findUnique: vi.fn(), update: vi.fn(), updateMany: vi.fn() };
+  // Each withTenantRls call hands its callback a fresh tx with its own spies,
+  // recorded in mockTxs, so a write made on the ambient client or in a second
+  // transaction is distinguishable from one made on the audited tx.
+  // mockTxUpdateMany is the behaviour (the CAS row count) every tx delegates to.
+  const mockTxUpdateMany = vi.fn();
+  const mockTxs: { user: { update: ReturnType<typeof vi.fn>; updateMany: ReturnType<typeof vi.fn> } }[] = [];
+  const mockWithTenantRls = vi.fn(async (_p: unknown, _t: unknown, fn: (tx: unknown) => unknown) => {
+    const tx = {
+      user: { update: vi.fn(), updateMany: vi.fn((args: unknown) => mockTxUpdateMany(args)) },
+    };
+    mockTxs.push(tx);
+    return fn(tx);
+  });
   return {
   mockAuth: vi.fn(),
-  mockPrismaUser: { findUnique: vi.fn(), update: vi.fn() },
+  mockPrismaUser,
+  mockTxUpdateMany,
+  mockTxs,
   mockRateLimiter,
   // Recording factory — assertRedisFailClosed's factory-attribution step
   // reads mockCreateRateLimiter.mock.{calls,results}.
   mockCreateRateLimiter: vi.fn((_opts: unknown) => mockRateLimiter),
   mockLogAudit: vi.fn(),
+  mockLogAuditInTx: vi.fn(),
   mockWithUserTenantRls: vi.fn(async (_userId: string, fn: () => unknown) => fn()),
+  mockWithTenantRls,
   mockInvalidateUserSessions: vi.fn().mockResolvedValue({
     sessions: 0,
     extensionTokens: 0,
@@ -43,12 +62,16 @@ vi.mock("@/lib/crypto/verifier-version", () => ({
 }));
 vi.mock("@/lib/audit/audit", () => ({
   logAuditAsync: mockLogAudit,
+  logAuditInTx: mockLogAuditInTx,
   extractRequestMeta: vi.fn(() => ({ ip: "127.0.0.1", userAgent: "test" })),
   personalAuditBase: vi.fn((_, userId) => ({ scope: "PERSONAL", userId })),
   tenantAuditBase: vi.fn((_, userId, tenantId) => ({ scope: "TENANT", userId, tenantId })),
 }));
 vi.mock("@/lib/tenant-context", () => ({
   withUserTenantRls: mockWithUserTenantRls,
+}));
+vi.mock("@/lib/tenant-rls", () => ({
+  withTenantRls: mockWithTenantRls,
 }));
 vi.mock("@/lib/logger", () => ({
   default: { child: () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) },
@@ -82,6 +105,7 @@ const userWithVault = {
   vaultSetupAt: new Date(),
   passphraseVerifierHmac: "a".repeat(64),
   passphraseVerifierVersion: 1,
+  accountSalt: "9".repeat(64),
   tenantId: "test-tenant-id",
 };
 
@@ -102,6 +126,11 @@ describe("POST /api/vault/change-passphrase", () => {
     mockAuth.mockResolvedValue({ user: { id: "user-1" } });
     mockRateLimiter.check.mockResolvedValue({ allowed: true });
     mockPrismaUser.findUnique.mockResolvedValue(userWithVault);
+    mockTxs.length = 0;
+    mockTxUpdateMany.mockResolvedValue({ count: 1 });
+    // Resolves like the real client so a write misrouted to the ambient
+    // client is caught by the assertions on it, not by a crash.
+    mockPrismaUser.updateMany.mockResolvedValue({ count: 1 });
     mockPrismaUser.update.mockResolvedValue({});
   });
 
@@ -123,7 +152,7 @@ describe("POST /api/vault/change-passphrase", () => {
         POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody })),
       limiter: changeLimiter,
       expectation: { envelope: "canonical" },
-      assertNoMutation: [mockPrismaUser.update, mockInvalidateUserSessions],
+      assertNoMutation: [mockTxUpdateMany, mockPrismaUser.updateMany, mockInvalidateUserSessions],
       limiterFactory: changeLimiterFactorySnapshot.replay(),
       failure: { allowed: false, redisErrored: true },
     });
@@ -208,9 +237,10 @@ describe("POST /api/vault/change-passphrase", () => {
     expect(res.status).toBe(200);
     const json = await res.json();
     expect(json.success).toBe(true);
-    expect(mockPrismaUser.update).toHaveBeenCalledWith(
+    expect(mockTxs).toHaveLength(1);
+    expect(mockTxs[0].user.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: { id: "user-1" },
+        where: { id: "user-1", accountSalt: userWithVault.accountSalt },
         data: expect.objectContaining({
           accountSalt: validBody.accountSalt,
           encryptedSecretKey: validBody.encryptedSecretKey,
@@ -219,6 +249,57 @@ describe("POST /api/vault/change-passphrase", () => {
         }),
       })
     );
+  });
+
+  it("writes the wrap only through the transaction, never the ambient client", async () => {
+    const res = await POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
+
+    expect(res.status).toBe(200);
+    expect(mockTxs[0].user.updateMany).toHaveBeenCalledTimes(1);
+    expect(mockPrismaUser.update).not.toHaveBeenCalled();
+    expect(mockPrismaUser.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 409 VAULT_WRAP_CONFLICT when the account salt moved since the snapshot", async () => {
+    // A concurrent wrapping writer committed first: the CAS on the snapshot's
+    // accountSalt matches no row.
+    mockTxUpdateMany.mockResolvedValue({ count: 0 });
+
+    const res = await POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
+
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("VAULT_WRAP_CONFLICT");
+  });
+
+  it("writes no audit and invalidates no sessions when the compare-and-swap loses", async () => {
+    mockTxUpdateMany.mockResolvedValue({ count: 0 });
+
+    await POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
+
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockLogAudit).not.toHaveBeenCalled();
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+  });
+
+  it("lets exactly one of two requests from the same snapshot commit", async () => {
+    // The first write moves accountSalt; the second still carries the
+    // snapshot's salt in its WHERE and matches nothing.
+    let storedSalt: string = userWithVault.accountSalt;
+    mockTxUpdateMany.mockImplementation(
+      async (args: { where: { accountSalt: string }; data: { accountSalt: string } }) => {
+        if (args.where.accountSalt !== storedSalt) return { count: 0 };
+        storedSalt = args.data.accountSalt;
+        return { count: 1 };
+      },
+    );
+    const post = () =>
+      POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
+
+    const statuses = (await Promise.all([post(), post()])).map((r) => r.status).sort();
+
+    expect(statuses).toEqual([200, 409]);
+    expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+    expect(mockInvalidateUserSessions).toHaveBeenCalledTimes(1);
   });
 
   it("passes excludeSessionToken to invalidateUserSessions to preserve the caller's current session", async () => {
@@ -243,15 +324,16 @@ describe("POST /api/vault/change-passphrase", () => {
     );
   });
 
-  it("emits VERIFIER_PEPPER_MISSING audit and returns 401 when pepper version is missing", async () => {
+  it("answers 503 SERVICE_UNAVAILABLE, audits once and writes nothing when the pepper version is missing", async () => {
     const { verifyPassphraseVerifier } = await import("@/lib/crypto/crypto-server");
     vi.mocked(verifyPassphraseVerifier).mockReturnValueOnce({ ok: false, reason: "MISSING_PEPPER_VERSION" });
 
     const res = await POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
     const json = await res.json();
 
-    expect(res.status).toBe(401);
-    expect(json.error).toBe("INVALID_PASSPHRASE");
+    expect(res.status).toBe(503);
+    expect(json.error).toBe("SERVICE_UNAVAILABLE");
+    expect(mockLogAudit).toHaveBeenCalledTimes(1);
     expect(mockLogAudit).toHaveBeenCalledWith(
       expect.objectContaining({
         action: "VERIFIER_PEPPER_MISSING",
@@ -260,5 +342,116 @@ describe("POST /api/vault/change-passphrase", () => {
         tenantId: "test-tenant-id",
       }),
     );
+    expect(mockWithTenantRls).not.toHaveBeenCalled();
+    expect(mockPrismaUser.update).not.toHaveBeenCalled();
+    expect(mockPrismaUser.updateMany).not.toHaveBeenCalled();
+    expect(mockLogAuditInTx).not.toHaveBeenCalled();
+    expect(mockInvalidateUserSessions).not.toHaveBeenCalled();
+  });
+  describe("VAULT_PASSPHRASE_CHANGE audit", () => {
+    const post = () =>
+      POST(createRequest("POST", "http://localhost/api/vault/change-passphrase", { body: validBody }));
+    const completionCalls = () =>
+      mockLogAudit.mock.calls.filter(
+        ([params]) => (params as { action?: string }).action === "VAULT_PASSPHRASE_CHANGE",
+      );
+
+    it("records the committed change inside the transaction that updates the user", async () => {
+      const res = await post();
+
+      expect(res.status).toBe(200);
+      expect(mockWithTenantRls).toHaveBeenCalledTimes(1);
+      expect(mockWithTenantRls).toHaveBeenCalledWith(expect.anything(), "test-tenant-id", expect.any(Function));
+      expect(mockTxs[0].user.updateMany).toHaveBeenCalledTimes(1);
+      expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+      expect(mockLogAuditInTx.mock.calls[0][0]).toBe(mockTxs[0]);
+      expect(mockLogAuditInTx).toHaveBeenCalledWith(
+        mockTxs[0],
+        "test-tenant-id",
+        expect.objectContaining({
+          action: "VAULT_PASSPHRASE_CHANGE",
+          scope: "PERSONAL",
+          userId: "user-1",
+          metadata: { phase: "committed" },
+        }),
+      );
+    });
+
+    it("records the completion with invalidationFailed false and the revoked counts when invalidation succeeds", async () => {
+      // Distinct counts, so a field read from the wrong source is visible.
+      mockInvalidateUserSessions.mockResolvedValueOnce({
+        sessions: 2,
+        extensionTokens: 1,
+        apiKeys: 3,
+        mcpAccessTokens: 4,
+        mcpRefreshTokens: 5,
+        delegationSessions: 6,
+        operatorTokens: 7,
+        cacheTombstoneFailures: 8,
+      });
+
+      const res = await post();
+
+      expect(res.status).toBe(200);
+      expect(completionCalls()).toHaveLength(1);
+      expect(completionCalls()[0][0]).toEqual(
+        expect.objectContaining({
+          scope: "PERSONAL",
+          userId: "user-1",
+          metadata: {
+            phase: "completed",
+            invalidationFailed: false,
+            invalidatedSessions: 2,
+            invalidatedExtensionTokens: 1,
+            invalidatedApiKeys: 3,
+            invalidatedMcpAccessTokens: 4,
+            invalidatedMcpRefreshTokens: 5,
+            invalidatedDelegationSessions: 6,
+            invalidatedOperatorTokens: 7,
+            cacheTombstoneFailures: 8,
+          },
+        }),
+      );
+    });
+
+    it("records the completion with invalidationFailed true and returns SESSION_INVALIDATE_FAILED when invalidation throws", async () => {
+      mockInvalidateUserSessions.mockRejectedValueOnce(new Error("db down"));
+
+      const res = await post();
+
+      expect(res.status).toBe(500);
+      expect((await res.json()).error).toBe("SESSION_INVALIDATE_FAILED");
+      expect(mockLogAuditInTx).toHaveBeenCalledTimes(1);
+      expect(completionCalls()).toHaveLength(1);
+      expect(completionCalls()[0][0]).toEqual(
+        expect.objectContaining({
+          metadata: {
+            phase: "completed",
+            invalidationFailed: true,
+            invalidatedSessions: null,
+            invalidatedExtensionTokens: null,
+            invalidatedApiKeys: null,
+            invalidatedMcpAccessTokens: null,
+            invalidatedMcpRefreshTokens: null,
+            invalidatedDelegationSessions: null,
+            invalidatedOperatorTokens: null,
+            cacheTombstoneFailures: null,
+          },
+        }),
+      );
+    });
+
+    it("writes no passphrase-change audit when the current passphrase is wrong", async () => {
+      mockPrismaUser.findUnique.mockResolvedValue({
+        ...userWithVault,
+        passphraseVerifierHmac: "f".repeat(64),
+      });
+
+      const res = await post();
+
+      expect(res.status).toBe(401);
+      expect(mockLogAuditInTx).not.toHaveBeenCalled();
+      expect(completionCalls()).toHaveLength(0);
+    });
   });
 });

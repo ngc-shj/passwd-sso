@@ -35,6 +35,9 @@ const LABELS = {
   passkeyAction: "reauthAction",
   passkeyFailed: "reauthFailed",
   passkeyCancelled: "reauthCancelled",
+  reauthSessionExpired: "reauthSessionExpired",
+  reauthUnavailable: "reauthUnavailable",
+  reauthCredentialMismatch: "reauthCredentialMismatch",
   signInAgainAction: "recentSessionAction",
 };
 
@@ -132,6 +135,25 @@ describe("SignInReauthPanel", () => {
       expect(screen.getByText("reauthFailed")).toBeInTheDocument();
     });
     expect(mockAssign).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole("button", { name: "recentSessionAction" }),
+    ).toBeEnabled();
+  });
+
+  it.each([
+    ["UNAUTHORIZED", "reauthSessionExpired"],
+    ["PASSKEY_REAUTH_UNAVAILABLE", "reauthUnavailable"],
+    ["PASSKEY_REAUTH_CREDENTIAL_MISMATCH", "reauthCredentialMismatch"],
+  ])("points %s at sign-in again instead of inviting a retry", async (error, label) => {
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: false, error });
+    renderPanel();
+
+    fireEvent.click(screen.getByRole("button", { name: "reauthAction" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    });
+    expect(screen.queryByText("reauthFailed")).not.toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "recentSessionAction" }),
     ).toBeEnabled();

@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import { toast } from "sonner";
 import { apiPath } from "@/lib/constants/auth/api-path";
 import { fetchApi } from "@/lib/url-helpers";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
 import { notifyTeamDataChanged } from "@/lib/events";
 import { handleStepUpError } from "@/lib/http/handle-step-up-error";
 
@@ -95,17 +96,25 @@ function buildBody(
   return { ids };
 }
 
-function extractCount(
-  json: Record<string, unknown>,
-  fallback: number,
-): number {
-  return (json.processedCount ??
-    json.archivedCount ??
-    json.unarchivedCount ??
-    json.movedCount ??
-    json.restoredCount ??
-    json.deletedCount ??
-    fallback) as number;
+// The count field each bulk endpoint answers with, in lookup order.
+const COUNT_FIELDS = [
+  "processedCount",
+  "archivedCount",
+  "unarchivedCount",
+  "movedCount",
+  "restoredCount",
+  "deletedCount",
+] as const;
+
+/** The processed count in a bulk response; `fallback` when the body has none (or is unreadable). */
+function extractCount(json: unknown, fallback: number): number {
+  if (typeof json !== "object" || json === null) return fallback;
+  const fields = json as Record<string, unknown>;
+  for (const field of COUNT_FIELDS) {
+    const value = fields[field];
+    if (typeof value === "number") return value;
+  }
+  return fallback;
 }
 
 const TOAST_KEYS: Record<BulkActionType, { success: string; error: string }> = {
@@ -174,14 +183,14 @@ export function useBulkAction({
         throw new Error("bulk action failed");
       }
 
-      const json = await res.json();
-      const count = extractCount(json, ids.length);
-      const keys = TOAST_KEYS[pendingAction];
-      toast.success(t(keys.success, { count }));
-
+      // The action is applied from here on: complete it, then read the count.
       setDialogOpen(false);
       onSuccess();
       if (scope.type === "team") notifyTeamDataChanged();
+
+      const count = extractCount(await parseJsonBodyOnce(res), ids.length);
+      const keys = TOAST_KEYS[pendingAction];
+      toast.success(t(keys.success, { count }));
     } catch {
       const keys = TOAST_KEYS[pendingAction];
       toast.error(t(keys.error));

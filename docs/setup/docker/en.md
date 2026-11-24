@@ -409,7 +409,7 @@ npm start
 
 ### Client-side
 
-- Clipboard auto-clears 30 seconds after copy
+- The web app attempts to clear the clipboard 30 seconds after a copy (effective on Chromium only)
 - Password display auto-hides after 30 seconds
 - Confirmation dialog before deletion
 
@@ -453,27 +453,27 @@ Configured in proxy:
 | `npm run docker:down` | `docker compose down` |
 | `npm run worker:audit-outbox` | Run the audit-outbox drain worker (requires `OUTBOX_WORKER_DATABASE_URL`) |
 | `npm run test` | Run unit tests (vitest) |
-| `npm run test:integration` | Run real-DB integration tests (requires running Postgres, and MinIO for the anchor S3 suites — see below) |
+| `npm run test:integration` | Run real-DB integration tests on a per-run scratch database (requires running Postgres, and MinIO for the anchor S3 suites — see below) |
 | `npm run version:bump` | Suggest next version from git log (interactive) |
 
 For the full authoritative list, see `package.json` or `CLAUDE.md`.
 
 ### Integration tests
 
-`npm run test:integration` needs Postgres with the Compose workers stopped (they
-claim the same rows), and the audit-anchor S3 suites
+`npm run test:integration` needs Postgres, and the audit-anchor S3 suites
 (`audit-anchor-publisher-s3`, `audit-anchor-s3-destination`) also need MinIO:
 they fail, never skip, without it. The override's `minio` service is ephemeral
 (tmpfs storage, a KMS key generated at each start):
 
 ```bash
 docker compose up -d minio
-docker compose stop audit-outbox-worker retention-gc-worker
 ANCHOR_TEST_S3_ENDPOINT=http://127.0.0.1:9000 npm run test:integration
-docker compose start audit-outbox-worker retention-gc-worker
 ```
 
-On a host running the workers overlay, also stop `audit-anchor-publisher` (with the overlay's `-f` set) while a suite that writes anchors runs.
+The runner creates an empty scratch database for the run on the cluster
+`MIGRATION_DATABASE_URL` names, migrates it, runs the suite on it and drops it;
+the dev database is never touched and the Compose workers can keep running. Pass
+vitest arguments after `--` (`npm run test:integration -- vault`).
 
 `scripts/pre-pr.sh` probes `${ANCHOR_TEST_S3_ENDPOINT:-http://127.0.0.1:9000}/minio/health/ready`
 before its integration step and refuses that step when MinIO is not ready.

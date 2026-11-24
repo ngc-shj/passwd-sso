@@ -37,6 +37,7 @@ import { sweepAuditLogs } from "@/workers/retention-gc-worker/sweep";
 import { RETENTION_REGISTRY, type PerTenantFnEntry } from "@/workers/retention-gc-worker/registry";
 import { SYSTEM_TENANT_ID } from "@/lib/constants/app";
 import { AUDIT_LOG_RETENTION_MIN } from "@/lib/validations/common";
+import { assertNoForeignRows } from "./foreign-rows";
 
 // The PER_TENANT_FN entry for audit_logs
 const auditLogsEntry = RETENTION_REGISTRY.find(
@@ -93,6 +94,21 @@ describe("retention-gc sweepAuditLogs: per-tenant retention (C3/T6)", () => {
     });
   });
 
+  /** Each cell asserts sweepAuditLogs' return, which counts every retention tenant's purge. */
+  async function assertNoForeignPurgeableRows(): Promise<void> {
+    await assertNoForeignRows(
+      ctx.su,
+      "sweepAuditLogs returns the audit_logs rows it purged across every tenant with a retention",
+      `SELECT l.id::text AS ref FROM audit_logs l JOIN tenants t ON t.id = l.tenant_id
+        WHERE t.audit_log_retention_days IS NOT NULL
+          AND l.created_at < now() - make_interval(days => GREATEST(t.audit_log_retention_days, $3::int))
+          AND l.tenant_id <> ALL(ARRAY[$1::uuid, $2::uuid])`,
+      tenantAId,
+      tenantBId,
+      AUDIT_LOG_RETENTION_MIN,
+    );
+  }
+
   async function insertAuditLog(tenantId: string, ageExpr: string): Promise<string> {
     // audit_logs.user_id is NOT NULL but has no FK (append-only); a random UUID
     // is sufficient. action must be a valid AuditAction enum value. The CHECK
@@ -115,6 +131,7 @@ describe("retention-gc sweepAuditLogs: per-tenant retention (C3/T6)", () => {
   }
 
   it("deletes A's >30d rows via audit_log_purge; keeps A's recent; B entirely untouched (C3/T6)", async () => {
+    await assertNoForeignPurgeableRows();
     // Tenant A: 2 old rows (>30d) and 1 recent row
     const aOldId1 = await insertAuditLog(tenantAId, "now() - interval '31 days'");
     const aOldId2 = await insertAuditLog(tenantAId, "now() - interval '60 days'");
@@ -164,6 +181,7 @@ describe("retention-gc sweepAuditLogs: per-tenant retention (C3/T6)", () => {
   });
 
   it("per-table heartbeat count attributes audit_logs deletion only to tenant A (T6 mechanism)", async () => {
+    await assertNoForeignPurgeableRows();
     const aOldId = await insertAuditLog(tenantAId, "now() - interval '45 days'");
     const bOldId = await insertAuditLog(tenantBId, "now() - interval '50 days'");
 
@@ -198,6 +216,7 @@ describe("retention-gc sweepAuditLogs: per-tenant retention (C3/T6)", () => {
   });
 
   it("clamps a tenant retention below AUDIT_LOG_RETENTION_MIN to the floor (T4)", async () => {
+    await assertNoForeignPurgeableRows();
     // Tenant A configures retention_days = 5, well below the AUDIT_LOG_RETENTION_MIN
     // (30) floor. effectiveDays = max(5, 30) = 30, so only the ~40d row is purged;
     // the ~10d row must survive (it would NOT survive if the tenant's raw 5d setting

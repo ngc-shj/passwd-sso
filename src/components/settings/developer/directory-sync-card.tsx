@@ -122,11 +122,14 @@ export function DirectorySyncCard() {
   const [saving, setSaving] = useState(false);
   const [editInitial, setEditInitial] = useState<Record<string, unknown> | null>(null);
 
+  // Credentials start blank on edit and are sent only when re-entered, so
+  // whether any was entered is the change Save carries (never the values).
   const editCurrent = useMemo(() => ({
     displayName: formDisplayName,
     enabled: formEnabled,
     syncInterval: formSyncInterval,
-  }), [formDisplayName, formEnabled, formSyncInterval]);
+    credentialsEntered: Object.values(formCredentials).some(Boolean),
+  }), [formDisplayName, formEnabled, formSyncInterval, formCredentials]);
 
   const editHasChanges = useFormDirty(editCurrent, editInitial);
 
@@ -200,6 +203,7 @@ export function DirectorySyncCard() {
       displayName: config.displayName,
       enabled: config.enabled,
       syncInterval: interval,
+      credentialsEntered: false,
     });
     setDialogOpen(true);
   }

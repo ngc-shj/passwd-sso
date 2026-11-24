@@ -13,6 +13,7 @@ import { toastApiError } from "@/lib/http/toast-api-error";
 import { API_PATH } from "@/lib/constants";
 import { buildTagPathMap } from "@/lib/format/tag-tree";
 import { fetchApi } from "@/lib/url-helpers";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
 import { TAG_NAME_MAX_LENGTH } from "@/lib/validations";
 
 export interface TagData {
@@ -21,6 +22,16 @@ export interface TagData {
   color: string | null;
   parentId?: string | null;
   depth?: number;
+}
+
+function isTagData(value: unknown): value is TagData {
+  if (typeof value !== "object" || value === null) return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.id === "string" &&
+    typeof v.name === "string" &&
+    (v.color === null || typeof v.color === "string")
+  );
 }
 
 interface TagInputProps {
@@ -108,9 +119,22 @@ export function TagInput({ selectedTags, onChange }: TagInputProps) {
         body: JSON.stringify({ name: inputValue.trim() }),
       });
       if (res.ok) {
-        const newTag: TagData = await res.json();
-        setAllTags((prev) => [...prev, newTag]);
-        addTag(newTag);
+        const newTag = await parseJsonBodyOnce(res);
+        if (isTagData(newTag)) {
+          setAllTags((prev) => [...prev, newTag]);
+          addTag(newTag);
+          return;
+        }
+        // The tag exists but its row could not be read: find it in a
+        // reloaded list (a tag created here is a root tag).
+        const name = inputValue.trim();
+        const listRes = await fetchApi(`${API_PATH.TAGS}?tree=true`);
+        const list = listRes.ok ? await parseJsonBodyOnce(listRes) : null;
+        if (!Array.isArray(list)) return;
+        const tags = list.filter(isTagData);
+        setAllTags(tags);
+        const created = tags.find((tag) => tag.name === name && !tag.parentId);
+        if (created) addTag(created);
       } else {
         await toastApiError(res, tApi);
       }

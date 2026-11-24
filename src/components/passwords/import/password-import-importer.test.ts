@@ -192,6 +192,34 @@ describe("runImportEntries", () => {
     expect(mockEncryptData).toHaveBeenCalledTimes(4);
   });
 
+  it("counts an accepted chunk whose response body cannot be read as imported", async () => {
+    const unreadable = {
+      ok: true,
+      status: 201,
+      headers: { get: () => null },
+      json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+    } as unknown as Response;
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(response(true)) // GET tags
+      .mockResolvedValueOnce(unreadable); // POST bulk
+    vi.stubGlobal("fetch", fetchMock);
+    mockEncryptData.mockResolvedValue({ ciphertext: "c", iv: "i", authTag: "t" });
+
+    const result = await runImportEntries({
+      entries: [makeEntry({ title: "a", isFavorite: false }), makeEntry({ title: "b", isFavorite: false })],
+      isTeamImport: true,
+      tagsPath: "/api/teams/tags",
+      foldersPath: "/api/teams/folders",
+      sourceFilename: "team.csv",
+      teamEncryptionKey: {} as CryptoKey,
+      teamKeyVersion: 1,
+      teamId: "team-1",
+    });
+
+    expect(result).toEqual({ successCount: 2, failedCount: 0 });
+  });
+
   it("imports personal entry with encrypted payload", async () => {
     // No folderPath on entries → folder resolution skips GET
     const fetchMock = vi

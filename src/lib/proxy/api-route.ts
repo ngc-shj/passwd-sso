@@ -6,9 +6,16 @@ import {
   isBearerBypassRoute,
   isBearerBypassPath,
 } from "./cors-gate";
-import { getSessionInfo, hasSessionCookie } from "./auth-gate";
+import {
+  getSessionInfo,
+  hasSessionCookie,
+  type ProxySessionInfo,
+  type SessionInfo,
+} from "./auth-gate";
 import { classifyRoute, ROUTE_POLICY_KIND } from "./route-policy";
 import { shouldEnforceCsrf, assertSessionCsrf } from "./csrf-gate";
+import { assertExpectedUser } from "./expected-user-gate";
+import { withoutSessionCookies } from "@/lib/auth/session/session-cookie";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
 import { errorResponse } from "@/lib/http/api-response";
@@ -24,7 +31,13 @@ import {
   isSessionGateTierB,
 } from "./session-passkey-gate";
 
-export async function handleApiAuth(request: NextRequest) {
+/**
+ * `incomingHeaders` are the headers the request arrived with, before
+ * normalizeForwardedHeaders rewrote Host and X-Forwarded-*. A pass-through
+ * that overrides the route's headers builds on them, so the route sees what
+ * any other pass-through forwards, less what the override removes.
+ */
+export async function handleApiAuth(request: NextRequest, incomingHeaders: Headers = request.headers) {
   const { pathname } = request.nextUrl;
   const policy = classifyRoute(pathname);
   // Bearer-bypass eligibility is a code-path concern (which dispatch
@@ -50,18 +63,36 @@ export async function handleApiAuth(request: NextRequest) {
     });
   }
 
+  // One session read per request, shared by the expected-user gate and the
+  // session gate.
+  let sessionRead: Promise<ProxySessionInfo> | undefined;
+  const readSession = () => (sessionRead ??= getSessionInfo(request));
+
+  // Expected-user gate: before every route, whatever its classification. A
+  // request that names its user is never served under another user's cookie.
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const cookiePresent = hasSessionCookie(cookieHeader);
+  const expectedUser = await assertExpectedUser(request, cookiePresent, readSession);
+  if (expectedUser.refusal) return applyCorsHeaders(request, expectedUser.refusal);
+  // Every pass-through below hands the route the headers the gate decided on:
+  // the incoming ones, less the session cookies when the gate removed them.
+  // The gates below still read the request.
+  const forwardHeaders = expectedUser.stripSessionCookies ? withoutSessionCookies(incomingHeaders) : null;
+  const passOn = () =>
+    forwardHeaders ? NextResponse.next({ request: { headers: forwardHeaders } }) : NextResponse.next();
+
   // Non-CSRF early returns. ALL paths outside the cookie-CSRF threat
   // model MUST short-circuit BEFORE the CSRF gate fires.
   if (policy.kind === ROUTE_POLICY_KIND.PUBLIC_SHARE) {
-    const res = NextResponse.next();
+    const res = passOn();
     res.headers.set("Cache-Control", "no-store");
     return res;
   }
   if (policy.kind === ROUTE_POLICY_KIND.PUBLIC_RECEIVER) {
-    return NextResponse.next();
+    return passOn();
   }
   if (policy.kind === ROUTE_POLICY_KIND.API_V1) {
-    const res = NextResponse.next();
+    const res = passOn();
     res.headers.set("Cache-Control", "private, no-store");
     return res;
   }
@@ -73,7 +104,7 @@ export async function handleApiAuth(request: NextRequest) {
   // + tenant IP restriction. MUST short-circuit BEFORE the CSRF gate fires
   // — see plan C2 (Round-2 S14/T16 load-bearing wiring).
   if (isBridgeCodeRoute) {
-    const res = NextResponse.next();
+    const res = passOn();
     res.headers.set("Cache-Control", "private, no-store");
     return applyCorsHeaders(request, res, { allowExtensionCredentials: true });
   }
@@ -83,8 +114,6 @@ export async function handleApiAuth(request: NextRequest) {
   // mutating method, regardless of route classification. This closes
   // pre1 (a mutating route without its own Origin check) and the R3
   // baseline gap structurally.
-  const cookieHeader = request.headers.get("cookie") ?? "";
-  const cookiePresent = hasSessionCookie(cookieHeader);
   if (shouldEnforceCsrf(request, cookiePresent)) {
     const csrfError = assertSessionCsrf(request);
     if (csrfError) return applyCorsHeaders(request, csrfError);
@@ -102,7 +131,7 @@ export async function handleApiAuth(request: NextRequest) {
   // clients, SA / MCP tokens) do not ship the Auth.js session cookie, so
   // the bypass still applies to them.
   if (hasBearer && isBearerRoute && !cookiePresent) {
-    const res = NextResponse.next();
+    const res = passOn();
     res.headers.set("Cache-Control", "private, no-store");
     return applyCorsHeaders(request, res, { allowExtension: true });
   }
@@ -112,7 +141,7 @@ export async function handleApiAuth(request: NextRequest) {
   // content script (isolated world). The route handler validates the code
   // and atomically consumes it. CORS must allow chrome-extension origins.
   if (isExchangeRoute) {
-    const res = NextResponse.next();
+    const res = passOn();
     res.headers.set("Cache-Control", "private, no-store");
     return applyCorsHeaders(request, res, { allowExtension: true });
   }
@@ -133,14 +162,14 @@ export async function handleApiAuth(request: NextRequest) {
     (isSessionRequired || cookiePresent) &&
     !isSessionGateTierA(request.method, pathname)
   ) {
-    const refusal = await gateSession(request, pathname, isSessionRequired);
+    const refusal = await gateSession(request, pathname, isSessionRequired, readSession);
     if (refusal) return applyCorsHeaders(request, refusal);
   }
 
   // Default (api-default): prevent CDN/proxy from caching authenticated
   // API responses. Route handlers may override with explicit
   // Cache-Control headers.
-  const res = NextResponse.next();
+  const res = passOn();
   res.headers.set("Cache-Control", "private, no-store");
   return applyCorsHeaders(request, res);
 }
@@ -153,9 +182,10 @@ async function gateSession(
   request: NextRequest,
   pathname: string,
   isSessionRequired: boolean,
+  readSession: () => Promise<SessionInfo>,
 ): Promise<NextResponse | null> {
   const { method } = request;
-  const session = await getSessionInfo(request);
+  const session = await readSession();
   if (!session.valid) {
     if (isSessionRequired) return noStoreError(API_ERROR.UNAUTHORIZED);
     // API_DEFAULT: keyed on whether the route reads the session, not on why

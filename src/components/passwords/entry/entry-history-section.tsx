@@ -18,6 +18,7 @@ import {
 } from "@/lib/team/team-history-restore";
 import { toastApiError } from "@/lib/http/toast-api-error";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { decryptData, type EncryptedData } from "@/lib/crypto/crypto-client";
 import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
 import { openTeamEntryFieldAt } from "@/lib/crypto/crypto-team";
@@ -42,7 +43,7 @@ import { useReprompt } from "@/hooks/vault/use-reprompt";
 import { formatDateTime, formatDate } from "@/lib/format/format-datetime";
 import { DISPLAY_KEYS, SENSITIVE_KEYS, DATE_KEYS, TRANSLATED_VALUE_KEYS } from "./entry-history-keys";
 import { fetchApi } from "@/lib/url-helpers";
-import { REVEAL_TIMEOUT_MS } from "@/lib/constants";
+import { useRevealSet, type RequireVerificationFn } from "@/hooks/vault/use-reveal-timeout";
 
 interface HistoryEntry {
   id: string;
@@ -82,10 +83,14 @@ async function openPersonalHistoryBlob(
   return decryptData(h.encryptedBlob, encryptionKey, aad);
 }
 
+const revealWithoutReprompt: RequireVerificationFn = (_entryId, _requireReprompt, callback) => callback();
+
 function ViewContent({ data }: { data: Record<string, unknown> }) {
   const t = useTranslations("PasswordDetail");
   const locale = useLocale();
-  const [revealedKeys, setRevealedKeys] = useState<Set<string>>(new Set());
+  // The history view is opened behind reprompt already, so a reveal needs no
+  // second verification.
+  const { handleRevealIndex, isRevealed } = useRevealSet(revealWithoutReprompt, "", false);
   const entries = DISPLAY_KEYS
     .filter((key) => data[key] != null && data[key] !== "")
     .map((key) => {
@@ -98,49 +103,30 @@ function ViewContent({ data }: { data: Record<string, unknown> }) {
       return [key, value];
     });
 
-  const toggleReveal = (key: string) => {
-    setRevealedKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-        setTimeout(() => {
-          setRevealedKeys((p) => {
-            const n = new Set(p);
-            n.delete(key);
-            return n;
-          });
-        }, REVEAL_TIMEOUT_MS);
-      }
-      return next;
-    });
-  };
-
   return (
     <div className="space-y-2">
-      {entries.map(([key, value]) => (
+      {entries.map(([key, value], idx) => (
         <div key={key}>
           <p className="text-xs font-medium text-muted-foreground">{t(key)}</p>
           {SENSITIVE_KEYS.has(key) ? (
             <div className="flex items-center gap-1">
               <p className="text-sm break-all whitespace-pre-wrap font-mono">
-                {revealedKeys.has(key) ? value : "••••••••"}
+                {isRevealed(idx) ? value : "••••••••"}
               </p>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
                 className="h-7 w-7 shrink-0"
-                onClick={() => toggleReveal(key)}
+                onClick={() => handleRevealIndex(idx)}
               >
-                {revealedKeys.has(key) ? (
+                {isRevealed(idx) ? (
                   <EyeOff className="h-3.5 w-3.5" />
                 ) : (
                   <Eye className="h-3.5 w-3.5" />
                 )}
               </Button>
-              {revealedKeys.has(key) && (
+              {isRevealed(idx) && (
                 <p className="text-xs text-muted-foreground">{t("autoHide")}</p>
               )}
             </div>
@@ -258,7 +244,7 @@ export function EntryHistorySection({
           break;
         }
         if (!scopedTeamId) return;
-        const code = ((await res.json().catch(() => ({}))) as { error?: unknown }).error;
+        const code = (await readApiErrorBody(res))?.error;
         if (code === API_ERROR.HISTORY_ROW_CHANGED && attempt === 0) continue;
         // A team refusal names its exits (HISTORY_KEY_UNAVAILABLE: restore a
         // more recent version, or delete the entry).

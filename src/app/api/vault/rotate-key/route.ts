@@ -4,6 +4,7 @@ import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { advisoryXactLock } from "@/lib/tenant-rls";
 import { compareVaultAuthHash } from "@/lib/vault/verify-auth-hash";
+import { checkStoredVerifier } from "@/lib/vault/stored-verifier-server";
 import { invalidateUserSessions } from "@/lib/auth/session/user-session-invalidation";
 import { createRateLimiter } from "@/lib/security/rate-limit";
 import { API_ERROR } from "@/lib/http/api-error-codes";
@@ -67,15 +68,21 @@ const attachmentCekRewrapSchema = z.object({
 });
 
 const rotateKeySchema = z.object({
-  // Current passphrase verification
+  // Proof of the current secret key (the unlocked vault)
   currentAuthHash: hexHash,
+  // Proof of the typed current passphrase: the new wrap and verifier are
+  // derived from it, so a typo must be refused here, not become the new
+  // passphrase.
+  currentVerifierHash: hexHash,
   // New vault wrapping data
   encryptedSecretKey: z.string().min(1).max(WRAPPED_SECRET_KEY_MAX),
   secretKeyIv: hexIv,
   secretKeyAuthTag: hexAuthTag,
   accountSalt: hexSalt,
   newAuthHash: hexHash,
-  newVerifierHash: hexHash.optional(),
+  // Required: the new wrap moves accountSalt, so a verifier left behind under
+  // the old salt would refuse every later passphrase check.
+  newVerifierHash: hexHash,
   verificationArtifact: verificationArtifactSchema,
   // Entry re-encryption payload — aadVersion must be >= 1 (AAD binding required)
   entries: z.array(z.object({
@@ -150,6 +157,8 @@ async function handlePOST(request: NextRequest) {
         masterPasswordServerSalt: true,
         keyVersion: true,
         accountSalt: true,
+        passphraseVerifierHmac: true,
+        passphraseVerifierVersion: true,
       },
     }),
   );
@@ -161,7 +170,26 @@ async function handlePOST(request: NextRequest) {
   // closure below — TS does not retain the guard's narrowing through it.
   const { vaultSetupAt, accountSalt, masterPasswordServerHash, masterPasswordServerSalt } = user;
 
-  // Verify current passphrase
+  // Verify the typed current passphrase against the CURRENT stored verifier
+  // (must be set — backfilled during unlock). currentAuthHash only proves the
+  // client holds the secret key, which an unlocked client always does — and
+  // a tab still holding pre-change state after a passphrase change elsewhere
+  // computes its verifier from the old salt, so it is refused here too.
+  const verifier = await checkStoredVerifier(request, {
+    userId,
+    tenantId: user.tenantId,
+    clientVerifierHash: payload.currentVerifierHash,
+    storedHmac: user.passphraseVerifierHmac,
+    storedVersion: user.passphraseVerifierVersion,
+  });
+  if (verifier !== "ok") {
+    if (verifier === "unavailable") return errorResponse(API_ERROR.SERVICE_UNAVAILABLE);
+    return errorResponse(
+      verifier === "not-set" ? API_ERROR.VERIFIER_NOT_SET : API_ERROR.INVALID_PASSPHRASE,
+    );
+  }
+
+  // Verify the client holds the current secret key
   if (!compareVaultAuthHash(payload.currentAuthHash, { masterPasswordServerHash, masterPasswordServerSalt })) {
     return errorResponse(API_ERROR.INVALID_PASSPHRASE);
   }
@@ -242,8 +270,11 @@ async function handlePOST(request: NextRequest) {
   // MUST remain OUTSIDE the rotation transaction because the helper opens
   // its own bypass-RLS transaction on the global prisma client and would
   // deadlock against the rotation's `pg_advisory_xact_lock` if nested.
+  // Cross-tenant: the vault key belongs to the global User, so its sessions
+  // and tokens in every tenant held the previous secretKey's trust. The
+  // current session is revoked too (#433/S-N2), unlike change-passphrase.
   const invalidationResult = await invalidateUserSessions(userId, {
-    tenantId: user.tenantId,
+    allTenants: true,
     reason: "KEY_ROTATION",
   }).catch((err) => {
     getLogger().error(

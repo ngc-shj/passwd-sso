@@ -34,7 +34,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:integration": "node scripts/run-integration-tests.mjs",
     "test:e2e": "playwright test --config e2e/playwright.config.ts",
     "licenses:check": "node scripts/checks/check-licenses.mjs --name app --lockfile package-lock.json",
     "licenses:check:strict": "node scripts/checks/check-licenses.mjs --name app --lockfile package-lock.json --strict",

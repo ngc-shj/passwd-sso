@@ -21,7 +21,7 @@
  * inherited HOME would let a test of default behaviour delete the developer's
  * real backups.
  */
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { spawnSync, spawn } from "node:child_process";
 import {
   mkdtempSync, mkdirSync, rmSync, writeFileSync, chmodSync, readFileSync,
@@ -197,13 +197,51 @@ esac
 exit 0`);
 }
 
+// A budget for a HUNG run, not a performance bound. An uncontended run takes
+// well under a second, but under the full `vitest run --coverage` suite one
+// passed 8 s, and the kill that followed was read as the script's verdict: the
+// harness stopped reading, the script's SIGTERM handler wrote to the closed
+// stderr, and the run surfaced as "expected 141 to be 0" with no BACKUP_ERR.
+const SCRIPT_TIMEOUT_MS = 30000;
+// The cell budget, for the same reason one level up. A synchronous cell cannot
+// be interrupted — vitest only measures it afterwards — so the global 10 s
+// default bounded nothing here and failed every cell whose runs, each well
+// inside SCRIPT_TIMEOUT_MS, added up past it under load: the 21-run allowlist
+// cell did on every one of 20 contended runs. A hung run is still stopped by
+// SCRIPT_TIMEOUT_MS, because runScript's timeout kills with SIGKILL; cells that
+// set their own budget keep it.
+vi.setConfig({ testTimeout: 300000 });
+
+/**
+ * spawnSync for the script under test. A timeout or a spawn failure THROWS:
+ * the status of a run the harness killed is the kill's, not the script's, and
+ * every assertion on it reports a wrong verdict instead of the hang it was.
+ *
+ * The timeout kills with SIGKILL unless a cell names its own signal. The script
+ * traps SIGTERM, and bash runs a trap only once the foreground command returns,
+ * so spawnSync's default SIGTERM stopped nothing while a stub hung: measured, a
+ * TERM-trapped `sleep 5` under a 1000 ms timeout returned at 5005 ms, and a
+ * child that never returns held the synchronous cell — which vitest cannot
+ * interrupt — forever.
+ */
+function runScript(bin, args, options) {
+  const timeout = options.timeout ?? SCRIPT_TIMEOUT_MS;
+  const r = spawnSync(bin, args, { encoding: "utf8", cwd: REPO_ROOT, killSignal: "SIGKILL", ...options, timeout });
+  if (r.error) {
+    const why = r.error.code === "ETIMEDOUT"
+      ? `did not finish within ${timeout} ms and was killed`
+      : `failed to run: ${r.error.message}`;
+    throw new Error(`${bin} ${args.join(" ")} ${why} (status ${r.status}, signal ${r.signal}); ` +
+      `stderr so far: ${r.stderr}`);
+  }
+  return r;
+}
+
 /** Run the script with an explicit environment allowlist. */
-function run(env = {}, { tocEntries, timeout = 8000, killSignal } = {}) {
-  return spawnSync("bash", [SCRIPT], {
-    encoding: "utf8",
+function run(env = {}, { tocEntries, timeout, killSignal } = {}) {
+  return runScript("bash", [SCRIPT], {
     timeout,
     ...(killSignal === undefined ? {} : { killSignal }),
-    cwd: REPO_ROOT,
     env: {
       PATH: `${binDir}:${process.env.PATH}`,
       HOME: homeDir,
@@ -448,8 +486,7 @@ exit 0`);
       const w = spawnSync("sh", ["-c", `command -v ${tool}`], { encoding: "utf8" });
       if (w.status === 0) symlinkSync(w.stdout.trim(), join(sysbin, tool));
     }
-    const r = spawnSync("bash", [SCRIPT], {
-      encoding: "utf8", timeout: 8000, cwd: REPO_ROOT,
+    const r = runScript("bash", [SCRIPT], {
       env: { PATH: sysbin, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir },
     });
     expect(err(r)).toBe("NO_DOCKER");
@@ -995,8 +1032,7 @@ exit 0`);
 
   it("does not leak the password into a bash -x trace", () => {
     pgStubs();
-    const r = spawnSync("bash", ["-x", SCRIPT], {
-      encoding: "utf8", timeout: 8000, cwd: REPO_ROOT,
+    const r = runScript("bash", ["-x", SCRIPT], {
       env: {
         PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C",
         BACKUP_DIR: backupDir,
@@ -1261,13 +1297,6 @@ done
 exit 0`);
   };
 
-  // The delegating cases run the real reader, which on a host without
-  // pg_restore is `docker compose exec` — 0.3-0.5 s idle, but past run()'s
-  // default 8 s under a full parallel pre-pr run. A kill there leaves no
-  // BACKUP_ERR line, so the failure reads as a wrong verdict, not a timeout.
-  // Same budget as the reader.list() calls above.
-  const DELEGATED_RUN_TIMEOUT_MS = 20000;
-
   it("publishes a VALID archive through the script's own reader invocation", { timeout: 30000 }, () => {
     // This is the case that reds on a regressed invocation. Naming /dev/stdin
     // as pg_restore's file argument makes it seek a non-seekable descriptor and
@@ -1275,7 +1304,7 @@ exit 0`);
     // that, because it fails either way.
     expect(reader, "a real archive reader is required — the delegating stub needs one").not.toBeNull();
     delegatingStub(join(FIXTURES, "valid.pgdump"));
-    const r = run({}, { timeout: DELEGATED_RUN_TIMEOUT_MS });
+    const r = run();
     expect(r.status, r.stderr).toBe(0);
     expect(readLog(), "the real reader must have been reached").toContain("DELEGATED");
     expect(generations()).toHaveLength(1);
@@ -1297,7 +1326,7 @@ exit 0`);
     // landed on the sibling case above and not on this twin.
     expect(reader, "a real archive reader is required — the delegating stub needs one").not.toBeNull();
     delegatingStub(join(FIXTURES, "truncated.pgdump"));
-    const r = run({}, { timeout: DELEGATED_RUN_TIMEOUT_MS });
+    const r = run();
     expect(err(r)).toBe("VALIDATE_FAILED");
     expect(readLog(), "the real reader must have been reached").toContain("DELEGATED");
     expect(readdirSync(backupDir).filter((n) => n.endsWith(".FAILED"))).toHaveLength(1);
@@ -1577,6 +1606,74 @@ exit 0`);
     expect(statLine, "the credential belongs in the one audited directory").toContain(backupDir);
     expect(readdirSync(backupDir).filter((n) => n.startsWith(".pgpass")),
       "and must not outlive the run").toEqual([]);
+  });
+
+  // rm is PATH-resolved, so a stub decides whether the cleanup's removal of the
+  // passfile works. Both arms of the check: rm failing, and rm claiming success
+  // while the file is still there.
+  const realRm = spawnSync("sh", ["-c", "command -v rm"], { encoding: "utf8" }).stdout.trim();
+  const passfileRmStub = (onPassfile) => stub("rm", `
+for a in "$@"; do
+  case "$a" in */.pgpass.*) ${onPassfile} ;; esac
+done
+exec "${realRm}" "$@"`);
+
+  it.each([
+    ["rm fails", "echo \"rm: cannot remove '$a': Operation not permitted\" >&2; exit 1"],
+    ["rm reports success but the file stays", "exit 0"],
+  ])("does not report success when the passfile survives the run (%s)", (_name, onPassfile) => {
+    pgStubs();
+    passfileRmStub(onPassfile);
+    const r = run({ MIGRATION_DATABASE_URL: url("u:p") });
+    expect(r.status, r.stderr).toBe(1);
+    expect(err(r)).toBe("CLEANUP_INCOMPLETE");
+    const left = readdirSync(backupDir).filter((n) => n.startsWith(".pgpass"));
+    expect(left, "positive control: the stub did keep the passfile").toHaveLength(1);
+    expect(r.stderr, "the warning names the file to remove").toContain(join(realBackupDir, left[0]));
+    expect(generations(), "the generation itself was published").toHaveLength(1);
+  });
+
+  it("exits 0 with no cleanup warning when the passfile is removed", () => {
+    pgStubs();
+    passfileRmStub(":");
+    const r = run({ MIGRATION_DATABASE_URL: url("u:p") });
+    expect(r.status, r.stderr).toBe(0);
+    expect(err(r)).toBeNull();
+    expect(r.stderr).not.toMatch(/could not remove/);
+    expect(readdirSync(backupDir).filter((n) => n.startsWith(".pgpass"))).toEqual([]);
+  });
+
+  it("keeps a failed run's own code when the passfile also survives", () => {
+    pgStubs();
+    stub("psql", `printf 'f||\\n'
+exit 0`);
+    passfileRmStub("exit 1");
+    const r = run({ MIGRATION_DATABASE_URL: url("u:p") });
+    expect(err(r), "one identifier per failure: the cause, not the cleanup").toBe("CONNECT_FAILED");
+    expect(r.stderr).not.toMatch(/BACKUP_ERR:CLEANUP_INCOMPLETE/);
+    expect(r.stderr).toMatch(/could not remove the passfile/);
+  });
+
+  it("finishes its cleanup when a signal lands before any command of it", () => {
+    // The cleanup's first commands run before its no-op handlers are armed: a
+    // signal there ran on_signal, whose exit — inside the EXIT trap, which bash
+    // does not run twice — skipped the passfile and the lock. No external
+    // command runs in that window, so a stub cannot reach it; a DEBUG trap
+    // injected through BASH_ENV signals the script before EVERY command the
+    // cleanup function runs, the first ones included.
+    pgStubs();
+    const fired = join(tmpDir, "fired");
+    const inject = join(tmpDir, "inject.sh");
+    writeFileSync(inject, `set -T
+trap '[ "\${FUNCNAME[0]:-}" = cleanup ] && { echo x >> "${fired}"; kill -TERM $$; }' DEBUG
+`, "utf8");
+    const r = run({ MIGRATION_DATABASE_URL: url("u:p"), BASH_ENV: inject });
+    expect(existsSync(fired) && readFileSync(fired, "utf8").length > 0,
+      "positive control: the injector signalled the cleanup").toBe(true);
+    expect(readdirSync(backupDir).filter((n) => n.startsWith(".pgpass")), "the passfile").toEqual([]);
+    expect(existsSync(join(backupDir, ".lock.d")), "the lock").toBe(false);
+    expect({ status: r.status, signal: r.signal }, "the run's own status, not a handler's 128+n")
+      .toEqual({ status: 0, signal: null });
   });
 
   it("neutralises an ambient libpq environment rather than passing it through", () => {
@@ -2051,6 +2148,104 @@ exit 0`);
     expect(r.stderr).toMatch(/refusing to publish over it/);
   });
 
+  it("finishes its cleanup and exits 1 when nothing reads its stderr any more", { timeout: 20000 }, async () => {
+    // A caller that kills the run and stops reading — node's spawnSync timeout,
+    // a log pipe whose reader died — turns the cleanup's own warnings into
+    // SIGPIPE. Its handler exited from inside the EXIT trap: the run reported a
+    // raw 141, and every step after the warning (the passfile, the lock) was
+    // skipped. A validation failure is the shape that warns BEFORE those steps.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    dockerStub({ restoreFails: "1" });
+    const child = spawn(BASH, [SCRIPT], {
+      cwd: REPO_ROOT,
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    child.stderr.destroy();
+    // A hung run must fail this cell rather than outlive it: the cell timeout
+    // only reports the cell, and the child would keep running behind it.
+    const killer = setTimeout(() => child.kill("SIGKILL"), 15000);
+    const [code, signal] = await new Promise((res) => child.on("exit", (c, s) => res([c, s])));
+    clearTimeout(killer);
+    expect({ code, signal }, "the trap's normalised status, not a handler's 128+n").toEqual({ code: 1, signal: null });
+    const left = readdirSync(backupDir);
+    expect(left.filter((n) => n === ".lock.d"), "the lock must not outlive the run").toEqual([]);
+    expect(left.filter((n) => n.endsWith(".partial"))).toEqual([]);
+    // Positive control: the run did reach the warning that used to cut it short.
+    expect(left.filter((n) => n.endsWith(".FAILED")), "the validation failure was kept").toHaveLength(1);
+  });
+
+  it("leaves the commands its cleanup runs killable by a supervisor's TERM", { timeout: 30000 }, async () => {
+    // The cleanup's handlers are a no-op, not `trap ''`: an IGNORED disposition
+    // is inherited by every command the cleanup starts, so a supervisor's TERM
+    // to the process group would leave a hung rm/mv running. A stubbed rm of
+    // the run directory blocks on a FIFO nobody writes; the test then TERMs the
+    // script and that rm, as a process-group stop does.
+    mkdirSync(backupDir, { recursive: true, mode: 0o700 });
+    chmodSync(backupDir, 0o700);
+    dockerStub({ dumpFails: "jackson" });
+    const fifo = join(tmpDir, "rm.fifo");
+    const rmPid = join(tmpDir, "rm.pid");
+    expect(spawnSync("mkfifo", [fifo]).status).toBe(0);
+    const realRm = spawnSync("sh", ["-c", "command -v rm"], { encoding: "utf8" }).stdout.trim();
+    stub("rm", `
+for a in "$@"; do
+  case "$a" in
+    *.partial) echo $$ > "${rmPid}.tmp" && mv "${rmPid}.tmp" "${rmPid}"; read -r _ < "${fifo}" ;;
+  esac
+done
+exec "${realRm}" "$@"`);
+    const child = spawn(BASH, [SCRIPT], {
+      cwd: REPO_ROOT,
+      env: { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.on("data", (d) => { stderr += d; });
+    const done = new Promise((res) => child.on("close", (c, sig) => res([c, sig])));
+
+    const deadline = Date.now() + 10000;
+    while (!existsSync(rmPid) && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 20));
+    }
+    expect(existsSync(rmPid), "positive control: the cleanup reached the stubbed rm").toBe(true);
+    const stuck = Number(readFileSync(rmPid, "utf8").trim());
+
+    child.kill("SIGTERM");
+    process.kill(stuck, "SIGTERM");
+    // An rm that ignores TERM blocks forever; end it and the run so the cell
+    // fails on the assertion below instead of hanging.
+    const killer = setTimeout(() => {
+      try { process.kill(stuck, "SIGKILL"); } catch { /* already gone */ }
+      child.kill("SIGKILL");
+    }, 5000);
+    const [code, signal] = await done;
+    clearTimeout(killer);
+
+    expect({ code, signal }, "the rm died of the TERM and the run finished its cleanup")
+      .toEqual({ code: 1, signal: null });
+    expect(stderr).toMatch(/BACKUP_ERR:DUMP_FAILED/);
+    expect(stderr, "the interrupted removal is reported, not silent").toMatch(/could not remove .*\.partial/);
+    expect(existsSync(join(backupDir, ".lock.d")), "the lock is removed after the killed rm").toBe(false);
+  });
+
+  it("reports a run the harness had to kill as a timeout, not as a verdict", () => {
+    // The harness half of the same flake: a run killed by spawnSync's timeout
+    // returned whatever status the dying script produced (141, or 1 with no
+    // BACKUP_ERR), and the case reported a wrong verdict instead of a hang.
+    stub("docker", `
+[ "\${2:-}" = "config" ] && exit 0
+[ "\${2:-}" = "ps" ] && { echo c1; exit 0; }
+for a in "$@"; do case "$a" in pg_dump) exec sleep 30 ;; esac; done
+exit 0`);
+    // A child that outlives the budget by far: the script's TERM handler waits
+    // for it, so only a kill bash cannot defer ends the run near the budget.
+    const started = Date.now();
+    expect(() => run({}, { timeout: 1000 })).toThrow(/did not finish within 1000 ms/);
+    expect(Date.now() - started, "the harness must not wait for the hung child").toBeLessThan(2000);
+  });
+
   it("reports the signal by name and leaves no credential behind", { timeout: 20000 }, () => {
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
@@ -2413,10 +2608,10 @@ exit 0`);
     mkdirSync(backupDir, { recursive: true, mode: 0o700 });
     chmodSync(backupDir, 0o700);
     unclaimableLockStub();
-    const r = spawnSync("bash", ["-x", SCRIPT], {
+    const r = runScript("bash", ["-x", SCRIPT], {
       // The trace of the mount-table reader grows with the host's mounts; the
       // default 1 MiB would truncate stderr before the line asserted here.
-      encoding: "utf8", timeout: 8000, cwd: REPO_ROOT, maxBuffer: 16 * 1024 * 1024,
+      maxBuffer: 16 * 1024 * 1024,
       env: { PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir },
     });
     // Positive control: xtrace is live around the claim. The script turns it off
@@ -2572,9 +2767,9 @@ for a in "$@"; do
   esac
 done
 exit 0`);
-    // SIGKILL, not the default SIGTERM: without the rollback the EXIT trap reads
-    // pid, i.e. /dev/full, forever, and bash defers the TERM handler until that
-    // command substitution ends — spawnSync would never return.
+    // SIGKILL, which is also the harness default: without the rollback the EXIT
+    // trap reads pid, i.e. /dev/full, forever, and bash defers a TERM handler
+    // until that command substitution ends — spawnSync would never return.
     const r = run({}, { killSignal: "SIGKILL" });
     expect(err(r)).toBe("INTERNAL");
     expect(r.stderr).toMatch(/could not record the lock holder/);
@@ -2674,7 +2869,7 @@ exec "${realStat}" "$@"`);
     const { BACKUP_DIR: _omitted, ...rest } = {
       PATH: `${binDir}:${process.env.PATH}`, HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir,
     };
-    const r = spawnSync(BASH, [SCRIPT], { encoding: "utf8", timeout: 8000, cwd: REPO_ROOT, env: rest });
+    const r = runScript(BASH, [SCRIPT], { env: rest });
     expect(r.status, r.stderr).toBe(0);
     const defaultRoot = join(homeDir, "passwd-sso-backups");
     expect(existsSync(defaultRoot), "the documented default must be where the run lands").toBe(true);
@@ -3964,7 +4159,7 @@ exit 0`);
 
   it("publishes with the root-swap cell's setup when the root is left alone (its positive control)", { timeout: 30000 }, () => {
     const env = slowDumpRun();
-    const r = spawnSync("bash", [SCRIPT], { encoding: "utf8", timeout: 25000, cwd: REPO_ROOT, env });
+    const r = runScript("bash", [SCRIPT], { timeout: 25000, env });
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(generations()).toHaveLength(1);
   });
@@ -4619,8 +4814,7 @@ exec "${real}" "$@"`);
     // before require_binary spawns an external command (the version floor, the
     // environment block and the URL parser are all shell builtins), so the
     // absence of pg_restore is constructed here rather than hoped for.
-    const r = spawnSync(BASH, [SCRIPT], {
-      encoding: "utf8", timeout: 8000, cwd: REPO_ROOT,
+    const r = runScript(BASH, [SCRIPT], {
       env: {
         PATH: sysbin,
         HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir,
@@ -4641,8 +4835,7 @@ exec "${real}" "$@"`);
       writeFileSync(join(sysbin, tool), "#!/usr/bin/env bash\nexit 0\n", "utf8");
       chmodSync(join(sysbin, tool), 0o755);
     }
-    const r = spawnSync("bash", [SCRIPT], {
-      encoding: "utf8", timeout: 8000, cwd: REPO_ROOT,
+    const r = runScript("bash", [SCRIPT], {
       env: {
         PATH: `${sysbin}:${process.env.PATH}`,
         HOME: homeDir, LANG: "C", BACKUP_DIR: backupDir,

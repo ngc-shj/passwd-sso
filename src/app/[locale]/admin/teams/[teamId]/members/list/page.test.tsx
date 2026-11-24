@@ -820,6 +820,22 @@ describe("TeamMembersPage (SCIM bulk admission, C5)", () => {
     });
   });
 
+  it.each(["approve", "reject"] as const)(
+    "reports a bulk %s whose response body cannot be read as done and reloads the list",
+    async (kind) => {
+      await renderPage(pendingRows(2), "OWNER", () => new Response("<html>gateway</html>", { status: 200 }));
+      const before = mockFetch.mock.calls.filter((c) => c[0] === "/api/teams/team-1/members").length;
+      await confirmBulk(kind);
+      await waitFor(() => {
+        expect(mockToast.success).toHaveBeenCalledWith(kind === "approve" ? "bulkApproveDone" : "bulkRejectDone");
+      });
+      expect(mockToast.error).not.toHaveBeenCalled();
+      await waitFor(() => {
+        expect(mockFetch.mock.calls.filter((c) => c[0] === "/api/teams/team-1/members").length).toBeGreaterThan(before);
+      });
+    },
+  );
+
   it("toasts the rejected count on bulk reject success", async () => {
     await renderPage(pendingRows(2), "OWNER", () =>
       okResults([

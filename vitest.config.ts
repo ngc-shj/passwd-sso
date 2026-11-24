@@ -22,54 +22,18 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       include: [
-        "src/app/api/**/*.ts",
-        "src/lib/crypto/crypto-utils.ts",
-        "src/lib/crypto/crypto-client.ts",
-        "src/lib/crypto/crypto-aad.ts",
-        "src/lib/crypto/crypto-emergency.ts",
-        "src/lib/crypto/crypto-recovery.ts",
-        "src/lib/auth/access/team-auth.ts",
-        "src/lib/crypto/crypto-server.ts",
-        "src/lib/crypto/crypto-team.ts",
-        "src/lib/team/team-vault-core.tsx",
-        "src/lib/generator/password-generator.ts",
-        "src/lib/email/**/*.ts",
-        "src/lib/auth/session/auth-adapter.ts",
-        "src/lib/auth/session/session-concurrency.ts",
-        "src/lib/auth/tokens/scim-token.ts",
-        "src/lib/scim/*.ts",
-        "src/lib/auth/webauthn/webauthn-authorize.ts",
-        "src/lib/auth/webauthn/webauthn-server.ts",
-        "src/lib/auth/session/check-auth.ts",
-        "src/lib/http/parse-body.ts",
-        "src/lib/http/with-request-log.ts",
-        "src/lib/auth/session/auth-or-token.ts",
-        "src/lib/auth/policy/access-restriction.ts",
-        "src/lib/auth/policy/account-lockout.ts",
-        "src/lib/webhook-dispatcher.ts",
-        "src/lib/audit/audit.ts",
-        "src/lib/audit/audit-outbox.ts",
-        "src/lib/audit/audit-query.ts",
-        "src/lib/audit/audit-chain.ts",
-        "src/lib/audit/audit-chain-verify.ts",
-        "src/proxy.ts",
-        "src/components/**/*.{ts,tsx}",
-        "src/app/global-error.tsx",
-        "src/lib/key-provider/**/*.ts",
-        "src/lib/prisma/prisma-error.ts",
-        "src/lib/security/sentry-sanitize.ts",
-        "src/lib/mcp/**/*.ts",
-        "src/lib/security/password-policy-validation.ts",
-        "src/lib/clipboard/**/*.ts",
-        "src/lib/auth/tokens/extension-token.ts",
-        "src/lib/auth/session/session-cookie.ts",
-        "src/lib/proxy/auth-gate.ts",
-        "src/lib/proxy/page-route.ts",
+        "src/**/*.{ts,tsx}",
+        "proxy.ts",
+        "instrumentation-client.ts",
+        "sentry.client.config.ts",
+        "sentry.server.config.ts",
       ],
-      exclude: [
-        "src/app/api/auth/\\[...nextauth\\]/**",
-        "src/components/**/*.test.{ts,tsx}",
-      ],
+      // Every production file is measured; scripts/checks/check-coverage-scope.mjs
+      // fails when one is not (scripts/checks/lib/coverage-members.mjs holds the
+      // member set this list must cover).
+      exclude: ["src/**/*.test.{ts,tsx}", "src/**/__tests__/**", "src/**/*.d.ts"],
+      // vitest's defaults plus json-summary, which check-coverage-scope reads.
+      reporter: ["text", "html", "clover", "json", "json-summary"],
       thresholds: isCoverageShard ? undefined : {
         // T8: floors exist so negative/denied paths (authz rejection,
         // expired-grant, revoked-token) can't silently erode. They are a
@@ -82,6 +46,27 @@ export default defineConfig({
         // Without this, statement-level erosion is ungated: v8 counts
         // statements and lines separately and they do diverge.
         statements: 75,
+        // Every measured file, on top of the aggregate: a nearly untested file
+        // used to average away under the floors above (one component sat at
+        // 2/84). Every file measured at >=65 when this was enrolled; a file with
+        // no statements (type-only modules) scores 100.
+        perFile: { statements: 60, lines: 60 },
+        // Security directories, at the measured aggregate minus 2: the
+        // per-file floor alone would let a 98% directory fall to 61% unnoticed.
+        // check-coverage-scope.test.mjs fails if a glob stops matching files.
+        "src/lib/crypto/**": { statements: 96, lines: 97, branches: 90 },
+        "src/lib/proxy/**": { statements: 96, lines: 96, branches: 92 },
+        "src/lib/security/**": { statements: 95, lines: 95, branches: 89 },
+        "src/lib/audit/**": { statements: 93, lines: 94, branches: 89 },
+        "src/lib/tenant/**": { statements: 94, lines: 95, branches: 90 },
+        "src/lib/auth/**": { statements: 92, lines: 94, branches: 88 },
+        "src/lib/vault/**": { statements: 78, lines: 79, branches: 76 },
+        // Store-backed security modules whose tests landed with the scope
+        // change; each refusal arm has its own test. Measured minus 2.
+        "src/lib/vault/rotate-key-server.ts": { statements: 98, lines: 98, branches: 98 },
+        "src/lib/auth/access/delegation.ts": { statements: 98, lines: 98, branches: 95 },
+        "src/lib/team/team-attachment-lock.ts": { statements: 98, lines: 98, branches: 98 },
+        "src/lib/extension-connect-request.ts": { statements: 98, lines: 98, branches: 89 },
         "src/lib/auth/session/auth-or-token.ts": { lines: 80, branches: 70 },
         "src/lib/crypto/crypto-server.ts": { lines: 80, branches: 70 },
         "src/lib/crypto/crypto-team.ts": { lines: 80, branches: 70 },

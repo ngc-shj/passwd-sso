@@ -74,6 +74,9 @@ jobs:
               # relative and the server hook is src/instrumentation.ts, already
               # covered by src/**.)
               - "instrumentation-client.ts"
+              # Root Sentry configs: coverage members (scripts/checks/lib/
+              # coverage-members.mjs), so a change to one must run app-coverage.
+              - "sentry.*.config.ts"
               - "messages/**"
               - "package.json"
               - "package-lock.json"
@@ -551,6 +554,11 @@ jobs:
         run: test "$(ls .vitest/blob/blob-*-3.json | wc -l)" -eq 3
 
       - run: npx vitest --merge-reports --coverage
+
+      # The merged report must measure every coverage member; a member vitest
+      # never saw has no per-file floor to fail.
+      - name: Require every coverage member in the merged report
+        run: node scripts/checks/check-coverage-scope.mjs coverage/coverage-summary.json
 
   # ─── Main App: Build ──────────────────────────────────────
   # Split from app-ci so the builds run in parallel with the test shards.

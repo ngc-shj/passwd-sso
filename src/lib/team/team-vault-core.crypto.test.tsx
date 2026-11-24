@@ -127,6 +127,8 @@ describe("team-vault-core (real WebCrypto)", () => {
         <TeamVaultProvider
           getEcdhPrivateKeyBytes={() => new Uint8Array(ecdhPrivateKeyBytes)}
           getUserId={() => USER_ID}
+          getLockEpoch={() => 0}
+          lockedSince={() => false}
           vaultUnlocked={false}
           pollingSuspended={false}
         >

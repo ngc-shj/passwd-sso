@@ -7,6 +7,7 @@ import {
   confirmPendingEmergencyGrants,
 } from "./emergency-access-context";
 import { VAULT_STATUS } from "@/lib/constants";
+import { SessionChangedError, _resetExpectedUserForTests } from "@/lib/url-helpers";
 import {
   generateECDHKeyPair,
   exportPublicKey,
@@ -58,6 +59,7 @@ describe("confirmPendingEmergencyGrants (real crypto)", () => {
           json: async () => [
             {
               id: "grant-1",
+              ownerId: "owner-1",
               granteeId: "grantee-1",
               granteePublicKey: granteePubJwk,
             },
@@ -82,6 +84,7 @@ describe("confirmPendingEmergencyGrants (real crypto)", () => {
     expect(typeof escrow.ownerEphemeralPublicKey).toBe("string");
     expect(escrow.keyVersion).toBe(7);
     expect(escrow.wrapVersion).toBe(1);
+    expect(escrow.ownerId).toBe("owner-1");
     // Hex-encoded fields — non-empty
     expect((escrow.secretKeyIv as string).length).toBeGreaterThan(0);
   });
@@ -96,8 +99,8 @@ describe("confirmPendingEmergencyGrants (real crypto)", () => {
         return {
           ok: true,
           json: async () => [
-            { id: "bad", granteeId: "g-bad", granteePublicKey: "not-a-jwk" },
-            { id: "good", granteeId: "g-good", granteePublicKey: valid },
+            { id: "bad", ownerId: "owner-1", granteeId: "g-bad", granteePublicKey: "not-a-jwk" },
+            { id: "good", ownerId: "owner-1", granteeId: "g-good", granteePublicKey: valid },
           ],
         };
       }
@@ -110,6 +113,82 @@ describe("confirmPendingEmergencyGrants (real crypto)", () => {
 
     // The malformed grant must be skipped silently; the valid grant must succeed.
     expect(confirmCalls).toEqual(["/api/emergency-access/good/confirm"]);
+  });
+});
+
+// The list is whoever the cookie belongs to when it is read. A grant that does
+// not name the owner whose key this is never gets that key escrowed to it.
+describe("confirmPendingEmergencyGrants owner binding", () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  async function confirmCallsFor(grants: Array<Record<string, unknown>>): Promise<string[]> {
+    const grantee = await generateECDHKeyPair();
+    const pub = await exportPublicKey(grantee.publicKey);
+    const confirmCalls: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string) => {
+      if (url === "/api/emergency-access/pending-confirmations") {
+        return { ok: true, json: async () => grants.map((g) => ({ granteeId: "g", granteePublicKey: pub, ...g })) };
+      }
+      confirmCalls.push(url);
+      return { ok: true, json: async () => ({}) };
+    }) as unknown as typeof fetch;
+    await confirmPendingEmergencyGrants(new Uint8Array(32).fill(4), "owner-1", 1);
+    return confirmCalls;
+  }
+
+  it("sends no confirm for a grant owned by another user", async () => {
+    expect(await confirmCallsFor([{ id: "foreign", ownerId: "owner-2" }])).toEqual([]);
+  });
+
+  it("sends no confirm for a grant without an ownerId", async () => {
+    expect(await confirmCallsFor([{ id: "unowned" }])).toEqual([]);
+  });
+
+  it("confirms only the grant the owner owns", async () => {
+    expect(
+      await confirmCallsFor([
+        { id: "foreign", ownerId: "owner-2" },
+        { id: "own", ownerId: "owner-1" },
+      ]),
+    ).toEqual(["/api/emergency-access/own/confirm"]);
+  });
+
+  it("stops at a session change instead of trying the remaining grants", async () => {
+    const grantee = await generateECDHKeyPair();
+    const pub = await exportPublicKey(grantee.publicKey);
+    const confirmCalls: string[] = [];
+    globalThis.fetch = vi.fn(async (url: string) => {
+      if (url === "/api/emergency-access/pending-confirmations") {
+        return {
+          ok: true,
+          json: async () => [
+            { id: "a", ownerId: "owner-1", granteeId: "g", granteePublicKey: pub },
+            { id: "b", ownerId: "owner-1", granteeId: "g", granteePublicKey: pub },
+          ],
+        };
+      }
+      confirmCalls.push(url);
+      return new Response(JSON.stringify({ error: "SESSION_CHANGED" }), { status: 409 });
+    }) as unknown as typeof fetch;
+    const hrefSet = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, origin: originalLocation.origin, pathname: "/ja/dashboard", search: "", set href(v: string) { hrefSet(v); } },
+    });
+    try {
+      await expect(
+        confirmPendingEmergencyGrants(new Uint8Array(32).fill(4), "owner-1", 1),
+      ).rejects.toThrow(SessionChangedError);
+    } finally {
+      Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+      _resetExpectedUserForTests();
+    }
+    expect(confirmCalls).toEqual(["/api/emergency-access/a/confirm"]);
   });
 });
 

@@ -176,9 +176,15 @@ describe("checkHIBP", () => {
 describe("delay", () => {
   it("resolves after specified time", async () => {
     vi.useFakeTimers();
-    const p = delay(100);
-    vi.advanceTimersByTime(100);
+    let settled = false;
+    const p = delay(100).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(99);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
     await p;
+    expect(settled).toBe(true);
     vi.useRealTimers();
   });
 });

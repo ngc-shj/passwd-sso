@@ -46,6 +46,8 @@ import { MAX_VIEWS_MIN, MAX_VIEWS_MAX } from "@/lib/validations";
 import { bindRangeInput } from "@/lib/ui/input-range";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { copySecretToClipboard } from "@/lib/clipboard/copy-secret";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
+import { readCreatedLink } from "@/components/share/read-created-link";
 import { reportCopyOutcome } from "@/lib/clipboard/report-copy-outcome";
 import { safeRecord } from "@/lib/safe-keys";
 import { SHARE_LINK_STATUS, shareLinkStatus } from "@/lib/share/share-link-status";
@@ -185,6 +187,8 @@ export function ShareDialog({
   const [logNextCursor, setLogNextCursor] = useState<string | null>(null);
   const [requirePassword, setRequirePassword] = useState(false);
   const [createdAccessPassword, setCreatedAccessPassword] = useState<string | null>(null);
+  // The link was created but its URL (or access password) could not be read.
+  const [createdUnavailable, setCreatedUnavailable] = useState(false);
   const [passwordCopied, setPasswordCopied] = useState(false);
   const [sharingAllowed, setSharingAllowed] = useState(true);
   const [passwordRequired, setPasswordRequired] = useState(false);
@@ -209,9 +213,22 @@ export function ShareDialog({
   const [prevOpenState, setPrevOpenState] = useState<{ open: boolean; entryParam: string } | null>(null);
   if (prevOpenState === null || prevOpenState.open !== open || prevOpenState.entryParam !== entryParam) {
     setPrevOpenState({ open, entryParam });
+    // The parent keeps this component mounted while closed. The created URL
+    // (it carries the share key) and the access password are cleared on every
+    // transition — close included — so neither stays resident in a closed
+    // dialog nor carries over to another entry.
+    setCreatedUrl(null);
+    setCreatedAccessPassword(null);
+    setCreatedUnavailable(false);
+    setCopied(false);
+    setPasswordCopied(false);
     if (open) {
-      setCreatedUrl(null);
+      // Everything the previous session typed is reset too. A policy-required
+      // password stays on (the policy effect refreshes it).
       setPermission(SHARE_PERMISSION.VIEW_ALL);
+      setExpiresIn("1d");
+      setMaxViews("");
+      setRequirePassword(passwordRequired);
       setLoadingLinks(true);
     }
   }
@@ -339,17 +356,23 @@ export function ShareDialog({
         return;
       }
 
-      const data = await res.json();
-      let fullUrl = appUrl(data.url);
+      // The link exists from here on: nothing below may be reported as a
+      // failed creation.
+      setLoadingLinks(true);
+      fetchLinks();
+      toast.success(t("createSuccess"));
+      const created = readCreatedLink(await parseJsonBodyOnce(res), requirePassword);
+      if (!created) {
+        setCreatedUnavailable(true);
+        return;
+      }
+      let fullUrl = appUrl(created.url);
       if (shareKeyForFragment) {
         fullUrl += `#key=${base64urlEncode(shareKeyForFragment)}`;
         shareKeyForFragment.fill(0);
       }
       setCreatedUrl(fullUrl);
-      if (data.accessPassword) setCreatedAccessPassword(data.accessPassword);
-      setLoadingLinks(true);
-      fetchLinks();
-      toast.success(t("createSuccess"));
+      if (created.accessPassword) setCreatedAccessPassword(created.accessPassword);
     } catch {
       toast.error(t("createError"));
     } finally {
@@ -360,9 +383,16 @@ export function ShareDialog({
 
   const handleCopyUrl = async () => {
     if (!createdUrl) return;
-    await navigator.clipboard.writeText(createdUrl);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2 * MS_PER_SECOND);
+    // The URL carries the share key in its `#key=` fragment, so it gets the same
+    // bounded residency as any other secret.
+    const outcome = await copySecretToClipboard(() => createdUrl);
+    reportCopyOutcome(outcome, {
+      tCopy,
+      onOk: () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2 * MS_PER_SECOND);
+      },
+    });
   };
 
   const fetchAccessLogs = useCallback(
@@ -418,8 +448,16 @@ export function ShareDialog({
     }
   };
 
+  // Closing while the POST is in flight would let its result land after the
+  // close-time clear and surface on the next open, so close is ignored until
+  // the request settles, as in create-grant-dialog.
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen && creating) return;
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-4xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
@@ -508,6 +546,13 @@ export function ShareDialog({
                 setPasswordCopied(false);
               }}
             >
+              {t("createAnother")}
+            </Button>
+          </div>
+        ) : createdUnavailable ? (
+          <div className="space-y-3 rounded-xl border bg-gradient-to-b from-muted/30 to-background p-4">
+            <p role="alert" className="text-sm">{t("createdLinkUnavailable")}</p>
+            <Button variant="outline" className="w-full" onClick={() => setCreatedUnavailable(false)}>
               {t("createAnother")}
             </Button>
           </div>

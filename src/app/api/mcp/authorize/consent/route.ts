@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { auth } from "@/auth";
 import { prisma } from "@/lib/prisma";
 import { withBypassRls, advisoryXactLock } from "@/lib/tenant-rls";
@@ -38,6 +39,9 @@ import {
 // spread into that array one identifier away.
 const MAX_REQUESTED_SCOPES = MCP_SCOPES.length + 3;
 
+// The user the consent page was rendered for, echoed by the form.
+const EXPECTED_USER_ID_SCHEMA = z.string().min(1).max(128);
+
 export async function POST(req: NextRequest) {
   // Origin presence guard (early return / defense-in-depth).
   // Primary CSRF protection happens in the proxy CSRF gate at
@@ -75,6 +79,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
   const formData = new URLSearchParams(read.text);
+
   const clientId = formData.get("client_id") ?? "";
   const redirectUri = formData.get("redirect_uri") ?? "";
   const state = formData.get("state") ?? "";
@@ -154,10 +159,27 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "invalid_request" }, { status: 400 });
   }
 
-  // Stale-session recovery: params are now validated, so it is safe to bounce the
-  // browser back to the authorize GET (which re-runs auth + step-up and redirects
-  // to sign-in). The callback is a self-origin app path, not the client redirect_uri.
-  if (stepUpStale) {
+  // The consent form is a native form POST, so it cannot carry the
+  // expected-user header the proxy gate binds fetchApi requests with. It
+  // carries the id of the user the page was rendered for instead: a page
+  // rendered for A and submitted after B signed in elsewhere must neither mint
+  // a code on B's account nor record B's denial. Refused here — after the
+  // client and redirect_uri checks above, which write nothing, and before every
+  // write below (deny audit, DCR claim, code mint) — by the same bounce as a
+  // stale session: the authorize GET re-renders consent for whoever the session
+  // now is, who decides for themselves. A JSON 409 would strand the browser.
+  const expectedUserId = EXPECTED_USER_ID_SCHEMA.safeParse(formData.get("expected_user_id"));
+  const userChanged = !expectedUserId.success || expectedUserId.data !== session.user.id;
+
+  // Stale-session recovery: client_id and redirect_uri are now validated, so it
+  // is safe to bounce the browser back to the authorize GET (which re-runs auth +
+  // step-up and redirects to sign-in). The callback is a self-origin app path,
+  // not the client redirect_uri. The PKCE parameters and scope are echoed as
+  // posted: on Allow the gate above has validated them; on Deny nothing here
+  // has, and the authorize GET validates them instead. The consent form posts
+  // them on Deny as well as Allow — a bounce without code_challenge would end
+  // on the GET's JSON 400 instead of a re-rendered consent.
+  if (stepUpStale || userChanged) {
     // serverAppUrl yields a relative path when no origin env is configured, which
     // new URL(relative) would throw on. Guard for parity with mobile/authorize's
     // redirectToSignIn: an unconfigured origin surfaces as a controlled 500.

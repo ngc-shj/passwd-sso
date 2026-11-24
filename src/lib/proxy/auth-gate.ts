@@ -37,6 +37,45 @@ export type { SessionInfo } from "@/lib/auth/session/session-cache";
 export { SESSION_CACHE_TTL_MS } from "@/lib/auth/session/session-cache";
 
 /**
+ * Whose session the cookie is, decided apart from whether the proxy accepts
+ * it. `valid` answers "may this session be used"; a user whose tenant cannot
+ * be resolved is invalid but still that user. The expected-user gate decides
+ * on this, the session gate on `valid`.
+ *
+ * - USER: `/api/auth/session` named this user id — the same field
+ *   `useSession()` reports, from the same endpoint.
+ * - NONE: the endpoint answered and named nobody (no cookie, or a session that
+ *   ended).
+ * - UNAVAILABLE: no answer to decide on (non-OK status, fetch or parse throw).
+ * - AMBIGUOUS: the cookie header could be read as more than one session.
+ */
+export const SESSION_IDENTITY = {
+  USER: "user",
+  NONE: "none",
+  UNAVAILABLE: "unavailable",
+  AMBIGUOUS: "ambiguous",
+} as const;
+
+export type SessionIdentity =
+  | { kind: typeof SESSION_IDENTITY.USER; userId: string }
+  | { kind: typeof SESSION_IDENTITY.NONE }
+  | { kind: typeof SESSION_IDENTITY.UNAVAILABLE }
+  | { kind: typeof SESSION_IDENTITY.AMBIGUOUS };
+
+export type ProxySessionInfo = SessionInfo & { identity: SessionIdentity };
+
+const NO_USER: SessionIdentity = { kind: SESSION_IDENTITY.NONE };
+const UNAVAILABLE: SessionIdentity = { kind: SESSION_IDENTITY.UNAVAILABLE };
+
+// A session cache entry carries a user id exactly when the answer it was
+// written from named one, so a hit and a fresh read decide alike.
+function identityOf(userId: unknown): SessionIdentity {
+  return typeof userId === "string" && userId !== ""
+    ? { kind: SESSION_IDENTITY.USER, userId }
+    : NO_USER;
+}
+
+/**
  * True iff the cookie header carries an Auth.js session token cookie.
  * Used by the CSRF gate to decide whether to run baseline Origin
  * enforcement (CSRF threat is cookie-based; without a cookie there's
@@ -50,7 +89,7 @@ export function hasSessionCookie(cookieHeader: string): boolean {
   return hasAnySessionCookie(cookieHeader);
 }
 
-export async function getSessionInfo(request: NextRequest): Promise<SessionInfo> {
+export async function getSessionInfo(request: NextRequest): Promise<ProxySessionInfo> {
   // Decide on the session Auth.js resolves from this same header, and
   // refuse any header it could read differently (see session-cookie.ts).
   // The cache used to be keyed on a different reading than the one the
@@ -59,15 +98,15 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
   const read = readSessionCookie(request.headers.get("cookie"));
   if (read.kind === SESSION_COOKIE_READ.AMBIGUOUS) {
     getLogger().warn({ msg: "auth-gate: ambiguous session cookie refused" });
-    return { valid: false };
+    return { valid: false, identity: { kind: SESSION_IDENTITY.AMBIGUOUS } };
   }
-  if (read.kind !== SESSION_COOKIE_READ.TOKEN) return { valid: false };
+  if (read.kind !== SESSION_COOKIE_READ.TOKEN) return { valid: false, identity: NO_USER };
   const { token } = read;
   // Forward only the cookie that was decided on, in the one spelling it has.
   const cookie = `${configuredSessionCookieName()}=${token}`;
 
   const cached = await getCachedSession(token);
-  if (cached) return cached;
+  if (cached) return { ...cached, identity: identityOf(cached.userId) };
 
   // Cache miss → fetch /api/auth/session and populate.
   try {
@@ -78,11 +117,12 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
     const res = await fetch(sessionUrl, { headers: { cookie } });
     if (!res.ok) {
       // Transient error — return invalid without caching.
-      return { valid: false };
+      return { valid: false, identity: UNAVAILABLE };
     }
     const data = await res.json();
     const valid = !!data?.user;
     const userId = data?.user?.id ?? undefined;
+    const identity = identityOf(userId);
 
     let tenantId: string | undefined;
     if (valid && userId) {
@@ -93,8 +133,9 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
         // A THROW (DB/RLS error, MULTI_TENANT anomaly) must not be swallowed:
         // leaving tenantId undefined would drop the tenant's IP/CIDR gate for a
         // user who DOES have a restricted tenant. Fail closed (uncached) —
-        // mirrors the !res.ok transient-error handling above.
-        return { valid: false };
+        // mirrors the !res.ok transient-error handling above. Still this
+        // user's cookie: only the identity survives.
+        return { valid: false, identity };
       }
       // A `null` return means NO active TenantMember row (deactivatedAt != null,
       // i.e. a de-provisioned member). `User.tenantId` is a non-null FK, so this
@@ -107,7 +148,7 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
       // member rejection. The result is uncached (fail-closed sessions never
       // populate the cache).
       if (resolved === null) {
-        return { valid: false };
+        return { valid: false, identity };
       }
       tenantId = resolved;
     }
@@ -192,8 +233,8 @@ export async function getSessionInfo(request: NextRequest): Promise<SessionInfo>
       ttlMs = Math.min(ttlMs, NEGATIVE_CACHE_TTL_MS);
     }
     await setCachedSession(token, info, ttlMs);
-    return info;
+    return { ...info, identity };
   } catch {
-    return { valid: false };
+    return { valid: false, identity: UNAVAILABLE };
   }
 }

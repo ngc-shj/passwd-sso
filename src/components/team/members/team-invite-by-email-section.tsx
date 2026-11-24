@@ -17,8 +17,10 @@ import { Loader2, Mail } from "lucide-react";
 import { toast } from "sonner";
 import { TEAM_ROLE, apiPath } from "@/lib/constants";
 import { fetchApi, appUrl } from "@/lib/url-helpers";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { readNonEmptyStringField } from "@/lib/http/read-body-field";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { COPY_OUTCOME, copySecretToClipboard } from "@/lib/clipboard/copy-secret";
 
 interface Props {
   teamId: string;
@@ -60,18 +62,26 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
       if (!res.ok) {
         throw new Error("Failed");
       }
-      const data = await res.json();
-      const inviteUrl = appUrl(`/dashboard/teams/invite/${data.token}`);
-      setIssuedLink({ email, url: inviteUrl });
+      // The invitation exists from here on: nothing below may be reported as
+      // a failed invitation.
       setInvEmail("");
       onSuccess();
-      // The invitation exists from here on: a clipboard refusal, or no
-      // clipboard at all (a non-secure origin), must not be reported as a
-      // failed invitation.
-      const copied = await Promise.resolve()
-        .then(() => navigator.clipboard.writeText(inviteUrl))
-        .then(() => true, () => false);
-      toast.success(t(copied ? "invitedWithLink" : "invitedLinkNotCopied"));
+
+      const token = readNonEmptyStringField(await parseJsonBodyOnce(res), "token");
+      if (!token) {
+        toast.warning(t("invitedLinkUnavailable"));
+        return;
+      }
+
+      const inviteUrl = appUrl(`/dashboard/teams/invite/${token}`);
+      setIssuedLink({ email, url: inviteUrl });
+      // A clipboard refusal, or no clipboard at all (a non-secure origin),
+      // leaves the link in the field below. The URL redeems the invitation, so
+      // it is copied with the same bounded residency as any other secret.
+      const outcome = await copySecretToClipboard(() => inviteUrl);
+      toast.success(
+        t(outcome === COPY_OUTCOME.OK ? "invitedWithLink" : "invitedLinkNotCopied"),
+      );
     } catch {
       toast.error(t("inviteFailed"));
     } finally {
@@ -133,6 +143,12 @@ export function TeamInviteByEmailSection({ teamId, onSuccess }: Props) {
             />
             <CopyButton getValue={() => issuedLink.url} />
           </div>
+          {/* The field is the recovery path when the auto-copy was refused, so
+              it stays until the user says they are done with it rather than
+              on a timer that could hide it before it is copied. */}
+          <Button variant="outline" size="sm" onClick={() => setIssuedLink(null)}>
+            {t("inviteLinkDone")}
+          </Button>
         </div>
       )}
     </section>

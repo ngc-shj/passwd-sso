@@ -127,6 +127,10 @@ describe("extractCount", () => {
     expect(extractCount({ restoredCount: 4 }, 10)).toBe(4);
   });
 
+  it("falls back to fallback for an unreadable (null) body", () => {
+    expect(extractCount(null, 4)).toBe(4);
+  });
+
   it("falls back to fallback when all fields missing", () => {
     expect(extractCount({}, 10)).toBe(10);
   });
@@ -221,6 +225,23 @@ describe("useBulkAction", () => {
         body: JSON.stringify({ ids: ["x"], operation: "archive" }),
       },
     );
+  });
+
+  it("completes an applied action whose response body cannot be read", async () => {
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+    });
+
+    const { result } = setup();
+    act(() => result.current.requestAction("trash"));
+    await act(() => result.current.executeAction());
+
+    expect(onSuccess).toHaveBeenCalled();
+    expect(result.current.dialogOpen).toBe(false);
+    // The count falls back to the number of ids sent.
+    expect(mockSuccess).toHaveBeenCalledWith(expect.stringContaining('"count":2'));
+    expect(mockError).not.toHaveBeenCalled();
   });
 
   it("does nothing when selectedIds is empty", async () => {

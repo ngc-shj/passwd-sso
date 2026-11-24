@@ -49,6 +49,27 @@ describe("import tag resolution", () => {
     expect(map.get("new")).toBe("t-new");
   });
 
+  it("links a tag whose create response body cannot be read by re-reading the tag list", async () => {
+    const unreadable = {
+      ok: true,
+      json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+    } as unknown as Response;
+    const fetcher = vi
+      .fn()
+      .mockResolvedValueOnce(response([]))
+      .mockResolvedValueOnce(unreadable)
+      .mockResolvedValueOnce(response([{ id: "t-new", name: "new", color: null }]));
+
+    const map = await resolveTagNameToIdForImport(
+      [entryWithTags([{ name: "new", color: null }])],
+      API_PATH.TAGS,
+      fetcher as never
+    );
+
+    expect(map.get("new")).toBe("t-new");
+    expect(fetcher).toHaveBeenNthCalledWith(3, API_PATH.TAGS);
+  });
+
   it("does not create tags when all already exist", async () => {
     const fetcher = vi
       .fn()

@@ -8,6 +8,11 @@ describe("audit log page group values", () => {
       join(process.cwd(), "src/app/[locale]/dashboard/audit-logs/page.tsx"),
       "utf8"
     );
+    // The personal page's action groups live in its hook.
+    const personalHook = readFileSync(
+      join(process.cwd(), "src/hooks/vault/use-personal-audit-logs.ts"),
+      "utf8"
+    );
     const teamPage = readFileSync(
       join(
         process.cwd(),
@@ -24,6 +29,8 @@ describe("audit log page group values", () => {
     );
 
     expect(personalPage).not.toMatch(/value:\s*"group:[^"]+"/);
+    expect(personalHook).toMatch(/value:\s*AUDIT_ACTION_GROUP\./);
+    expect(personalHook).not.toMatch(/value:\s*"group:[^"]+"/);
     expect(teamPage).not.toMatch(/value:\s*"group:[^"]+"/);
     expect(tenantPage).not.toMatch(/value:\s*"group:[^"]+"/);
   });

@@ -93,4 +93,50 @@ describe("BankAccountFields", () => {
     render(<BankAccountFields {...baseProps} idPrefix="edit-" />);
     expect(screen.getByPlaceholderText("BankPH").id).toBe("edit-bankName");
   });
+
+  it.each([
+    ["HolderPH", "onAccountHolderNameChange", "Jane Doe"],
+    ["AcctPH", "onAccountNumberChange", "123456789"],
+    ["RoutePH", "onRoutingNumberChange", "021000021"],
+    ["BranchPH", "onBranchNameChange", "Main St"],
+    ["SwiftPH", "onSwiftBicChange", "DEUTDEFF"],
+    ["IbanPH", "onIbanChange", "DE89370400440532013000"],
+    ["NotesPH", "onNotesChange", "memo"],
+  ] as const)("routes typing in the %s input to %s only", (placeholder, handler, value) => {
+    const handlers = {
+      onAccountHolderNameChange: vi.fn(),
+      onAccountNumberChange: vi.fn(),
+      onRoutingNumberChange: vi.fn(),
+      onBranchNameChange: vi.fn(),
+      onSwiftBicChange: vi.fn(),
+      onIbanChange: vi.fn(),
+      onNotesChange: vi.fn(),
+    };
+    render(<BankAccountFields {...baseProps} {...handlers} />);
+    fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value } });
+    expect(handlers[handler]).toHaveBeenCalledWith(value);
+    for (const [name, fn] of Object.entries(handlers)) {
+      if (name !== handler) expect(fn).not.toHaveBeenCalled();
+    }
+  });
+
+  it("masks the account and routing numbers until their toggles are shown", () => {
+    const { rerender } = render(
+      <BankAccountFields {...baseProps} accountNumber="111" routingNumber="222" />,
+    );
+    expect(screen.getByPlaceholderText("AcctPH")).toHaveAttribute("type", "password");
+    expect(screen.getByPlaceholderText("RoutePH")).toHaveAttribute("type", "password");
+
+    rerender(
+      <BankAccountFields
+        {...baseProps}
+        accountNumber="111"
+        routingNumber="222"
+        showAccountNumber
+        showRoutingNumber
+      />,
+    );
+    expect(screen.getByPlaceholderText("AcctPH")).toHaveAttribute("type", "text");
+    expect(screen.getByPlaceholderText("RoutePH")).toHaveAttribute("type", "text");
+  });
 });

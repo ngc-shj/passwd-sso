@@ -28,7 +28,11 @@ const {
   mockFetch: vi.fn(),
   mockToast: { error: vi.fn(), success: vi.fn() },
   newTeamKeysSnapshot: { refs: [] as Uint8Array[], copies: [] as Uint8Array[] },
-  vault: { resolve: null as ResolveTeamKey | null, invalidateTeamKey: vi.fn() },
+  vault: {
+    resolve: null as ResolveTeamKey | null,
+    invalidateTeamKey: vi.fn(),
+    lockEpoch: 0,
+  },
   mockCanUsePasskeyRecovery: vi.fn(),
   mockReauthenticateWithPasskey: vi.fn(),
 }));
@@ -41,8 +45,16 @@ vi.mock("next-intl", () => ({
 
 vi.mock("sonner", () => ({ toast: mockToast }));
 
-vi.mock("@/lib/url-helpers", () => ({
+vi.mock("@/lib/url-helpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/url-helpers")>()),
   fetchApi: (...args: unknown[]) => mockFetch(...args),
+}));
+
+vi.mock("@/lib/vault/vault-context", () => ({
+  useVault: () => ({
+    getLockEpoch: () => vault.lockEpoch,
+    lockedSince: (epoch: number) => epoch !== vault.lockEpoch,
+  }),
 }));
 
 vi.mock("@/lib/team/team-vault-core", () => ({
@@ -102,6 +114,8 @@ async function setupRotateFetch(opts: {
   actorKeyVersions: number[];
   rotateStatus?: number;
   rotateBody?: Record<string, unknown>;
+  /** Replaces the rotate POST's response (a reject, a non-JSON page). */
+  rotateResponse?: () => Promise<Response>;
   versionHolders?: Record<string, unknown>;
 }) {
   const member = await generateECDHKeyPair();
@@ -127,6 +141,7 @@ async function setupRotateFetch(opts: {
       }), { status: 200 }));
     }
     if (init?.method === "POST") {
+      if (opts.rotateResponse) return opts.rotateResponse();
       return Promise.resolve(new Response(JSON.stringify(opts.rotateBody ?? { success: true }), {
         status: opts.rotateStatus ?? 200,
       }));
@@ -157,6 +172,7 @@ describe("TeamRotateKeyButton", () => {
     newTeamKeysSnapshot.refs.length = 0;
     newTeamKeysSnapshot.copies.length = 0;
     memberPublicKeys.length = 0;
+    vault.lockEpoch = 0;
     mockCanUsePasskeyRecovery.mockResolvedValue(false);
     mockReauthenticateWithPasskey.mockResolvedValue({ ok: true });
   });
@@ -230,6 +246,47 @@ describe("TeamRotateKeyButton", () => {
     expect(mockFetch.mock.calls.some((c) => (c[1] as RequestInit | undefined)?.method === "POST")).toBe(false);
   });
 
+  // The vault's keys were dropped (a lock, a session end or user switch) while
+  // the rotation was being built: the new key is never sent.
+  it("sends no rotation once the vault lock epoch moved since the start", async () => {
+    const keys = await makeTeamKeys([2]);
+    vault.resolve = async (version) => {
+      vault.lockEpoch += 1;
+      return makeResolver(keys)(version);
+    };
+    await setupRotateFetch({ entries: [await v1("e", keys.get(2)!, 2)], actorKeyVersions: [2] });
+    const onSuccess = vi.fn();
+    render(<TeamRotateKeyButton teamId={TEAM_ID} onSuccess={onSuccess} />);
+
+    await openAndConfirm();
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("rotateKeyVaultRequired"));
+    expect(mockFetch.mock.calls.some((c) => (c[1] as RequestInit | undefined)?.method === "POST")).toBe(false);
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  // The proxy refused the POST before the route ran: a definite "nothing
+  // rotated", never the outcome-unknown path that reloads as if it committed.
+  it("reports a session change on the POST as not rotated, not as outcome unknown", async () => {
+    const { SessionChangedError } = await import("@/lib/url-helpers");
+    const keys = await makeTeamKeys([2]);
+    vault.resolve = makeResolver(keys);
+    await setupRotateFetch({
+      entries: [await v1("e", keys.get(2)!, 2)],
+      actorKeyVersions: [2],
+      rotateResponse: () => Promise.reject(new SessionChangedError()),
+    });
+    const onSuccess = vi.fn();
+    render(<TeamRotateKeyButton teamId={TEAM_ID} onSuccess={onSuccess} />);
+
+    await openAndConfirm();
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("sessionChanged"));
+    expect(mockToast.error).not.toHaveBeenCalledWith("rotateKeyOutcomeUnknown");
+    expect(vault.invalidateTeamKey).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
   it("zeroes the new team key and never sends it", async () => {
     const keys = await makeTeamKeys([2]);
     vault.resolve = makeResolver(keys);
@@ -270,6 +327,73 @@ describe("TeamRotateKeyButton", () => {
 
     await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith(message));
     expect(mockToast.success).not.toHaveBeenCalled();
+  });
+
+  it("keeps the refusal toast and the cached team key on an allow-listed refusal", async () => {
+    const keys = await makeTeamKeys([2]);
+    vault.resolve = makeResolver(keys);
+    await setupRotateFetch({
+      entries: [await v1("e", keys.get(2)!, 2)],
+      actorKeyVersions: [2],
+      rotateStatus: 409,
+      rotateBody: { error: "TEAM_KEY_RECIPIENT_CHANGED" },
+    });
+    const onSuccess = vi.fn();
+    render(<TeamRotateKeyButton teamId={TEAM_ID} onSuccess={onSuccess} />);
+
+    await openAndConfirm();
+
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("teamKeyRecipientChanged"));
+    expect(mockToast.error).not.toHaveBeenCalledWith("rotateKeyOutcomeUnknown");
+    expect(vault.invalidateTeamKey).not.toHaveBeenCalled();
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
+  describe("when the POST's outcome is unknown", () => {
+    it.each([
+      ["the POST rejects in transit", () => Promise.reject(new TypeError("Failed to fetch"))],
+      [
+        "a proxy answers 502 with an HTML page",
+        () => Promise.resolve(new Response("<html>Bad Gateway</html>", { status: 502, headers: { "Content-Type": "text/html" } })),
+      ],
+      [
+        "a 500 carries INTERNAL_ERROR, which does not prove nothing committed",
+        () => Promise.resolve(new Response(JSON.stringify({ error: "INTERNAL_ERROR" }), { status: 500 })),
+      ],
+    ])("%s: drops the cached team key, refreshes the page and says it is unknown", async (_label, rotateResponse) => {
+      const keys = await makeTeamKeys([2]);
+      vault.resolve = makeResolver(keys);
+      await setupRotateFetch({ entries: [await v1("e", keys.get(2)!, 2)], actorKeyVersions: [2], rotateResponse });
+      const onSuccess = vi.fn();
+      render(<TeamRotateKeyButton teamId={TEAM_ID} onSuccess={onSuccess} />);
+
+      await openAndConfirm();
+
+      await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("rotateKeyOutcomeUnknown"));
+      expect(mockToast.error).not.toHaveBeenCalledWith("rotateKeyFailed");
+      expect(mockToast.success).not.toHaveBeenCalled();
+      expect(vault.invalidateTeamKey).toHaveBeenCalledWith(TEAM_ID);
+      expect(onSuccess).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("treats a 2xx whose body is unreadable as a committed rotation", async () => {
+    const keys = await makeTeamKeys([2]);
+    vault.resolve = makeResolver(keys);
+    await setupRotateFetch({
+      entries: [await v1("e", keys.get(2)!, 2)],
+      actorKeyVersions: [2],
+      rotateResponse: () => Promise.resolve(new Response("not json", { status: 200 })),
+    });
+    const onSuccess = vi.fn();
+    render(<TeamRotateKeyButton teamId={TEAM_ID} onSuccess={onSuccess} />);
+
+    await openAndConfirm();
+
+    await waitFor(() => expect(mockToast.success).toHaveBeenCalledWith("rotateKeySuccess"));
+    expect(vault.invalidateTeamKey).toHaveBeenCalledWith(TEAM_ID);
+    expect(onSuccess).toHaveBeenCalledTimes(1);
+    expect(mockToast.error).not.toHaveBeenCalled();
   });
 
   it("opens the recent-session dialog on a SESSION_STEP_UP_REQUIRED rotate (RT8)", async () => {

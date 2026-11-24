@@ -1,9 +1,11 @@
 import { describe, test, expect, vi } from "vitest";
-import { AccessRequestStatus } from "@prisma/client";
+import { AccessRequestStatus, type Prisma } from "@prisma/client";
+import { tenantRlsStorage } from "@/lib/tenant-rls";
 import {
   MATRIX,
   canTransition,
   transition,
+  bulkTransition,
   AR_ACTOR,
   AR_STATUS,
   type ArActor,
@@ -139,5 +141,116 @@ describe("transition() return-value strictness", () => {
         actor: AR_ACTOR.ADMIN,
       }),
     ).rejects.toThrow(/where matched >1 row/);
+  });
+});
+
+// Recording db fake: captures the updateMany arguments so the tests can pin
+// the from-status filter and the data written.
+function makeRecordingDb(count: number) {
+  const calls: Array<{ where: Prisma.AccessRequestWhereInput; data: Prisma.AccessRequestUncheckedUpdateManyInput }> = [];
+  const db = {
+    accessRequest: {
+      updateMany: async (args: (typeof calls)[number]) => {
+        calls.push(args);
+        return { count };
+      },
+    },
+  } as unknown as Parameters<typeof transition>[0]["db"];
+  return { db, calls };
+}
+
+function underBypass<T>(fn: () => Promise<T>): Promise<T> {
+  return tenantRlsStorage.run(
+    { tx: {} as Prisma.TransactionClient, tenantId: null, bypass: true, refusedNesting: false },
+    fn,
+  );
+}
+
+describe("transition() filter and refusal arms", () => {
+  test("restricts the update to the statuses the actor may leave", async () => {
+    const { db, calls } = makeRecordingDb(1);
+    await transition({
+      db,
+      where: { id: "req-1" },
+      to: AR_STATUS.APPROVED,
+      actor: AR_ACTOR.ADMIN,
+      extraData: { approvedById: "admin-1" },
+    });
+    expect(calls).toEqual([
+      {
+        where: { id: "req-1", status: { in: [AR_STATUS.PENDING] } },
+        data: { approvedById: "admin-1", status: AR_STATUS.APPROVED },
+      },
+    ]);
+  });
+
+  test("refuses a transition no actor may make, without writing", async () => {
+    const { db, calls } = makeRecordingDb(1);
+    const result = await transition({ db, where: { id: "req-1" }, to: AR_STATUS.PENDING, actor: AR_ACTOR.ADMIN });
+    expect(result).toEqual({ ok: false });
+    expect(calls).toEqual([]);
+  });
+
+  test("refuses SYSTEM approving a request, without writing", async () => {
+    const { db, calls } = makeRecordingDb(1);
+    const result = await transition({ db, where: { id: "req-1" }, to: AR_STATUS.APPROVED, actor: AR_ACTOR.SYSTEM });
+    expect(result).toEqual({ ok: false });
+    expect(calls).toEqual([]);
+  });
+
+  test("throws under bypass RLS when where lacks tenantId, without writing", async () => {
+    const { db, calls } = makeRecordingDb(1);
+    await expect(
+      underBypass(() => transition({ db, where: { id: "req-1" }, to: AR_STATUS.APPROVED, actor: AR_ACTOR.ADMIN })),
+    ).rejects.toThrow(/under withBypassRls, where must include/);
+    expect(calls).toEqual([]);
+  });
+
+  test("proceeds under bypass RLS when where carries tenantId", async () => {
+    const { db, calls } = makeRecordingDb(1);
+    const result = await underBypass(() =>
+      transition({ db, where: { id: "req-1", tenantId: "t-1" }, to: AR_STATUS.APPROVED, actor: AR_ACTOR.ADMIN }),
+    );
+    expect(result).toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+  });
+});
+
+describe("bulkTransition()", () => {
+  test("returns the updated row count and filters by allowed from-statuses", async () => {
+    const { db, calls } = makeRecordingDb(3);
+    const result = await bulkTransition({
+      db,
+      where: { tenantId: "t-1" },
+      to: AR_STATUS.EXPIRED,
+      actor: AR_ACTOR.SYSTEM,
+    });
+    expect(result).toEqual({ updated: 3 });
+    expect(calls[0]).toEqual({
+      where: { tenantId: "t-1", status: { in: [AR_STATUS.PENDING] } },
+      data: { status: AR_STATUS.EXPIRED },
+    });
+  });
+
+  test("returns 0 without writing for a forbidden transition", async () => {
+    const { db, calls } = makeRecordingDb(3);
+    const result = await bulkTransition({ db, where: { tenantId: "t-1" }, to: AR_STATUS.EXPIRED, actor: AR_ACTOR.ADMIN });
+    expect(result).toEqual({ updated: 0 });
+    expect(calls).toEqual([]);
+  });
+
+  test("throws under bypass RLS when where lacks tenantId, without writing", async () => {
+    const { db, calls } = makeRecordingDb(3);
+    await expect(
+      underBypass(() => bulkTransition({ db, where: { id: "req-1" }, to: AR_STATUS.EXPIRED, actor: AR_ACTOR.SYSTEM })),
+    ).rejects.toThrow(/under withBypassRls, where must include/);
+    expect(calls).toEqual([]);
+  });
+
+  test("proceeds under bypass RLS when where carries tenantId", async () => {
+    const { db } = makeRecordingDb(2);
+    await expect(
+      underBypass(() => bulkTransition({ db, where: { tenantId: "t-1" }, to: AR_STATUS.EXPIRED, actor: AR_ACTOR.SYSTEM })),
+    ).resolves.toEqual({ updated: 2 });
   });
 });

@@ -130,6 +130,7 @@ export default async function McpConsentPage({
     <ConsentForm
       clientName={client.name}
       clientId={clientId}
+      expectedUserId={session.user.id}
       isDcr={client.isDcr}
       scopes={grantedScopes}
       redirectUri={redirectUri}

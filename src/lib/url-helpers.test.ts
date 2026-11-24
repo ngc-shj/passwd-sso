@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { CLIENT_LOG_EVENT, opaque } from "@/lib/logger/client";
+import { renderHook } from "@testing-library/react";
 
 /**
  * BASE_PATH is evaluated at module load time from process.env.NEXT_PUBLIC_BASE_PATH.
@@ -644,5 +645,249 @@ describe("currentAppPath", () => {
     placeAt("/en/admin");
     const { currentAppPath } = await import("@/lib/url-helpers");
     expect(currentAppPath()).toBe("/en/admin");
+  });
+});
+
+// ─── fetchApi expected-user binding ──────────────────────────
+
+describe("fetchApi expected-user binding", () => {
+  const ORIGIN = "https://app.example.com";
+  let location: { origin: string; pathname: string; search: string; href: string };
+  let originalLocation: Location;
+
+  const headerOf = (spy: ReturnType<typeof vi.spyOn>, call = 0): string | null => {
+    const init = spy.mock.calls[call][1] as RequestInit | undefined;
+    return new Headers(init?.headers).get("x-passwd-expected-user");
+  };
+
+  async function loadHelpers() {
+    const mod = await import("@/lib/url-helpers");
+    mod._resetExpectedUserForTests();
+    return mod;
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+    originalLocation = window.location;
+    location = { origin: ORIGIN, pathname: "/ja/dashboard", search: "", href: `${ORIGIN}/ja/dashboard` };
+    Object.defineProperty(window, "location", { value: location, writable: true, configurable: true });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "location", { value: originalLocation, writable: true, configurable: true });
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("sends no header before the page knows its user", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
+    const { fetchApi } = await loadHelpers();
+
+    await fetchApi("/api/vault/status");
+
+    expect(spy).toHaveBeenCalledWith("/api/vault/status");
+  });
+
+  it("names the expected user on a read and on a mutation, keeping the caller's headers", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response());
+    const { fetchApi, setExpectedUser } = await loadHelpers();
+    setExpectedUser("user-a");
+
+    await fetchApi("/api/vault/status");
+    await fetchApi("/api/passwords", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+
+    expect(headerOf(spy, 0)).toBe("user-a");
+    expect(headerOf(spy, 1)).toBe("user-a");
+    const init = spy.mock.calls[1][1] as RequestInit;
+    expect(new Headers(init.headers).get("content-type")).toBe("application/json");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe("{}");
+  });
+
+  it("stays bound to the first user and reloads when another is named", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response());
+    const { fetchApi, setExpectedUser } = await loadHelpers();
+    setExpectedUser("user-a");
+    location.href = "before";
+
+    setExpectedUser("user-b");
+    await fetchApi("/api/vault/status");
+
+    expect(headerOf(spy)).toBe("user-a");
+    expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
+  });
+
+  it("does not reload when the bound user is named again", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response());
+    const { setExpectedUser } = await loadHelpers();
+    setExpectedUser("user-a");
+    location.href = "before";
+
+    setExpectedUser("user-a");
+
+    expect(location.href).toBe("before");
+  });
+
+  it("does not send the header to another origin", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
+    const { fetchApi, setExpectedUser } = await loadHelpers();
+    setExpectedUser("user-a");
+
+    await fetchApi("//evil.example/api");
+
+    expect(spy).toHaveBeenCalledWith("//evil.example/api");
+  });
+
+  describe("on 409 SESSION_CHANGED", () => {
+    const sessionChanged = () =>
+      new Response(JSON.stringify({ error: "SESSION_CHANGED" }), { status: 409 });
+
+    // A vault unlock reads a non-OK unlock-data response as a refused
+    // passphrase, and a generic mutation as its own refusal: neither may see it.
+    it.each([
+      ["a vault unlock read", "/api/vault/unlock/data", undefined],
+      ["a generic mutation", "/api/passwords", { method: "POST", body: "{}" }],
+    ])("rejects %s with SessionChangedError and reloads the page", async (_label, path, init) => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => sessionChanged());
+      const { fetchApi, setExpectedUser, SessionChangedError } = await loadHelpers();
+      setExpectedUser("user-a");
+      location.href = "before";
+
+      await expect(fetchApi(path, init)).rejects.toBeInstanceOf(SessionChangedError);
+      expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
+
+      location.href = "unchanged";
+      await expect(fetchApi(path, init)).rejects.toBeInstanceOf(SessionChangedError);
+      expect(location.href).toBe("unchanged");
+    });
+
+    it("returns a route's own 409 to the caller untouched", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        async () => new Response(JSON.stringify({ error: "CONFLICT" }), { status: 409 }),
+      );
+      const { fetchApi } = await loadHelpers();
+      location.href = "before";
+
+      const res = await fetchApi("/api/passwords", { method: "POST" });
+
+      expect(res.status).toBe(409);
+      expect(location.href).toBe("before");
+      expect((await res.json()).error).toBe("CONFLICT");
+    });
+
+    describe("while a reload is pending", () => {
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["Date"] });
+        vi.setSystemTime(new Date("2026-11-24T00:00:00Z"));
+      });
+
+      afterEach(() => {
+        vi.useRealTimers();
+      });
+
+      it("starts one reload for two refusals", async () => {
+        vi.spyOn(globalThis, "fetch").mockImplementation(async () => sessionChanged());
+        const { fetchApi, setExpectedUser, SessionChangedError, isSessionChangedReloadPending } =
+          await loadHelpers();
+        setExpectedUser("user-a");
+
+        location.href = "before";
+        await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+        expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
+        expect(isSessionChangedReloadPending()).toBe(true);
+
+        location.href = "unchanged";
+        await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+        expect(location.href).toBe("unchanged");
+      });
+
+      it("counts a user switch and a refusal as the same reload", async () => {
+        vi.spyOn(globalThis, "fetch").mockImplementation(async () => sessionChanged());
+        const { fetchApi, setExpectedUser, SessionChangedError } = await loadHelpers();
+        setExpectedUser("user-a");
+        setExpectedUser("user-b");
+
+        location.href = "unchanged";
+        await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+        expect(location.href).toBe("unchanged");
+      });
+
+      // The page outlived the reload (a stop, a handler outside the app
+      // cancelled it): the next refusal must reload again, not wedge the page.
+      it("reloads again on a refusal after a reload that never unloaded the page", async () => {
+        vi.spyOn(globalThis, "fetch").mockImplementation(async () => sessionChanged());
+        const {
+          fetchApi,
+          setExpectedUser,
+          SessionChangedError,
+          SESSION_CHANGED_RELOAD_PENDING_MS,
+          isSessionChangedReloadPending,
+        } = await loadHelpers();
+        setExpectedUser("user-a");
+        await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+
+        vi.setSystemTime(Date.now() + SESSION_CHANGED_RELOAD_PENDING_MS);
+        expect(isSessionChangedReloadPending()).toBe(false);
+        location.href = "cancelled";
+        await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+        expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
+      });
+    });
+
+    // A browser fires beforeunload inside the href assignment, so the app's
+    // guards read the pending mark there: it must be set before navigating.
+    it("marks the reload pending before it navigates, so a dirty form's guard lets it through", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => sessionChanged());
+      const { fetchApi, setExpectedUser, SessionChangedError, isSessionChangedReloadPending } =
+        await loadHelpers();
+      const { useBeforeUnloadGuard } = await import("@/hooks/form/use-before-unload-guard");
+      const { unmount } = renderHook(() => useBeforeUnloadGuard(true));
+      const beforeUnloadPrevented = () => {
+        const event = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      const atNavigation: { pending: boolean; prevented: boolean }[] = [];
+      let href = location.href;
+      Object.defineProperty(location, "href", {
+        get: () => href,
+        set: (next: string) => {
+          atNavigation.push({ pending: isSessionChangedReloadPending(), prevented: beforeUnloadPrevented() });
+          href = next;
+        },
+        configurable: true,
+      });
+      setExpectedUser("user-a");
+
+      // Control: the mounted guard holds any other navigation.
+      expect(beforeUnloadPrevented()).toBe(true);
+      await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+
+      expect(atNavigation).toEqual([{ pending: true, prevented: false }]);
+      expect(href).toBe(`${ORIGIN}/ja/dashboard`);
+      unmount();
+    });
+
+    // The gate's answer when it could not read the session: a fault, which a
+    // reload would not fix.
+    it("returns a pre-route 503 without reloading", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        async () => new Response(JSON.stringify({ error: "SERVICE_UNAVAILABLE" }), { status: 503 }),
+      );
+      const { fetchApi, setExpectedUser, isSessionChangedReloadPending } = await loadHelpers();
+      setExpectedUser("user-a");
+      location.href = "before";
+
+      const res = await fetchApi("/api/vault/status");
+
+      expect(res.status).toBe(503);
+      expect(location.href).toBe("before");
+      expect(isSessionChangedReloadPending()).toBe(false);
+    });
   });
 });

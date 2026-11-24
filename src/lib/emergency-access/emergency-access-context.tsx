@@ -5,7 +5,7 @@ import { VAULT_STATUS } from "@/lib/constants";
 import type { VaultStatus } from "@/lib/constants";
 import { API_PATH, apiPath } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { fetchApi } from "@/lib/url-helpers";
+import { fetchApi, SessionChangedError } from "@/lib/url-helpers";
 import { createKeyEscrow } from "../crypto/crypto-emergency";
 
 const EA_CONFIRM_INTERVAL_MS = 2 * MS_PER_MINUTE;
@@ -15,11 +15,15 @@ export async function confirmPendingEmergencyGrants(secretKey: Uint8Array, owner
   if (!res.ok) return;
   const grants: Array<{
     id: string;
+    ownerId?: unknown;
     granteeId: string;
     granteePublicKey: string;
   }> = await res.json();
 
   for (const grant of grants) {
+    // The list is whoever the cookie belongs to now. Escrow only a grant that
+    // names the owner whose key this is; a grant without an owner is skipped.
+    if (grant.ownerId !== ownerId) continue;
     try {
       const escrow = await createKeyEscrow(secretKey, grant.granteePublicKey, {
         grantId: grant.id,
@@ -30,9 +34,11 @@ export async function confirmPendingEmergencyGrants(secretKey: Uint8Array, owner
       await fetchApi(apiPath.emergencyConfirm(grant.id), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(escrow),
+        body: JSON.stringify({ ...escrow, ownerId }),
       });
-    } catch {
+    } catch (e) {
+      // The session is no longer this owner's: stop, do not try the rest.
+      if (e instanceof SessionChangedError) throw e;
       // Skip individual grant failures
     }
   }

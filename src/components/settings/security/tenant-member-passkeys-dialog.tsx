@@ -25,6 +25,7 @@ import {
 import { Fingerprint, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { fetchApi } from "@/lib/url-helpers";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
 import { apiPath } from "@/lib/constants";
 import { MEMBER_ACTIVITY_LOOKBACK_DAYS } from "@/lib/constants/audit/member-activity";
 import { MS_PER_DAY } from "@/lib/constants/time";
@@ -124,6 +125,35 @@ const SHARE_TYPE_NAME = {
 } as const;
 
 /** The audit-log page filtered to one member's activity since the lookback; no name or email in the URL. */
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/**
+ * The containment counts in a revoke-all answer. Malformed entries are dropped,
+ * and an unreadable body yields an empty answer: the revoke itself is done.
+ */
+function readRevokeAnswer(body: unknown): { contained: ContainedCounts; remaining: RemainingCounts } {
+  const contained: ContainedCounts = {};
+  const remaining: RemainingCounts = {};
+  if (!isRecord(body)) return { contained, remaining };
+  if (isRecord(body.contained)) {
+    for (const kind of Object.keys(CONTAINMENT_KIND_NAME) as ContainmentItem["kind"][]) {
+      const counts = body.contained[kind];
+      if (isRecord(counts) && typeof counts.revoked === "number" && typeof counts.skipped === "number") {
+        contained[kind] = { revoked: counts.revoked, skipped: counts.skipped };
+      }
+    }
+  }
+  if (isRecord(body.remaining)) {
+    for (const [kind] of FOOTHOLD_KINDS) {
+      const count = body.remaining[kind];
+      if (typeof count === "number") remaining[kind] = count;
+    }
+  }
+  return { contained, remaining };
+}
+
 function memberActivityHref(userId: string, now: Date = new Date()): string {
   const from = new Date(now.getTime() - MEMBER_ACTIVITY_LOOKBACK_DAYS * MS_PER_DAY);
   return `/admin/tenant/audit-logs?actor=${encodeURIComponent(userId)}&from=${toISODateString(from)}`;
@@ -342,7 +372,7 @@ export function TenantMemberPasskeysDialog({ userId, memberName, disabled }: Ten
         // Neutral: revoke-all succeeds for a member with no passkeys too.
         toast.success(revokeAll ? t("revokeAllPasskeysDone", { name: memberName }) : t("revokePasskeySuccess"));
         if (revokeAll) {
-          const answer = await res.json().catch(() => null);
+          const answer = readRevokeAnswer(await parseJsonBodyOnce(res));
           warnSkipped(answer);
           warnRemaining(answer);
         }

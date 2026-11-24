@@ -1,5 +1,5 @@
 export { APP_NAME } from "./app";
-export { VAULT_STATUS } from "./vault/vault";
+export { VAULT_STATUS, INITIAL_VAULT_KEY_VERSION } from "./vault/vault";
 export type { VaultStatus } from "./vault/vault";
 
 export { ENTRY_TYPE, ENTRY_TYPE_VALUES } from "./vault/entry-type";

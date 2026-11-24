@@ -227,6 +227,7 @@ describe("rejectEmergencyGrantSchema", () => {
 
 describe("confirmEmergencyGrantSchema", () => {
   const valid = (): {
+    ownerId: string;
     ownerEphemeralPublicKey: string;
     encryptedSecretKey: string;
     secretKeyIv: string;
@@ -234,6 +235,7 @@ describe("confirmEmergencyGrantSchema", () => {
     hkdfSalt: string;
     wrapVersion: number;
   } => ({
+    ownerId: "owner-1",
     ownerEphemeralPublicKey: "ephemeral-pub-key",
     encryptedSecretKey: "encrypted-secret",
     secretKeyIv: HEX_IV,
@@ -256,6 +258,11 @@ describe("confirmEmergencyGrantSchema", () => {
 
   it("rejects when ownerEphemeralPublicKey is missing", () => {
     const { ownerEphemeralPublicKey: _, ...rest } = valid();
+    expect(confirmEmergencyGrantSchema.safeParse(rest).success).toBe(false);
+  });
+
+  it("rejects when ownerId is missing", () => {
+    const { ownerId: _, ...rest } = valid();
     expect(confirmEmergencyGrantSchema.safeParse(rest).success).toBe(false);
   });
 

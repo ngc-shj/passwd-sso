@@ -1,16 +1,16 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslations } from "next-intl";
-import { useRouter } from "@/i18n/navigation";
 import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
+import { VAULT_UNLOCK_INTERRUPTED } from "@/lib/vault/vault-unlock-codes";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { API_PATH, SESSION_STORAGE_KEY } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { isWebAuthnSupported } from "@/lib/auth/webauthn/webauthn-client";
 import { hasPrf } from "@/lib/auth/prf-handoff";
-import { fetchApi } from "@/lib/url-helpers";
+import { fetchApi, SessionChangedError } from "@/lib/url-helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,8 +22,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Link } from "@/i18n/navigation";
-import { Fingerprint, Loader2, Lock, LogIn, Eye, EyeOff } from "lucide-react";
+import { Fingerprint, Loader2, Lock, Eye, EyeOff } from "lucide-react";
 import { ExtConnectBanner } from "@/components/extension/ext-connect-banner";
+import { SessionExpiredCard } from "./session-expired-card";
 
 /** @internal Exported for testing */
 export function formatLockedUntil(lockedUntil: string | null | undefined, t: (key: string, values?: Record<string, string>) => string): string {
@@ -38,10 +39,71 @@ export function formatLockedUntil(lockedUntil: string | null | undefined, t: (ke
   return t("accountLockedWithTime", { time: t("minutes", { count: String(minutes) }) });
 }
 
+export type UnlockErrorResolution =
+  | { kind: "sessionExpired" }
+  | { kind: "message"; message: string };
+
+/**
+ * The one mapping from an unlock failure to what the user sees. Each caller
+ * supplies its own strings; an unknown code or a non-VaultUnlockError gets
+ * `fallback`, never text taken from the error itself.
+ */
+export function resolveUnlockError(
+  err: unknown,
+  msgs: {
+    lockedUntil: (lockedUntil: string | null | undefined) => string;
+    rateLimited: string;
+    unavailable: string;
+    interrupted: string;
+    sessionChanged: string;
+    fallback: string;
+  },
+): UnlockErrorResolution {
+  // The page's session now belongs to someone else and the page is reloading:
+  // the request was refused before any route ran, so no attempt was made.
+  if (err instanceof SessionChangedError) return { kind: "message", message: msgs.sessionChanged };
+  if (!(err instanceof VaultUnlockError)) return { kind: "message", message: msgs.fallback };
+  switch (err.code) {
+    case API_ERROR.UNAUTHORIZED:
+      return { kind: "sessionExpired" };
+    case API_ERROR.ACCOUNT_LOCKED:
+      return { kind: "message", message: msgs.lockedUntil(err.lockedUntil) };
+    case API_ERROR.RATE_LIMIT_EXCEEDED:
+      return { kind: "message", message: msgs.rateLimited };
+    case API_ERROR.SERVICE_UNAVAILABLE:
+      return { kind: "message", message: msgs.unavailable };
+    // The credential was accepted, but the page was hidden before the vault
+    // took the key: neither a wrong passphrase nor a failed attempt.
+    case VAULT_UNLOCK_INTERRUPTED:
+      return { kind: "message", message: msgs.interrupted };
+    default:
+      return { kind: "message", message: msgs.fallback };
+  }
+}
+
+// Blocked storage (sandboxed iframe, disabled site data) throws on access; a
+// missing flag only means no auto-unlock, so it must not take the screen down.
+function readWebAuthnSignInFlag(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return sessionStorage.getItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function consumeWebAuthnSignInFlag(): void {
+  try {
+    sessionStorage.removeItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN);
+  } catch {
+    // Same blocked-storage case: the auto-unlock below must still run.
+  }
+}
+
 export function VaultLockScreen() {
   const t = useTranslations("Vault");
   const tw = useTranslations("WebAuthn");
-  const router = useRouter();
+  const tApi = useTranslations("ApiErrors");
   const { unlock, unlockWithPasskey, unlockWithStoredPrf } = useVault();
 
   const [passphrase, setPassphrase] = useState("");
@@ -51,6 +113,18 @@ export function VaultLockScreen() {
   const [error, setError] = useState("");
   const [hasPrfPasskeys, setHasPrfPasskeys] = useState(false);
   const [sessionExpired, setSessionExpired] = useState(false);
+
+  const showUnlockError = useCallback(
+    (err: unknown, msgs: Parameters<typeof resolveUnlockError>[1]) => {
+      const resolved = resolveUnlockError(err, msgs);
+      if (resolved.kind === "sessionExpired") {
+        setSessionExpired(true);
+      } else {
+        setError(resolved.message);
+      }
+    },
+    [],
+  );
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -65,31 +139,31 @@ export function VaultLockScreen() {
         setPassphrase("");
       }
     } catch (err) {
-      if (err instanceof VaultUnlockError) {
-        switch (err.code) {
-          case API_ERROR.UNAUTHORIZED:
-            setSessionExpired(true);
-            return;
-          case API_ERROR.ACCOUNT_LOCKED:
-            setError(formatLockedUntil(err.lockedUntil, t));
-            break;
-          case API_ERROR.RATE_LIMIT_EXCEEDED:
-            setError(t("rateLimited"));
-            break;
-          case API_ERROR.SERVICE_UNAVAILABLE:
-            setError(t("retryLater"));
-            break;
-          default:
-            setError(t("unlockError"));
-        }
-      } else {
-        setError(t("unlockError"));
-      }
+      showUnlockError(err, {
+        lockedUntil: (lockedUntil) => formatLockedUntil(lockedUntil, t),
+        rateLimited: t("rateLimited"),
+        unavailable: t("retryLater"),
+        interrupted: t("unlockInterrupted"),
+        sessionChanged: tApi("sessionChanged"),
+        fallback: t("unlockError"),
+      });
       setPassphrase("");
     } finally {
       setLoading(false);
     }
   };
+
+  const passkeyUnlockMessages = useMemo(
+    () => ({
+      lockedUntil: (lockedUntil: string | null | undefined) => formatLockedUntil(lockedUntil, t),
+      rateLimited: t("rateLimited"),
+      unavailable: tw("serviceUnavailable"),
+      interrupted: t("unlockInterrupted"),
+      sessionChanged: tApi("sessionChanged"),
+      fallback: tw("unlockError"),
+    }),
+    [t, tw, tApi],
+  );
 
   const handlePasskeyUnlock = useCallback(async () => {
     setPasskeyLoading(true);
@@ -100,38 +174,16 @@ export function VaultLockScreen() {
         setError(tw("unlockError"));
       }
     } catch (err) {
-      if (err instanceof VaultUnlockError) {
-        switch (err.code) {
-          case API_ERROR.UNAUTHORIZED:
-            setSessionExpired(true);
-            return;
-          case API_ERROR.ACCOUNT_LOCKED:
-            setError(formatLockedUntil(err.lockedUntil, t));
-            break;
-          case API_ERROR.RATE_LIMIT_EXCEEDED:
-            setError(t("rateLimited"));
-            break;
-          case API_ERROR.SERVICE_UNAVAILABLE:
-            setError(tw("serviceUnavailable"));
-            break;
-          default:
-            setError(tw("unlockError"));
-        }
-      } else {
-        setError(tw("unlockError"));
-      }
+      showUnlockError(err, passkeyUnlockMessages);
     } finally {
       setPasskeyLoading(false);
     }
-  }, [unlockWithPasskey, t, tw]);
+  }, [unlockWithPasskey, tw, passkeyUnlockMessages, showUnlockError]);
 
   // Track whether we arrived via WebAuthn sign-in.
   // The ref persists across renders so we don't lose the flag while
   // waiting for the hasPrfPasskeys query to resolve.
-  const webauthnSignInRef = useRef(
-    typeof window !== "undefined" &&
-      sessionStorage.getItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN) === "1",
-  );
+  const webauthnSignInRef = useRef(readWebAuthnSignInFlag());
 
   // Auto-unlock vault after WebAuthn sign-in, once the PRF passkey check below
   // has settled. If PRF output was captured during sign-in (single-ceremony
@@ -142,7 +194,7 @@ export function VaultLockScreen() {
       if (!webauthnSignInRef.current) return;
       // Consume flag (one-shot)
       webauthnSignInRef.current = false;
-      sessionStorage.removeItem(SESSION_STORAGE_KEY.WEBAUTHN_SIGNIN);
+      consumeWebAuthnSignInFlag();
 
       // PRF material is handed off in-memory (not sessionStorage) and consumed by
       // unlockWithStoredPrf; peek without consuming to decide whether to attempt.
@@ -153,24 +205,14 @@ export function VaultLockScreen() {
           .then((ok) => {
             if (!ok) setError(tw("unlockError"));
           })
-          .catch((err) => {
-            if (err instanceof VaultUnlockError) {
-              if (err.code === API_ERROR.UNAUTHORIZED) {
-                setSessionExpired(true);
-                return;
-              }
-              setError(formatLockedUntil(err.lockedUntil, t));
-            } else {
-              setError(tw("unlockError"));
-            }
-          })
+          .catch((err) => showUnlockError(err, passkeyUnlockMessages))
           .finally(() => setPasskeyLoading(false));
       }
       // If sign-in did not produce PRF output (authenticator doesn't support PRF),
       // do NOT auto-trigger a separate ceremony — the user can manually unlock
       // with passphrase or click the passkey unlock button.
     };
-  }, [unlockWithStoredPrf, t, tw]);
+  }, [unlockWithStoredPrf, tw, passkeyUnlockMessages, showUnlockError]);
 
   // Check if user has a passkey that can unlock now: PRF-capable AND holding
   // the server-side wrapping. A passkey registered while the vault was locked,
@@ -199,30 +241,7 @@ export function VaultLockScreen() {
     };
   }, []);
 
-  if (sessionExpired) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">
-        <Card className="w-full max-w-sm rounded-xl border">
-          <CardHeader className="text-center">
-            <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-              <LogIn className="h-6 w-6 text-muted-foreground" />
-            </div>
-            <CardTitle>{t("sessionExpired")}</CardTitle>
-            <CardDescription>{t("sessionExpiredDescription")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Button
-              className="w-full"
-              onClick={() => router.push("/auth/signin")}
-            >
-              <LogIn className="h-4 w-4 mr-2" />
-              {t("goToSignIn")}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  if (sessionExpired) return <SessionExpiredCard />;
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-b from-muted/30 to-background p-4">

@@ -35,6 +35,10 @@ export const rejectEmergencyGrantSchema = z.object({
 });
 
 export const confirmEmergencyGrantSchema = z.object({
+  // The owner the escrow was built for; the route refuses it unless it is the
+  // session's user (the escrow's AAD names this owner, and the server cannot
+  // read it).
+  ownerId: z.string().min(1).max(128),
   ownerEphemeralPublicKey: z.string().min(1).max(512),
   encryptedSecretKey: z.string().min(1).max(512),
   secretKeyIv: z.string().length(HEX_IV_LENGTH),

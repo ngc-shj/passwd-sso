@@ -235,7 +235,7 @@ Client(on valid):
 
 - Personal vault keys must only exist in runtime memory during unlock windows.
 - Auto-lock settings are part of security posture; do not disable casually.
-- Clear clipboard copies quickly (already implemented as 30s auto-clear).
+- Clear clipboard copies quickly. The web app attempts a clear after 30s, but it only takes effect on Chromium; Firefox and Safari keep the value until it is overwritten, so do not treat the clear as a boundary.
 
 ## 5. Browser Extension Specific
 

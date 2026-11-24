@@ -18,6 +18,7 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { createRaceHelpers, holdPrismaWriter } from "./race-helpers";
+import { assertNoForeignRows } from "./foreign-rows";
 import { AUDIT_ACTION, AUDIT_OUTBOX } from "@/lib/constants/audit/audit";
 import { MS_PER_HOUR } from "@/lib/constants/time";
 import { BYPASS_GRANT, setBypassGucs } from "@/lib/tenant-rls-grants";
@@ -171,6 +172,19 @@ describe("audit delivery to an inactive target (C6)", () => {
     });
   }
 
+  /** For the cells that count what a pass took: the pass picks from every tenant's parked backlog. */
+  async function assertNoForeignExpirable(): Promise<void> {
+    await assertNoForeignRows(
+      ctx.su,
+      "expireInactiveTargetDeliveriesInTx takes the oldest PENDING deliveries of inactive targets across every tenant",
+      `SELECT d.id::text AS ref FROM audit_deliveries d
+         JOIN audit_delivery_targets t ON t.id = d.target_id AND t.is_active = false
+        WHERE d.status = 'PENDING' AND d.created_at < $1::timestamptz AND d.tenant_id <> $2::uuid`,
+      cutoff,
+      tenantId,
+    );
+  }
+
   function deliveredOutboxIds(): string[] {
     return mockDeliver.mock.calls.map((c) => (c[1] as { id: string }).id);
   }
@@ -264,6 +278,7 @@ describe("audit delivery to an inactive target (C6)", () => {
     });
 
     it("processes only `limit` rows per pass and drains the remainder on the next", async () => {
+      await assertNoForeignExpirable();
       const inactive = await seedTarget(false);
       const seeded: string[] = [];
       for (let i = 0; i < 5; i++) {
@@ -333,6 +348,7 @@ describe("audit delivery to an inactive target (C6)", () => {
 
   describe("overlap and re-activation races", () => {
     it("an overlapping pass is not blocked by one holding its pick and takes a disjoint set; one dead-letter row per delivery", async () => {
+      await assertNoForeignExpirable();
       const inactive = await seedTarget(false);
       const seeded: string[] = [];
       for (let i = 0; i < 6; i++) {

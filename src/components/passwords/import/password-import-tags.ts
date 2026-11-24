@@ -1,5 +1,6 @@
 import type { ParsedEntry } from "@/components/passwords/import/password-import-types";
 import { fetchApi } from "@/lib/url-helpers";
+import { parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
 
 interface ExistingTag {
   id: string;
@@ -28,20 +29,23 @@ export async function resolveTagNameToIdForImport(
 ): Promise<Map<string, string>> {
   const tagNameToId = new Map<string, string>();
 
-  try {
-    const tagsRes = await fetcher(tagsPath);
-    if (tagsRes.ok) {
-      const existingTags = (await tagsRes.json()) as ExistingTag[];
-      for (const tag of existingTags) {
-        const name = tag.name?.trim();
-        if (name && tag.id) {
-          tagNameToId.set(name, tag.id);
+  const loadExistingTags = async () => {
+    try {
+      const tagsRes = await fetcher(tagsPath);
+      if (tagsRes.ok) {
+        const existingTags = (await tagsRes.json()) as ExistingTag[];
+        for (const tag of existingTags) {
+          const name = tag.name?.trim();
+          if (name && tag.id) {
+            tagNameToId.set(name, tag.id);
+          }
         }
       }
+    } catch {
+      // Ignore and continue without tag linkage.
     }
-  } catch {
-    // Ignore and continue without tag linkage.
-  }
+  };
+  await loadExistingTags();
 
   const missingTags = new Map<string, string | null>();
   for (const entry of entries) {
@@ -52,6 +56,9 @@ export async function resolveTagNameToIdForImport(
     }
   }
 
+  // A tag created with an unreadable response exists; its id is read back
+  // from the list once the loop is done.
+  let createdUnread = false;
   for (const [name, color] of missingTags) {
     try {
       const createRes = await fetcher(tagsPath, {
@@ -60,15 +67,21 @@ export async function resolveTagNameToIdForImport(
         body: JSON.stringify({ name, ...(color ? { color } : {}) }),
       });
       if (createRes.ok) {
-        const created = (await createRes.json()) as ExistingTag;
-        if (created?.id) {
-          tagNameToId.set(name, created.id);
+        const created = await parseJsonBodyOnce(createRes);
+        const createdId =
+          typeof created === "object" && created !== null && "id" in created ? created.id : null;
+        if (typeof createdId === "string" && createdId !== "") {
+          tagNameToId.set(name, createdId);
+        } else {
+          createdUnread = true;
         }
       }
     } catch {
       // Ignore and proceed without this tag.
     }
   }
+
+  if (createdUnread) await loadExistingTags();
 
   return tagNameToId;
 }

@@ -95,4 +95,77 @@ describe("SshKeyFields", () => {
     render(<SshKeyFields {...baseProps} privateKeyWarning="Long form detected" />);
     expect(screen.getByText("Long form detected")).toBeInTheDocument();
   });
+
+  it("ignores edits to the private key while it is masked", () => {
+    const onPrivateKeyChange = vi.fn();
+    render(<SshKeyFields {...baseProps} privateKey="k" onPrivateKeyChange={onPrivateKeyChange} />);
+    fireEvent.change(screen.getByLabelText("Private key"), { target: { value: "typed" } });
+    expect(onPrivateKeyChange).not.toHaveBeenCalled();
+  });
+
+  it("reveals an empty masked private key on focus so it can be pasted into", () => {
+    const onTogglePrivateKey = vi.fn();
+    render(<SshKeyFields {...baseProps} onTogglePrivateKey={onTogglePrivateKey} />);
+    fireEvent.focus(screen.getByLabelText("Private key"));
+    expect(onTogglePrivateKey).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a filled private key masked on focus", () => {
+    const onTogglePrivateKey = vi.fn();
+    render(
+      <SshKeyFields {...baseProps} privateKey="k" onTogglePrivateKey={onTogglePrivateKey} />,
+    );
+    fireEvent.focus(screen.getByLabelText("Private key"));
+    expect(onTogglePrivateKey).not.toHaveBeenCalled();
+  });
+
+  it("toggles the private key from the Show button", () => {
+    const onTogglePrivateKey = vi.fn();
+    render(<SshKeyFields {...baseProps} onTogglePrivateKey={onTogglePrivateKey} />);
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    expect(onTogglePrivateKey).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to English Show/Hide text when the labels omit them", () => {
+    const labels = { ...baseProps.labels, show: undefined, hide: undefined };
+    const { rerender } = render(<SshKeyFields {...baseProps} labels={labels} />);
+    expect(screen.getByRole("button", { name: "Show" })).toBeInTheDocument();
+    rerender(<SshKeyFields {...baseProps} labels={labels} showPrivateKey />);
+    expect(screen.getByRole("button", { name: "Hide" })).toBeInTheDocument();
+  });
+
+  it("calls onPrivateKeyBlur when the private key loses focus", () => {
+    const onPrivateKeyBlur = vi.fn();
+    render(<SshKeyFields {...baseProps} onPrivateKeyBlur={onPrivateKeyBlur} />);
+    fireEvent.blur(screen.getByLabelText("Private key"));
+    expect(onPrivateKeyBlur).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits the key size suffix when keySize is 0", () => {
+    render(<SshKeyFields {...baseProps} keyType="ed25519" fingerprint="SHA256:x" />);
+    expect(screen.getByDisplayValue("ED25519")).toBeInTheDocument();
+  });
+
+  it("marks the public key as auto-detected only when a public key is present", () => {
+    const { rerender } = render(
+      <SshKeyFields {...baseProps} autoDetectedLabel="auto-detected" />,
+    );
+    expect(screen.queryByText("(auto-detected)")).not.toBeInTheDocument();
+    rerender(
+      <SshKeyFields {...baseProps} publicKey="ssh-ed25519 AAAA" autoDetectedLabel="auto-detected" />,
+    );
+    expect(screen.getByText("(auto-detected)")).toBeInTheDocument();
+  });
+
+  it.each([
+    ["PubPH", "onPublicKeyChange", "ssh-ed25519 AAAA"],
+    ["PassPH", "onPassphraseChange", "secret"],
+    ["CommentPH", "onCommentChange", "laptop"],
+    ["NotesPH", "onNotesChange", "memo"],
+  ] as const)("routes typing in the %s input to %s", (placeholder, handler, value) => {
+    const fn = vi.fn();
+    render(<SshKeyFields {...baseProps} {...{ [handler]: fn }} />);
+    fireEvent.change(screen.getByPlaceholderText(placeholder), { target: { value } });
+    expect(fn).toHaveBeenCalledWith(value);
+  });
 });

@@ -140,6 +140,24 @@ describe("useInlineReauth reauth failure mapping", () => {
     expect(onSuccess).not.toHaveBeenCalled();
   });
 
+  it("routes an expired session (UNAUTHORIZED) to the recent-session dialog", async () => {
+    mockReauthenticateWithPasskey.mockResolvedValue({
+      ok: false,
+      error: "UNAUTHORIZED",
+    });
+    const onSuccess = vi.fn(async () => {});
+    await openReauthDialog(onSuccess);
+
+    fireEvent.click(screen.getByText("confirm"));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("reauth-open")).toHaveTextContent("false");
+    });
+    expect(screen.getByTestId("recent-session-open")).toHaveTextContent("true");
+    expect(mockToastError).toHaveBeenCalledWith("reauthSessionExpired");
+    expect(onSuccess).not.toHaveBeenCalled();
+  });
+
   it("routes PASSKEY_REAUTH_CREDENTIAL_MISMATCH to the recent-session dialog", async () => {
     mockReauthenticateWithPasskey.mockResolvedValue({
       ok: false,

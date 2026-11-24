@@ -143,11 +143,19 @@ describe("crypto-aad", () => {
   // ─── Error Handling ───────────────────────────────────────────
 
   describe("error handling", () => {
-    it("throws on wrong number of fields (internal consistency)", () => {
-      // buildPersonalEntryAAD expects exactly 2 fields
-      // We can't pass wrong count directly, but the function validates internally
-      // This test confirms the type safety works
-      expect(() => buildPersonalEntryAAD("user", "entry", "blob")).not.toThrow();
+    // The field-count check in buildAADBytes is unreachable through the public
+    // builders (each passes a fixed-length array); the length cap is the
+    // reachable error path.
+    it("throws when a field exceeds the u16 length prefix (65,535 bytes)", () => {
+      expect(() => buildPersonalEntryAAD("x".repeat(0x10000), "entry-1", "blob")).toThrow(
+        "AAD field too long: 65536 bytes (max 65535)",
+      );
+    });
+
+    it("accepts a field of exactly 65,535 bytes", () => {
+      const aad = buildPersonalEntryAAD("x".repeat(0xffff), "entry-1", "blob");
+      const view = new DataView(aad.buffer, aad.byteOffset, aad.byteLength);
+      expect(view.getUint16(4, false)).toBe(0xffff);
     });
 
     it("accepts empty string fields (encodes as length=0)", () => {

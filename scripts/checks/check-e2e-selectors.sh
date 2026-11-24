@@ -60,8 +60,10 @@ warn() {
 
 printf "${BOLD}▸ Checking deleted/moved route paths vs E2E tests${RESET}\n"
 
-# Find deleted page.tsx files under src/app/
-deleted_pages=$(git diff "${BASE}...HEAD" --diff-filter=D --name-only \
+# Find deleted or moved page.tsx files under src/app/. --no-renames: with rename
+# detection a `git mv` of a page is reported as R, never D, so a moved route
+# still referenced by a spec would pass silently. Without it the old path is a D.
+deleted_pages=$(git diff "${BASE}...HEAD" --diff-filter=D --name-only --no-renames \
   | grep -E '^src/app/.*page\.tsx$' || true)
 
 if [ -n "$deleted_pages" ]; then
@@ -95,10 +97,6 @@ if [ -n "$deleted_pages" ]; then
   done
 fi
 
-# Also check renamed/moved pages (file added + deleted in same diff)
-added_pages=$(git diff "${BASE}...HEAD" --diff-filter=A --name-only \
-  | grep -E '^src/app/.*page\.tsx$' || true)
-
 # ── 2. CSS class selector check ──────────────────────────────
 #
 # Extract CSS class selectors used in E2E .locator() calls,
@@ -112,8 +110,11 @@ e2e_class_selectors=$(grep -rohE '\.locator\([[:space:]]*["'"'"'](\.[a-zA-Z0-9_-
   | sed -E "s/.*\.locator\([[:space:]]*[\"']//; s/[\"']$//" \
   | sort -u || true)
 
-# Get the full list of changed .tsx source files (reused by checks 2, 5, 6)
-changed_src=$(git diff "${BASE}...HEAD" --name-only \
+# Get the full list of changed .tsx source files (reused by checks 2, 3, 5, 6, 7).
+# --no-renames lists a renamed file under both paths; with rename detection only
+# the new path is listed, the scoped diffs below see the file as wholly added,
+# and a selector dropped during the move never shows up as a removed line.
+changed_src=$(git diff "${BASE}...HEAD" --name-only --no-renames \
   | grep -E '^src/.*\.tsx$' \
   | grep -v '\.test\.' \
   | grep -v '__tests__' || true)
@@ -136,7 +137,7 @@ if [ -n "$e2e_class_selectors" ]; then
           # Verify it's actually gone (not just moved)
           added_with_class=$(git diff "${BASE}...HEAD" -- $changed_src \
             | grep -E '^\+.*className=.*\b'"${cls}"'\b' \
-            | grep -v '^\+\+\+' || true)
+            | grep -vE '^\+\+\+' || true)
           if [ -z "$added_with_class" ]; then
             ref_files=$(grep -rl "\\.$cls" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
             warn "CSS class '$cls' removed from source but used in E2E selector '$selector' in: $ref_files"
@@ -157,16 +158,16 @@ e2e_testids=$(grep -rohE "data-testid=[\"'][^\"']+[\"']" "$E2E_DIR/" \
   | sed -E "s/data-testid=[\"']//; s/[\"']$//" \
   | sort -u || true)
 
-if [ -n "$e2e_testids" ]; then
+if [ -n "$e2e_testids" ] && [ -n "$changed_src" ]; then
   for testid in $e2e_testids; do
     # Check if this testid was removed from any source file
-    removed=$(git diff "${BASE}...HEAD" \
+    removed=$(git diff "${BASE}...HEAD" -- $changed_src \
       | grep -E '^\-.*data-testid=.*'"$testid" \
       | grep -v '^\-\-\-' || true)
     if [ -n "$removed" ]; then
-      added=$(git diff "${BASE}...HEAD" \
+      added=$(git diff "${BASE}...HEAD" -- $changed_src \
         | grep -E '^\+.*data-testid=.*'"$testid" \
-        | grep -v '^\+\+\+' || true)
+        | grep -vE '^\+\+\+' || true)
       if [ -z "$added" ]; then
         ref_files=$(grep -rl "$testid" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
         warn "data-testid='$testid' removed from source but used in E2E: $ref_files"
@@ -259,7 +260,7 @@ if [ -n "$e2e_aria_names" ] && [ -n "$changed_src" ]; then
       if grep -qi "$name" 2>/dev/null <<<"$removed_aria"; then
         added_aria=$(git diff "${BASE}...HEAD" -- $changed_src \
           | grep -E '^\+.*aria-label=.*'"$name" \
-          | grep -v '^\+\+\+' || true)
+          | grep -vE '^\+\+\+' || true)
         if [ -z "$added_aria" ]; then
           ref_files=$(grep -ril "$name" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
           warn "aria-label containing '$name' removed from source but used in E2E: $ref_files"
@@ -292,7 +293,7 @@ if [ -n "$e2e_ids" ] && [ -n "$changed_src" ]; then
       if grep -q "\"${id}\"" 2>/dev/null <<<"$removed_ids"; then
         added_id=$(git diff "${BASE}...HEAD" -- $changed_src \
           | grep -E '^\+.*\bid=.*"'"${id}"'"' \
-          | grep -v '^\+\+\+' || true)
+          | grep -vE '^\+\+\+' || true)
         if [ -z "$added_id" ]; then
           ref_files=$(grep -rl "#${id}" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
           warn "id='$id' removed from source but used as #$id in E2E: $ref_files"
@@ -313,15 +314,15 @@ e2e_slots=$(grep -rohE "data-slot=[\"'][^\"']+[\"']" "$E2E_DIR/" \
   | sed -E "s/data-slot=[\"']//; s/[\"']$//" \
   | sort -u || true)
 
-if [ -n "$e2e_slots" ]; then
+if [ -n "$e2e_slots" ] && [ -n "$changed_src" ]; then
   for slot in $e2e_slots; do
-    removed=$(git diff "${BASE}...HEAD" \
+    removed=$(git diff "${BASE}...HEAD" -- $changed_src \
       | grep -E '^\-.*data-slot=.*'"$slot" \
       | grep -v '^\-\-\-' || true)
     if [ -n "$removed" ]; then
-      added=$(git diff "${BASE}...HEAD" \
+      added=$(git diff "${BASE}...HEAD" -- $changed_src \
         | grep -E '^\+.*data-slot=.*'"$slot" \
-        | grep -v '^\+\+\+' || true)
+        | grep -vE '^\+\+\+' || true)
       if [ -z "$added" ]; then
         ref_files=$(grep -rl "data-slot.*$slot" "$E2E_DIR/" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
         warn "data-slot='$slot' removed from source but used in E2E: $ref_files"

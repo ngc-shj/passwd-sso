@@ -11,6 +11,7 @@
   "rotateKeyProgressEncrypting": "暗号化中 {progress}...",
   "rotateKeySuccess": "チームキーのローテーションが完了しました",
   "rotateKeyFailed": "キーのローテーションに失敗しました。再試行してください。",
+  "rotateKeyOutcomeUnknown": "チームキーのローテーションが完了したか確認できませんでした。このページを確認し、必要に応じて再試行してください。",
   "rotateKeyFetchFailed": "ローテーション用のチームデータの読み込みに失敗しました。",
   "rotateKeyRateLimited": "ローテーションの試行回数が多すぎます。しばらく待ってから再試行してください。",
   "rotateKeyVersionConflict": "キーバージョンの競合が発生しました。別のローテーションが進行中の可能性があります。",

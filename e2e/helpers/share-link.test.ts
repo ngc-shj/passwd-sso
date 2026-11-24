@@ -219,9 +219,8 @@ describe("seedShareLink", () => {
     const iv = params[6] as string;
     const authTag = params[7] as string;
 
-    // Decryption with V1 key (MASTER_KEY) should succeed
-    expect(() =>
-      decryptGcm(MASTER_KEY, ciphertext, iv, authTag, E2E_TENANT.id)
-    ).not.toThrow();
+    // The GCM tag only verifies under the V1 key (MASTER_KEY)
+    const plaintext = decryptGcm(MASTER_KEY, ciphertext, iv, authTag, E2E_TENANT.id);
+    expect(JSON.parse(plaintext).title).toBe(BASE_OPTIONS.title);
   });
 });

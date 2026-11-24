@@ -1,0 +1,303 @@
+"use client";
+
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
+import { useTranslations } from "next-intl";
+import { useVault } from "@/lib/vault/vault-context";
+import { VAULT_STATUS, ENTRY_TYPE, apiPath } from "@/lib/constants";
+import type { EntryTypeValue } from "@/lib/constants";
+import { eaErrorToI18nKey } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import {
+  decryptPrivateKey,
+  importPrivateKey,
+  unwrapSecretKeyAsGrantee,
+} from "@/lib/crypto/crypto-emergency";
+import { deriveEncryptionKey, decryptData, hexDecode, type EncryptedData } from "@/lib/crypto/crypto-client";
+import { buildPersonalEntryAAD, VAULT_TYPE } from "@/lib/crypto/crypto-aad";
+import { fetchApi } from "@/lib/url-helpers";
+import type { EntryCardData } from "@/types/entry-card";
+import type { InlineDetailData } from "@/types/entry";
+import { mapDecryptedBlobToDetailFields } from "@/lib/vault/map-detail-fields";
+import type { EntryTagNameColor } from "@/lib/vault/entry-form-types";
+
+interface RawVaultEntry {
+  id: string;
+  encryptedBlob: string;
+  blobIv: string;
+  blobAuthTag: string;
+  encryptedOverview: string;
+  overviewIv: string;
+  overviewAuthTag: string;
+  keyVersion: number;
+  aadVersion: number;
+  entryType: string;
+  isFavorite: boolean;
+  isArchived: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface DecryptedOverview {
+  title: string;
+  username?: string | null;
+  urlHost?: string | null;
+  snippet?: string | null;
+  brand?: string | null;
+  lastFour?: string | null;
+  cardholderName?: string | null;
+  fullName?: string | null;
+  idNumberLast4?: string | null;
+  relyingPartyId?: string | null;
+  bankName?: string | null;
+  accountNumberLast4?: string | null;
+  softwareName?: string | null;
+  licensee?: string | null;
+  keyType?: string | null;
+  fingerprint?: string | null;
+  tags: EntryTagNameColor[];
+}
+
+export interface DisplayEntry {
+  card: EntryCardData;
+  raw: RawVaultEntry;
+}
+
+/**
+ * Grantee-side read-only view of a grantor's vault: unwraps the grantor's
+ * secret key via ECDH, decrypts entry overviews for the list, and decrypts
+ * blobs lazily on demand.
+ */
+export function useEmergencyVault(grantId: string) {
+  const t = useTranslations("EmergencyAccess");
+  const { status: vaultStatus, encryptionKey } = useVault();
+
+  const [entries, setEntries] = useState<DisplayEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [ownerName, setOwnerName] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [decryptFailCount, setDecryptFailCount] = useState(0);
+  // Owner's derived encryption key, stored after ECDH unwrap for lazy blob decryption
+  const ownerEncKeyRef = useRef<CryptoKey | null>(null);
+  const ownerIdRef = useRef<string>("");
+
+  // Defensive: the vault context sets the key and UNLOCKED together, but if
+  // the key is ever missing while unlocked, surface it instead of decrypting.
+  const keyMissing = vaultStatus === VAULT_STATUS.UNLOCKED && !encryptionKey;
+  const isLoading = loading && !keyMissing;
+  const displayError = error ?? (keyMissing ? t("vaultUnlockRequired") : null);
+
+  useEffect(() => {
+    if (vaultStatus !== VAULT_STATUS.UNLOCKED || !encryptionKey) return;
+
+    const decryptEntries = async () => {
+      try {
+        // 1. Fetch ECDH data
+        const vaultRes = await fetchApi(apiPath.emergencyGrantVault(grantId));
+        if (!vaultRes.ok) {
+          const body = await readApiErrorBody(vaultRes);
+          setError(t(eaErrorToI18nKey(body?.error)));
+          setLoading(false);
+          return;
+        }
+        const vaultData = await vaultRes.json();
+        setOwnerName(vaultData.owner?.name || vaultData.owner?.email || "");
+        ownerIdRef.current = vaultData.ownerId;
+
+        // 2. Decrypt grantee's ECDH private key
+        const granteePrivKeyBytes = await decryptPrivateKey(
+          {
+            ciphertext: vaultData.granteeKeyPair.encryptedPrivateKey,
+            iv: vaultData.granteeKeyPair.privateKeyIv,
+            authTag: vaultData.granteeKeyPair.privateKeyAuthTag,
+          },
+          encryptionKey
+        );
+        // importKey copies the bytes, so the plaintext PKCS#8 is wiped on
+        // either outcome.
+        const granteePrivKey = await importPrivateKey(granteePrivKeyBytes).finally(() =>
+          granteePrivKeyBytes.fill(0),
+        );
+
+        // 3. Unwrap owner's secretKey
+        const hkdfSalt = hexDecode(vaultData.hkdfSalt);
+        const wrapCtx = {
+          grantId: vaultData.grantId,
+          ownerId: vaultData.ownerId,
+          granteeId: vaultData.granteeId,
+          keyVersion: vaultData.keyVersion ?? 1,
+          wrapVersion: vaultData.wrapVersion ?? 1,
+        };
+        const ownerSecretKey = await unwrapSecretKeyAsGrantee(
+          {
+            ciphertext: vaultData.encryptedSecretKey,
+            iv: vaultData.secretKeyIv,
+            authTag: vaultData.secretKeyAuthTag,
+          },
+          vaultData.ownerEphemeralPublicKey,
+          granteePrivKey,
+          hkdfSalt,
+          wrapCtx
+        );
+
+        // 4. Derive owner's encryption key
+        const ownerEncKey = await deriveEncryptionKey(ownerSecretKey).finally(() =>
+          ownerSecretKey.fill(0),
+        );
+        ownerEncKeyRef.current = ownerEncKey;
+
+        // 5. Fetch encrypted entries
+        const entriesRes = await fetchApi(apiPath.emergencyGrantVaultEntries(grantId));
+        if (!entriesRes.ok) {
+          setError(t("networkError"));
+          setLoading(false);
+          return;
+        }
+        const rawEntries: RawVaultEntry[] = await entriesRes.json();
+
+        // 6. Decrypt overviews for list display
+        const decrypted: DisplayEntry[] = [];
+        let failCount = 0;
+        for (const entry of rawEntries) {
+          try {
+            const aad = entry.aadVersion >= 1
+              ? buildPersonalEntryAAD(vaultData.ownerId, entry.id, VAULT_TYPE.OVERVIEW)
+              : undefined;
+            const overviewEncrypted: EncryptedData = {
+              ciphertext: entry.encryptedOverview,
+              iv: entry.overviewIv,
+              authTag: entry.overviewAuthTag,
+            };
+            const overviewPlain = await decryptData(overviewEncrypted, ownerEncKey, aad);
+            const overview: DecryptedOverview = JSON.parse(overviewPlain);
+
+            decrypted.push({
+              card: {
+                id: entry.id,
+                // Deliberate: the grantee cannot satisfy the grantor's passphrase,
+                // so a re-prompt here would be unsatisfiable rather than
+                // protective. Mirrors the InlineDetailData literal below.
+                requireReprompt: false,
+                entryType: (entry.entryType as EntryTypeValue) ?? ENTRY_TYPE.LOGIN,
+                title: overview.title || "Untitled",
+                username: overview.username ?? null,
+                urlHost: overview.urlHost ?? null,
+                snippet: overview.snippet ?? null,
+                brand: overview.brand ?? null,
+                lastFour: overview.lastFour ?? null,
+                cardholderName: overview.cardholderName ?? null,
+                fullName: overview.fullName ?? null,
+                idNumberLast4: overview.idNumberLast4 ?? null,
+                relyingPartyId: overview.relyingPartyId ?? null,
+                bankName: overview.bankName ?? null,
+                accountNumberLast4: overview.accountNumberLast4 ?? null,
+                softwareName: overview.softwareName ?? null,
+                licensee: overview.licensee ?? null,
+                keyType: overview.keyType ?? null,
+                fingerprint: overview.fingerprint ?? null,
+                tags: overview.tags ?? [],
+                isFavorite: entry.isFavorite,
+                isArchived: entry.isArchived,
+              },
+              raw: entry,
+            });
+          } catch {
+            failCount++;
+          }
+        }
+
+        setDecryptFailCount(failCount);
+        setEntries(decrypted);
+      } catch {
+        setError(t("networkError"));
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    void decryptEntries();
+  }, [vaultStatus, encryptionKey, grantId, t]);
+
+  // Clear crypto refs on unmount
+  useEffect(() => {
+    return () => {
+      ownerEncKeyRef.current = null;
+      ownerIdRef.current = "";
+    };
+  }, []);
+
+  const decryptBlob = useCallback(async (entry: RawVaultEntry) => {
+    const ownerEncKey = ownerEncKeyRef.current;
+    if (!ownerEncKey) throw new Error("Owner key not available");
+    const aad = entry.aadVersion >= 1
+      ? buildPersonalEntryAAD(ownerIdRef.current, entry.id, VAULT_TYPE.BLOB)
+      : undefined;
+    const blobEncrypted: EncryptedData = {
+      ciphertext: entry.encryptedBlob,
+      iv: entry.blobIv,
+      authTag: entry.blobAuthTag,
+    };
+    return JSON.parse(await decryptData(blobEncrypted, ownerEncKey, aad));
+  }, []);
+
+  const makeGetDetail = useCallback((displayEntry: DisplayEntry) => {
+    return async (): Promise<InlineDetailData> => {
+      const data = await decryptBlob(displayEntry.raw);
+      return {
+        // Blob-sourced display fields via the shared mapper (commonized with the
+        // personal/team paths so no per-entry-type field can be dropped here).
+        ...mapDecryptedBlobToDetailFields(data as unknown as Record<string, unknown>),
+        // Caller-specific fields:
+        id: displayEntry.raw.id,
+        entryType: (displayEntry.raw.entryType as EntryTypeValue) ?? ENTRY_TYPE.LOGIN,
+        requireReprompt: false,
+        urlHost: displayEntry.card.urlHost,
+        passwordHistory: data.passwordHistory ?? [],
+        createdAt: displayEntry.raw.createdAt,
+        updatedAt: displayEntry.raw.updatedAt,
+      };
+    };
+  }, [decryptBlob]);
+
+  const makeGetPassword = useCallback((displayEntry: DisplayEntry) => {
+    return async (): Promise<string> => {
+      const data = await decryptBlob(displayEntry.raw);
+      return data.password ?? "";
+    };
+  }, [decryptBlob]);
+
+  const makeGetUrl = useCallback((displayEntry: DisplayEntry) => {
+    return async (): Promise<string | null> => {
+      const data = await decryptBlob(displayEntry.raw);
+      return data.url ?? null;
+    };
+  }, [decryptBlob]);
+
+  // Pre-compute stable callback references keyed by entry ID for O(1) lookup
+  const entryCallbackMap = useMemo(
+    () =>
+      new Map(
+        entries.map((entry) => [
+          entry.card.id,
+          {
+            getPassword: makeGetPassword(entry),
+            getDetail: makeGetDetail(entry),
+            getUrl: makeGetUrl(entry),
+          },
+        ])
+      ),
+    [entries, makeGetDetail, makeGetPassword, makeGetUrl]
+  );
+
+  return {
+    vaultStatus,
+    entries,
+    ownerName,
+    isLoading,
+    displayError,
+    decryptFailCount,
+    expandedId,
+    setExpandedId,
+    entryCallbackMap,
+  };
+}

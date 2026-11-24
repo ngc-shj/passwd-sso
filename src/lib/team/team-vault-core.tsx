@@ -20,7 +20,7 @@ import {
 import { buildItemKeyWrapAAD } from "../crypto/crypto-aad";
 import { apiPath, API_PATH } from "@/lib/constants";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
-import { fetchApi } from "@/lib/url-helpers";
+import { fetchApi, SessionChangedError } from "@/lib/url-helpers";
 import {
   clientLogWarn,
   clientLogError,
@@ -237,6 +237,10 @@ interface TeamVaultProviderProps {
   children: ReactNode;
   getEcdhPrivateKeyBytes: () => Uint8Array | null;
   getUserId: () => string | null;
+  /** The vault's lock epoch (useVault().getLockEpoch), captured at a flow's start. */
+  getLockEpoch: () => number;
+  /** Whether the vault dropped its keys since `epoch` (useVault().lockedSince). */
+  lockedSince: (epoch: number) => boolean;
   vaultUnlocked: boolean;
   /** True while the session is passkey-blocked or degraded: the proxy refuses the distribution calls. */
   pollingSuspended: boolean;
@@ -246,6 +250,8 @@ export function TeamVaultProvider({
   children,
   getEcdhPrivateKeyBytes,
   getUserId,
+  getLockEpoch,
+  lockedSince,
   vaultUnlocked,
   pollingSuspended,
 }: TeamVaultProviderProps) {
@@ -667,6 +673,10 @@ export function TeamVaultProvider({
   );
 
   const distributePendingKeys = useCallback(async () => {
+    // A lock (or a session end or user switch, which drops the vault's keys
+    // too) stops distribution: what this run unwrapped belongs to the user it
+    // started for, and nothing more is sent once those keys were dropped.
+    const lockEpoch = getLockEpoch();
     const ecdhPrivateKeyBytes = getEcdhPrivateKeyBytes();
     const userId = getUserId();
     if (!ecdhPrivateKeyBytes || !userId) return;
@@ -709,6 +719,7 @@ export function TeamVaultProvider({
       }
 
       for (const [teamId, members] of byTeam) {
+        if (lockedSince(lockEpoch)) return;
         let teamKeyBytes: Uint8Array | undefined;
         try {
           // Get own team key first
@@ -751,6 +762,7 @@ export function TeamVaultProvider({
                 member.teamKeyVersion
               );
 
+              if (lockedSince(lockEpoch)) return;
               // Send to confirm-key endpoint
               await fetchApi(
                 apiPath.teamMemberConfirmKey(teamId, member.memberId),
@@ -769,11 +781,14 @@ export function TeamVaultProvider({
                   }),
                 }
               );
-            } catch {
+            } catch (e) {
+              // The session is no longer this user's: stop, do not try the rest.
+              if (e instanceof SessionChangedError) throw e;
               // Skip failed distributions silently — will retry on next poll
             }
           }
-        } catch {
+        } catch (e) {
+          if (e instanceof SessionChangedError) throw e;
           // Skip failed team — will retry on next poll
         } finally {
           teamKeyBytes?.fill(0);
@@ -784,7 +799,7 @@ export function TeamVaultProvider({
     } finally {
       ecdhPrivateKeyBytes.fill(0);
     }
-  }, [getEcdhPrivateKeyBytes, getUserId]);
+  }, [getEcdhPrivateKeyBytes, getUserId, getLockEpoch, lockedSince]);
 
   // Locking the vault drops every unwrapped key: the provider stays mounted
   // across lock, so nothing else would release them.

@@ -1,5 +1,5 @@
 {
-  "copied": "Copied — this app will clear the clipboard in {seconds}s",
+  "copied": "Copied — this app will try to clear it in {seconds}s. Clear your clipboard when you are done.",
   "copy": "Copy to clipboard",
   "copyNamed": "Copy {name}",
   "copyEmpty": "Nothing to copy — this field is empty",

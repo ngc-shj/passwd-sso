@@ -139,7 +139,7 @@ the broad class; the `error` code is the specific reason.
 | 401 | No identity — caller did not authenticate, or session/token is invalid/expired | `UNAUTHORIZED`, `INVALID_SESSION`, `API_KEY_INVALID`, all `MOBILE_*` |
 | 403 | Identity OK, permission insufficient — role, scope, tenancy, recency, or origin restriction denies access | `FORBIDDEN`, `FORBIDDEN_INSUFFICIENT_ROLE`, `ACCESS_DENIED`, `SESSION_STEP_UP_REQUIRED`, `*_SCOPE_INSUFFICIENT`, `OWNER_ONLY`, `ONLY_OWN_ENTRIES`, `NOT_AUTHORIZED_FOR_GRANT`, `ACCOUNT_LOCKED` |
 | 404 | Resource does not exist in this caller's scope | `NOT_FOUND`, `USER_NOT_FOUND`, `TEAM_NOT_FOUND`, `*_NOT_FOUND` family |
-| 409 | Request conflicts with current resource state | `CONFLICT`, `VAULT_ALREADY_SETUP`, `*_ALREADY_EXISTS`, `*_ALREADY_REVOKED`, `ALREADY_A_MEMBER`, `SLUG_ALREADY_TAKEN`, `TEAM_BUSY` (team-row lock wait ran out; carries `Retry-After`) |
+| 409 | Request conflicts with current resource state | `CONFLICT`, `VAULT_ALREADY_SETUP`, `*_ALREADY_EXISTS`, `*_ALREADY_REVOKED`, `ALREADY_A_MEMBER`, `SLUG_ALREADY_TAKEN`, `TEAM_BUSY` (team-row lock wait ran out; carries `Retry-After`), `SESSION_CHANGED` (see below) |
 | 410 | Endpoint deprecated and removed | (deprecated route stubs) |
 | 413 | Body exceeds size limit | `PAYLOAD_TOO_LARGE`, `FILE_TOO_LARGE`, `SEND_FILE_TOO_LARGE` |
 | 422 | Semantic validation of well-formed input failed (rare), OR a deliberately distinct-from-401 failure signal (see below) | `AUTH_HASH_MISMATCH`, `MCP_CLIENT_LIMIT_EXCEEDED` |
@@ -217,6 +217,65 @@ reasons:
 
 **Clients receiving `SESSION_STEP_UP_REQUIRED` MUST dispatch on the `error`
 code, NOT the HTTP status — the code is the stable contract.**
+
+#### SESSION_CHANGED → 409
+
+The proxy's expected-user gate (`src/lib/proxy/expected-user-gate.ts`)
+returns it before any route runs: the request named, in
+`x-passwd-expected-user`, the user its page is bound to (the first user
+`useSession` named on that page load), and the session cookie the browser sent
+belongs to another user (another user signed in in another tab). An empty
+header names nobody and is refused the same way. `POST
+/api/emergency-access/[id]/confirm` also returns it, before the grant changes,
+when the body's `ownerId` is not the session user. Either way nothing was
+written. These are the only two emitters.
+
+`POST /api/mcp/authorize/consent` binds the same way but does not answer
+`SESSION_CHANGED`: its form is a native browser POST, which carries no header
+and would land on a raw JSON page. It echoes the page's user in
+`expected_user_id` instead, and a mismatch (or a missing value) is answered
+like a stale step-up — see §5.1.
+
+The gate decides on whose session the cookie is, as `/api/auth/session` names
+it — the same field `useSession` reports — not on whether the proxy accepts
+the session:
+
+| Cookie's session | Gate answer |
+|---|---|
+| The named user, valid or not (no active tenant membership, tenant lookup failed) | continues; the session gate decides as without the header |
+| Another user | 409 `SESSION_CHANGED` |
+| Nobody (`/api/auth/session` answered with no user) | continues, with every session cookie removed from the request the route receives |
+| Session read failed (non-OK, fetch or parse error) | 503 `SERVICE_UNAVAILABLE` |
+| Cookie header readable as more than one session | 401 `UNAUTHORIZED` |
+
+"Nobody" is not proof the cookie is dead: Auth.js answers 200 with a null body
+both for an ended session and when its own session lookup throws
+(`@auth/core` `lib/actions/session.js` swallows the error). A route that read
+the cookie again with `auth()` could then resolve it to another user, so the
+proxy forwards that request without the session cookie (every known name and
+its chunks; other cookies are kept). The route acts for nobody, as the gate
+decided; pre-auth passkey sign-in, which needs no session, still works.
+
+The 503 and 401 are already proxy pre-route refusals (`PROXY_PRE_ROUTE_REFUSALS`)
+and do not reload the page: a reload would resend the same cookie.
+
+**409, not 401**: the cookie may well be a valid session — just another
+user's — and 401 is wired in clients to "sign in again" and, on
+`/api/vault/unlock`, to a refused passphrase. **Not 403**: nothing about the
+cookie's user is denied. The conflict is between the page's state and the
+session's.
+
+Clients MUST NOT read it as a business refusal (a wrong passphrase, a denied
+action, a missing record). `fetchApi` (`src/lib/url-helpers.ts`) does not
+return the response: it rejects with `SessionChangedError` — so a multi-step
+flow stops at the first refused step — and reloads the page, rebuilding it
+for whoever the session now belongs to. While that reload is pending, further
+409s start no second one and the app's `beforeunload` guards stand down; a
+reload that has not unloaded the page within
+`SESSION_CHANGED_RELOAD_PENDING_MS` (a stop, a handler outside the app) no
+longer holds, so the next 409 reloads again. When `useSession` itself names a
+different user, the binding stays on the first and the page reloads the same
+way.
 
 #### ACCOUNT_LOCKED → 403
 
@@ -351,6 +410,26 @@ Error responses are typically delivered as redirects with the `error` and
 `error_description` query parameters appended to the registered redirect URI
 (per RFC 6749 §4.1.2.1) — the JSON body shape is used only when the redirect
 URI itself cannot be resolved.
+
+`POST /api/mcp/authorize/consent` has one answer outside this list. When the
+session needs step-up, or the form's `expected_user_id` is missing or names a
+user other than the session's (another user signed in after the page was
+rendered), it answers `303` to the self-origin `GET /api/mcp/authorize` with
+the validated `client_id`, `redirect_uri` and the submitted `state`, `scope`
+and PKCE parameters, and writes nothing: no code, no DCR claim, no denial and
+no audit row. The authorize GET then re-runs sign-in and step-up and renders
+consent for whoever the session now belongs to, who decides for themselves.
+The consent form posts the same authorization-request parameters on Allow
+and Deny, so either bounce reaches a re-rendered consent.
+
+The bounce runs only after the client and its registered `redirect_uri` are
+validated; a request failing those checks keeps its `400` JSON answer. On
+Allow, the PKCE challenge, its method and the scope are validated before the
+bounce too (a failure is a `400` JSON answer from the consent route). On Deny
+the consent route does not validate them: they are echoed as posted, and the
+authorize GET validates them, so a Deny posted without a valid
+`code_challenge` (not one the consent form sends) is bounced and then answered
+`400` JSON by the authorize GET.
 
 ### 5.2 Token + revoke endpoints (RFC 6749 §5.2; RFC 7009 §2.2)
 

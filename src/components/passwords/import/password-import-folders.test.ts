@@ -214,6 +214,29 @@ describe("resolveFolderPathsForImport", () => {
     expect(result.get("Work")).toBe("existing-1");
   });
 
+  it("finds a folder whose create response body cannot be read by re-fetching", async () => {
+    const unreadable = {
+      ok: true,
+      status: 201,
+      json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+    } as unknown as Response;
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([])) // GET: empty
+      .mockResolvedValueOnce(unreadable) // POST: created, body unreadable
+      .mockResolvedValueOnce(jsonResponse([
+        { id: "created-1", name: "Work", parentId: null },
+      ])); // GET refetch
+
+    const result = await resolveFolderPathsForImport(
+      [makeEntry("Work")],
+      "/api/folders",
+      fetcher,
+    );
+
+    expect(result.get("Work")).toBe("created-1");
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
   it("deduplicates entries with same folderPath", async () => {
     const fetcher = vi.fn()
       .mockResolvedValueOnce(jsonResponse([])) // GET: empty

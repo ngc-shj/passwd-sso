@@ -585,6 +585,201 @@ const body = {
     expect(errors).toHaveLength(0);
   });
 
+  // R6 (T6-5/S6-6): the constant is not followed through aliases. Only its
+  // definition, the index re-export, a named import by its own name and one
+  // `keyVersion: INITIAL_VAULT_KEY_VERSION` per setup site are permitted; every
+  // other spelling, and every module object that could hand it out, is refused.
+  const IMPORT = `import { INITIAL_VAULT_KEY_VERSION } from "@/lib/constants";\n`;
+  const SETUP = "src/app/api/vault/setup/route.ts";
+  const CONTEXT = "src/lib/vault/vault-context.tsx";
+  const OTHER = "src/lib/vault/rotate.ts";
+  const at = (what, rel, line) => `Check E: INITIAL_VAULT_KEY_VERSION ${what} at ${rel}:${line} `;
+
+  it.each([
+    ["a use outside the setup sites", OTHER, `${IMPORT}const v = INITIAL_VAULT_KEY_VERSION;\n`, "used", 2],
+    ["a second keyVersion value in vault-context", CONTEXT, `${IMPORT}install({ keyVersion: INITIAL_VAULT_KEY_VERSION });\nagain({ keyVersion: INITIAL_VAULT_KEY_VERSION });\n`, "installed a second time", 3],
+    ["a use other than a keyVersion value in vault-context", CONTEXT, `${IMPORT}install({ keyVersion: INITIAL_VAULT_KEY_VERSION });\ncommitKeyVersion(INITIAL_VAULT_KEY_VERSION);\n`, "used", 3],
+    ["a keyVersion value outside the setup sites", OTHER, `${IMPORT}install({ keyVersion: INITIAL_VAULT_KEY_VERSION });\n`, "used", 2],
+    ["a value of another property in a setup site", SETUP, `${IMPORT}data({ version: INITIAL_VAULT_KEY_VERSION });\n`, "used", 2],
+    ["a parenthesised keyVersion value", SETUP, `${IMPORT}data({ keyVersion: (INITIAL_VAULT_KEY_VERSION) });\n`, "used", 2],
+    ["a ternary (T6-5)", CONTEXT, `${IMPORT}export const V = ok ? INITIAL_VAULT_KEY_VERSION : 0;\n`, "used", 2],
+    ["?? (T6-5)", CONTEXT, `${IMPORT}export const V = x ?? INITIAL_VAULT_KEY_VERSION;\n`, "used", 2],
+    ["+ 0 (T6-5)", CONTEXT, `${IMPORT}export const V = INITIAL_VAULT_KEY_VERSION + 0;\n`, "used", 2],
+    ["an as-expression alias", CONTEXT, `${IMPORT}export const V = INITIAL_VAULT_KEY_VERSION as number;\n`, "used", 2],
+    ["a binding default (T6-5)", CONTEXT, `${IMPORT}export const { V = INITIAL_VAULT_KEY_VERSION } = {};\n`, "used", 2],
+    ["a parameter default (T6-5)", CONTEXT, `${IMPORT}const f = (v = INITIAL_VAULT_KEY_VERSION) => g(v);\nf();\n`, "used", 2],
+    ["||= (T6-5)", CONTEXT, `${IMPORT}export let V = 0;\nV ||= INITIAL_VAULT_KEY_VERSION;\n`, "used", 3],
+    ["a renamed import", OTHER, `import { INITIAL_VAULT_KEY_VERSION as FIRST } from "@/lib/constants";\ncommit(FIRST);\n`, "renamed import", 1],
+    ["an unused renamed import", OTHER, `import {\n  INITIAL_VAULT_KEY_VERSION as FIRST,\n} from "@/lib/constants";\n`, "renamed import", 2],
+    ["a renamed import in the setup route", SETUP, `import { INITIAL_VAULT_KEY_VERSION as FIRST } from "@/lib/constants/vault/vault";\ncreate({ data: { keyVersion: FIRST } });\n`, "renamed import", 1],
+    ["an exported const alias (R5)", OTHER, `${IMPORT}export const V = INITIAL_VAULT_KEY_VERSION;\n`, "used", 2],
+    ["a use inside a single-line exported function", OTHER, `${IMPORT}export function f() { return commit(INITIAL_VAULT_KEY_VERSION); }\n`, "used", 2],
+    ["a renamed re-export from the index (R5)", "src/lib/constants/index.ts", `export { INITIAL_VAULT_KEY_VERSION as V1 } from "./vault/vault";\n`, "exported", 1],
+    ["a re-export outside the index", OTHER, `export { INITIAL_VAULT_KEY_VERSION } from "@/lib/constants";\n`, "exported", 1],
+    ["a re-export of the definition module outside the index", OTHER, `export { INITIAL_VAULT_KEY_VERSION } from "../constants/vault/vault";\n`, "exported", 1],
+    ["an export clause in the definition module (R5)", "src/lib/constants/vault/vault.ts", `export const INITIAL_VAULT_KEY_VERSION = 1;\nexport { INITIAL_VAULT_KEY_VERSION as V1 };\n`, "exported", 2],
+    ["a second declaration of the name", OTHER, `export const INITIAL_VAULT_KEY_VERSION = 1;\n`, "used", 1],
+    ["a type query", OTHER, `${IMPORT}type T = typeof INITIAL_VAULT_KEY_VERSION;\n`, "used", 2],
+    ["an alias of an alias (R5)", OTHER, `${IMPORT}const A = INITIAL_VAULT_KEY_VERSION;\nlet B = A;\ncommit(B);\n`, "used", 2],
+    ["a namespace member read", OTHER, `import * as C from "@/lib/constants";\ncommit(C.INITIAL_VAULT_KEY_VERSION);\n`, "used", 2],
+    ["a namespace element read by string key", OTHER, `import * as C from "@/lib/constants";\ncommit(C["INITIAL_VAULT_KEY_VERSION"]);\n`, "read by a string key", 2],
+    ["a computed destructuring key (S6-6)", OTHER, `import { VAULT_STATUS } from "@/lib/constants";\nconst { ["INITIAL_VAULT_KEY_VERSION"]: v } = VAULT_STATUS as never;\nuse(v);\n`, "read by a string key", 2],
+    ["a computed element of the index namespace (S6-6)", OTHER, `import * as C from "@/lib/constants";\nconst k = "INITIAL_VAULT_KEY_VERSION";\nexport const v = C[k as keyof typeof C];\n`, "reachable through namespace C of src/lib/constants used other than as C.<name>", 3],
+    ["a concatenated key on the index namespace (S6-6)", OTHER, `import * as C from "@/lib/constants";\nx(C[("INITIAL_" + "VAULT_KEY_VERSION") as keyof typeof C]);\n`, "reachable through namespace C of src/lib/constants used other than as C.<name>", 2],
+    ["the index namespace destructured (S6-6)", OTHER, `import * as C from "@/lib/constants";\nconst { ...all } = C;\nuse(all);\n`, "reachable through namespace C of src/lib/constants used other than as C.<name>", 2],
+    ["the index namespace passed on", OTHER, `import * as C from "@/lib/constants";\nuse(C);\n`, "reachable through namespace C of src/lib/constants used other than as C.<name>", 2],
+    ["a namespace import of the definition module (S6-6)", OTHER, `import * as C from "@/lib/constants/vault/vault";\nexport const s = C.VAULT_STATUS;\n`, "reachable through a namespace import of its definition module", 1],
+    ["a namespace import of the definition module by a relative path", "src/lib/constants/team.ts", `import * as C from "./vault/vault";\nexport const s = C.VAULT_STATUS;\n`, "reachable through a namespace import of its definition module", 1],
+    ["an export * of the definition module", "src/lib/constants/all.ts", `export * from "./vault/vault";\n`, "re-exported by export *", 1],
+    ["an export * of the index", OTHER, `export * from "@/lib/constants";\n`, "re-exported by export *", 1],
+    ["an export * as of the index", OTHER, `export * as C from "../constants";\n`, "re-exported by export *", 1],
+    ["a dynamic import of the index", OTHER, `export const m = () => import("@/lib/constants");\n`, "reachable through an import() that may load its module", 1],
+    ["a dynamic import of the definition module", OTHER, `export const m = () => import("../constants/vault/vault");\n`, "reachable through an import() that may load its module", 1],
+    ["a dynamic import with a non-literal specifier", OTHER, `export const m = (p: string) => import(p);\n`, "reachable through an import() that may load its module", 1],
+    ["a dynamic import whose template head may reach it", OTHER, "export const m = (p: string) => import(`@/lib/constants/${p}`);\n", "reachable through an import() that may load its module", 1],
+    ["a require of the index", OTHER, `export const m = require("@/lib/constants");\n`, "reachable through an require() that may load its module", 1],
+  ])("flags %s", (_label, rel, content, what, line) => {
+    const errors = checkKeyVersionHardcode([{ rel, content }]);
+    expect(errors.some((e) => e.startsWith(at(what, rel, line)))).toBe(true);
+  });
+
+  it("allows one keyVersion value in each setup site, its definition and its index re-export", () => {
+    const errors = checkKeyVersionHardcode([
+      {
+        rel: CONTEXT,
+        content: `${IMPORT}install({ keyVersion: INITIAL_VAULT_KEY_VERSION });\n// INITIAL_VAULT_KEY_VERSION in a comment\n`,
+      },
+      {
+        rel: SETUP,
+        content: `import { INITIAL_VAULT_KEY_VERSION } from "@/lib/constants/vault/vault";\ncreate({ data: { keyVersion: INITIAL_VAULT_KEY_VERSION } });\n`,
+      },
+      { rel: "src/lib/constants/vault/vault.ts", content: `export const INITIAL_VAULT_KEY_VERSION = 1;\n` },
+      { rel: "src/lib/constants/index.ts", content: `export { VAULT_STATUS, INITIAL_VAULT_KEY_VERSION } from "./vault/vault";\n` },
+    ]);
+    expect(errors).toEqual([]);
+  });
+
+  it.each([
+    [
+      "a multi-line import with one keyVersion value in vault-context",
+      CONTEXT,
+      `import {\n  VAULT_STATUS,\n  INITIAL_VAULT_KEY_VERSION,\n} from "@/lib/constants";\ninstall({ keyVersion: INITIAL_VAULT_KEY_VERSION });\n`,
+    ],
+    ["an unused plain import outside the setup sites", OTHER, IMPORT],
+    ["a block comment naming the constant", OTHER, `/* INITIAL_VAULT_KEY_VERSION is set only by vault setup */\nexport const x = 1;\n`],
+    ["a string naming the constant outside a member read", OTHER, `export const s = "INITIAL_VAULT_KEY_VERSION";\n`],
+    ["the index namespace read by member names", OTHER, `import * as C from "@/lib/constants";\nexport const s = C.VAULT_STATUS;\ntype T = typeof C;\n`],
+    ["a dynamic import of a const package name", "src/lib/crypto/crypto-client.ts", `export async function f() {\n  const moduleName = "hash-wasm";\n  return import(/* webpackIgnore: true */ moduleName);\n}\n`],
+    ["a require of a package", "src/lib/key-provider/p.ts", `export const m = require("node:module");\n`],
+    // R8: specifiers that resolve to another scanned module or a package.
+    ["a namespace import of a module outside constants/", OTHER, `import * as X from "@/lib/url-helpers";\nexport const v = X;\n`],
+    ["a namespace import of a sibling module under constants/", OTHER, `import * as X from "@/lib/constants/vault/../team/invitation";\nexport const v = X;\n`],
+    ["a namespace import of another module by a relative path", OTHER, `import * as X from "../url-helpers";\nexport const v = X;\n`],
+    ["a namespace import of a scoped package", OTHER, `import * as X from "@prisma/client";\nexport const v = X;\n`],
+    ["an import = require() of a package", OTHER, `import X = require("node:module");\nexport const v = X;\n`],
+  ])("allows %s", (_label, rel, content) => {
+    expect(checkKeyVersionHardcode([{ rel, content }])).toEqual([]);
+  });
+
+  // R8: a specifier is decided by where it resolves. Each spelling below
+  // resolves to src/lib/constants/index.ts or src/lib/constants/vault/vault.ts,
+  // and each passed the string rule on HEAD.
+  const INDEX_SPELLINGS = [
+    "@/lib/../lib/constants",
+    "@/lib//constants",
+    "@/./lib/constants",
+    "@/lib/./constants",
+    "@/components/../lib/constants",
+    "@/lib/constants/",
+    "../constants/",
+    "../constants/index.ts",
+  ];
+  const DEFINITION_SPELLINGS = ["@/lib/constants/vault/../vault/vault", "@/lib/constants//vault/vault", "../constants/./vault/vault"];
+  const INDEX_NS = "reachable through namespace C of src/lib/constants used other than as C.<name>";
+  const LOADER = (l) => `reachable through an ${l} that may load its module`;
+  const R8_FORMS = [
+    ["a computed key on its namespace", (s) => `import * as C from "${s}";\nconst k = "INITIAL_VAULT_KEY_VERSION";\nexport const v = C[k as keyof typeof C];\n`, 3, INDEX_NS, "index"],
+    ["a namespace import", (s) => `import * as C from "${s}";\nexport const v = C.VAULT_STATUS;\n`, 1, "reachable through a namespace import of its definition module", "definition"],
+    ["a default import", (s) => `import C from "${s}";\nexport const v = C;\n`, 1, null, "both"],
+    ["an export *", (s) => `export * from "${s}";\n`, 1, "re-exported by export *", "both"],
+    ["an import()", (s) => `export const m = () => import("${s}");\n`, 1, LOADER("import()"), "both"],
+    ["a require()", (s) => `export const m = require("${s}");\n`, 1, LOADER("require()"), "both"],
+    ["an import = require()", (s) => `import C = require("${s}");\nexport const v = C;\n`, 1, LOADER("import = require()"), "both"],
+    ["a const string import()", (s) => `const n = "${s}";\nexport const m = () => import(n);\n`, 2, LOADER("import()"), "both"],
+  ];
+  const R8_ROWS = R8_FORMS.flatMap(([form, code, line, what, applies]) => {
+    const specs = applies === "index" ? INDEX_SPELLINGS : applies === "definition" ? DEFINITION_SPELLINGS : [...INDEX_SPELLINGS, ...DEFINITION_SPELLINGS];
+    return specs.map((spec) => {
+      const isDefinition = DEFINITION_SPELLINGS.includes(spec);
+      const w = what ?? (isDefinition ? "reachable through a default import of its definition module" : "reachable through a default import of src/lib/constants");
+      return [`${form} of ${spec}`, code(spec), w, line];
+    });
+  });
+
+  it.each(R8_ROWS)("flags %s (R8)", (_label, content, what, line) => {
+    const errors = checkKeyVersionHardcode([{ rel: OTHER, content }]);
+    expect(errors.some((e) => e.startsWith(at(what, OTHER, line)))).toBe(true);
+  });
+
+  it.each([
+    ["an alias template head", OTHER, "export const m = (p: string) => import(`@/lib/./${p}`);\n"],
+    ["a template head with .. in it", OTHER, "export const m = (p: string) => import(`@/lib/../lib/consta${p}`);\n"],
+    ["the messages template outside messages.ts", "src/i18n/other.ts", "export const m = (safe: string, ns: string) => import(`../../messages/${safe}/${ns}.json`);\n"],
+    ["another template in messages.ts", "src/i18n/messages.ts", "export const m = (p: string) => import(`../../messages/${p}.json`);\n"],
+    ["a bare package template head", OTHER, "export const m = (p: string) => import(`hash-wasm/${p}`);\n"],
+    ["require.context", OTHER, "export const c = require.context(\"../constants\", true);\n"],
+  ])("flags a loader of %s (R8)", (_label, rel, content) => {
+    const errors = checkKeyVersionHardcode([{ rel, content }]);
+    expect(errors.some((e) => e.startsWith(`Check E: INITIAL_VAULT_KEY_VERSION reachable through an `) && e.includes(` at ${rel}:1 `))).toBe(true);
+  });
+
+  // R8: Check E no longer picks its files by a regex over the text; each of
+  // these passed that prefilter on HEAD and so was never parsed.
+  const BACKSLASH = String.fromCharCode(92);
+  it.each([
+    ["a default import of the index", `import C from "@/lib/constants";\nexport const v = C;\n`, "reachable through a default import of src/lib/constants", 1],
+    ["a comment between import and *", `import /**/ * as C from "@/lib/constants/vault/vault";\nexport const v = C;\n`, "reachable through a namespace import of its definition module", 1],
+    ["an escaped spelling of the name", `import { INITIAL_VAULT_KEY_VERSION } from "@/lib/constants";\nexport const v = INITIAL_VAULT_KEY_VERSIO${BACKSLASH}u004e;\n`.replace("import { INITIAL_VAULT_KEY_VERSION }", `import { INITIAL_VAULT_KEY_VERSIO${BACKSLASH}u004e }`), "used", 2],
+  ])("flags %s (R8)", (_label, content, what, line) => {
+    const errors = checkKeyVersionHardcode([{ rel: OTHER, content }]);
+    expect(errors.some((e) => e.startsWith(at(what, OTHER, line)))).toBe(true);
+  });
+
+  it("flags an index re-export from a specifier that does not resolve to the definition module (R8)", () => {
+    const rel = "src/lib/constants/index.ts";
+    const errors = checkKeyVersionHardcode([{ rel, content: `export { INITIAL_VAULT_KEY_VERSION } from "./vault/nope";\n` }]);
+    expect(errors.some((e) => e.startsWith(at("exported", rel, 1)))).toBe(true);
+  });
+
+  it("allows an index re-export from the definition module spelled through .. (R8)", () => {
+    const rel = "src/lib/constants/index.ts";
+    expect(checkKeyVersionHardcode([{ rel, content: `export { INITIAL_VAULT_KEY_VERSION } from "./vault/../vault/vault";\n` }])).toEqual([]);
+  });
+
+  // A repo file outside the structural scan (../sentry.server.config) is pulled
+  // into Check E's scan rather than left undecided.
+  it("allows a load of a repo file outside the structural scan, which it then scans (R8)", () => {
+    const rel = "src/instrumentation.ts";
+    expect(checkKeyVersionHardcode([{ rel, content: `export const m = () => import("../sentry.server.config");\n` }])).toEqual([]);
+  });
+
+  const MESSAGES_LOADER = "  const mod = await import(`../../messages/${safe}/${ns}.json`);\n";
+  it("allows the messages loader template in messages.ts, twice", () => {
+    expect(checkKeyVersionHardcode([{ rel: "src/i18n/messages.ts", content: MESSAGES_LOADER + MESSAGES_LOADER }])).toEqual([]);
+  });
+
+  it("refuses a stale messages loader entry: the template once", () => {
+    expect(checkKeyVersionHardcode([{ rel: "src/i18n/messages.ts", content: MESSAGES_LOADER }])).toEqual([
+      "Check E: src/i18n/messages.ts: template `../../messages/${safe}/${ns}.json` matched 1 time(s), expected 2 (stale template loader allowlist entry)",
+    ]);
+  });
+
+  it("refuses a stale messages loader entry: messages.ts absent from a whole scan", () => {
+    expect(checkKeyVersionHardcode([{ rel: OTHER, content: "export const x = 1;\n" }], { whole: true })).toEqual([
+      "Check E: src/i18n/messages.ts: template loader allowlist entry names a file that is not scanned (stale)",
+    ]);
+  });
+
   it("does not flag a ternary expression like data.keyVersion : 1", () => {
     const files = [
       {

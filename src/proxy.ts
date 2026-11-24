@@ -18,7 +18,9 @@ export async function proxy(request: NextRequest, options: ProxyOptions) {
   // (non-CSP) security headers — nosniff / Referrer-Policy / HSTS — to every
   // API response (CSP / X-Frame-Options stay page-only).
   if (pathname.startsWith(`${API_PATH.API_ROOT}/`)) {
-    const apiResponse = await handleApiAuth(normalized);
+    // The original headers too: a route whose headers the proxy overrides
+    // must still see the Host and X-Forwarded-* the request arrived with.
+    const apiResponse = await handleApiAuth(normalized, request.headers);
     return applyBaselineSecurityHeaders(apiResponse);
   }
 

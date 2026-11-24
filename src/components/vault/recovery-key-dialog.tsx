@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { useVault } from "@/lib/vault/vault-context";
+import { PRE_ROUTE_AND_PRE_TX_REFUSALS } from "@/lib/vault/pre-commit-refusals";
 import { computePassphraseVerifier } from "@/lib/crypto/crypto-client";
 import {
   generateRecoveryKey,
@@ -29,19 +30,52 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Loader2, Copy, AlertTriangle } from "lucide-react";
-import { fetchApi } from "@/lib/url-helpers";
+import { fetchApi, SessionChangedError } from "@/lib/url-helpers";
 
 // ── Core logic (exported for testing) ───────────────────────────
 
 type FlowSuccess = { ok: true; formattedKey: string };
+/** Nothing was stored: the POST was refused before the write, or never sent. */
 type FlowError = { ok: false; errorCode: string | null };
+/**
+ * The POST was sent but whether the server stored the new wrap is unknown. If
+ * it did, the previous recovery key no longer works and the new one was never
+ * shown, so the user must generate another.
+ */
+type FlowOutcomeUnknown = { ok: false; outcomeUnknown: true };
+/** The vault was locked before the POST was sent: nothing was stored. */
+type FlowNotStartedVaultLocked = { ok: false; notStartedVaultLocked: true };
+/**
+ * The server stored the new wrap, but the vault was locked after the POST was
+ * sent: the key is not returned (the dialog that would show it is gone), so
+ * the previous recovery key no longer works and no one has seen the new one.
+ */
+type FlowCommittedVaultLocked = { ok: false; committedVaultLocked: true };
 
 /** @internal Exported for testing */
-export type GenerateFlowResult = FlowSuccess | FlowError;
+export type GenerateFlowResult =
+  | FlowSuccess
+  | FlowError
+  | FlowOutcomeUnknown
+  | FlowNotStartedVaultLocked
+  | FlowCommittedVaultLocked;
+
+// Codes that prove the generate POST was refused before its write: the shared
+// PRE_ROUTE_AND_PRE_TX_REFUSALS plus VAULT_WRAP_CONFLICT, which
+// recovery-key/generate returns when the compare-and-swap matched no
+// row — that transaction wrote nothing and committed no audit row. After a
+// committed write it only returns 200; a throw inside or after the
+// transaction is not an envelope.
+const GENERATE_REFUSALS: ReadonlySet<string> = new Set([
+  ...PRE_ROUTE_AND_PRE_TX_REFUSALS,
+  API_ERROR.VAULT_WRAP_CONFLICT,
+]);
 
 /**
  * Pure async flow: generate Recovery Key, wrap secretKey, send to server.
  * Guarantees both `secretKey` and `recoveryKey` are zeroed in `finally`.
+ * `vaultLockedSinceStart` reports a vault lock since the caller started: then
+ * nothing is sent, and a committed key is not returned.
  *
  * @internal Exported for testing — the component delegates to this function.
  */
@@ -49,8 +83,10 @@ export async function generateRecoveryKeyFlow(
   passphrase: string,
   secretKey: Uint8Array,
   accountSalt: Uint8Array,
+  vaultLockedSinceStart: () => boolean,
 ): Promise<GenerateFlowResult> {
   let recoveryKey: Uint8Array | null = null;
+  let sent = false;
   try {
     const currentVerifierHash = await computePassphraseVerifier(
       passphrase,
@@ -60,27 +96,49 @@ export async function generateRecoveryKeyFlow(
     recoveryKey = generateRecoveryKey();
     const wrapped = await wrapSecretKeyWithRecovery(secretKey, recoveryKey);
 
-    const res = await fetchApi(API_PATH.VAULT_RECOVERY_KEY_GENERATE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        currentVerifierHash,
-        encryptedSecretKey: wrapped.encryptedSecretKey,
-        secretKeyIv: wrapped.iv,
-        secretKeyAuthTag: wrapped.authTag,
-        hkdfSalt: wrapped.hkdfSalt,
-        verifierHash: wrapped.verifierHash,
-      }),
-    });
+    if (vaultLockedSinceStart()) return { ok: false, notStartedVaultLocked: true };
+    let res: Response;
+    sent = true;
+    try {
+      res = await fetchApi(API_PATH.VAULT_RECOVERY_KEY_GENERATE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          currentVerifierHash,
+          encryptedSecretKey: wrapped.encryptedSecretKey,
+          secretKeyIv: wrapped.iv,
+          secretKeyAuthTag: wrapped.authTag,
+          hkdfSalt: wrapped.hkdfSalt,
+          verifierHash: wrapped.verifierHash,
+        }),
+      });
+    } catch (e) {
+      // Refused by the proxy before the route ran: nothing was stored.
+      if (e instanceof SessionChangedError) return { ok: false, errorCode: API_ERROR.SESSION_CHANGED };
+      return { ok: false, outcomeUnknown: true };
+    }
 
     if (!res.ok) {
       const err = await readApiErrorBody(res);
-      return { ok: false, errorCode: err?.error ?? null };
+      if (!err || !GENERATE_REFUSALS.has(err.error)) {
+        return { ok: false, outcomeUnknown: true };
+      }
+      // Refused before the write, but there is no dialog left to say why.
+      if (vaultLockedSinceStart()) return { ok: false, notStartedVaultLocked: true };
+      return { ok: false, errorCode: err.error };
     }
 
+    // Committed. Checked before formatting (no key string is made) and again
+    // after the last await, synchronously with the return.
+    if (vaultLockedSinceStart()) return { ok: false, committedVaultLocked: true };
     const formattedKey = await formatRecoveryKey(recoveryKey);
+    if (vaultLockedSinceStart()) return { ok: false, committedVaultLocked: true };
     return { ok: true, formattedKey };
   } catch {
+    // A throw once the POST was sent (formatting a committed key) leaves the
+    // user without the key the server may hold. Before it, nothing was stored.
+    if (sent) return { ok: false, outcomeUnknown: true };
+    if (vaultLockedSinceStart()) return { ok: false, notStartedVaultLocked: true };
     return { ok: false, errorCode: null };
   } finally {
     recoveryKey?.fill(0);
@@ -104,7 +162,17 @@ export function RecoveryKeyDialog({
   const t = useTranslations("Vault");
   const tApi = useTranslations("ApiErrors");
   const tCopy = useTranslations("CopyButton");
-  const { getSecretKey, getAccountSalt, hasRecoveryKey, recoveryKeyInvalidated, setHasRecoveryKey } = useVault();
+  const {
+    getSecretKey,
+    getAccountSalt,
+    verifyPassphrase,
+    lock,
+    getLockEpoch,
+    lockedSince,
+    hasRecoveryKey,
+    recoveryKeyInvalidated,
+    setHasRecoveryKey,
+  } = useVault();
 
   const [step, setStep] = useState<Step>("passphrase");
   const [passphrase, setPassphrase] = useState("");
@@ -130,23 +198,74 @@ export function RecoveryKeyDialog({
     e.preventDefault();
     if (!passphrase) return;
 
-    const secretKey = getSecretKey();
-    const accountSalt = getAccountSalt();
-    if (!secretKey || !accountSalt) {
-      setError(t("vaultMustBeUnlocked"));
-      return;
-    }
+    // A lock from here on unmounts this dialog: what it would show must go
+    // to a persistent toast instead, and nothing is sent once it happened.
+    const lockEpoch = getLockEpoch();
+    const vaultLockedSinceStart = () => lockedSince(lockEpoch);
+    // Whether a recovery key existed before this one, for the notices that say
+    // the previous one no longer works.
+    const hadRecoveryKey = hasRecoveryKey || recoveryKeyInvalidated;
 
     setLoading(true);
     setError("");
 
-    const result = await generateRecoveryKeyFlow(passphrase, secretKey, accountSalt);
+    // Refuse a mistyped passphrase locally, with the vault left unlocked, so
+    // that a server INVALID_PASSPHRASE after this check passed is unambiguous.
+    const passphraseOk = await verifyPassphrase(passphrase);
+    if (vaultLockedSinceStart()) {
+      toast.warning(t("recoveryKeyNotStartedVaultLocked"), { duration: Infinity });
+      handleOpenChange(false);
+      setLoading(false);
+      return;
+    }
+    if (!passphraseOk) {
+      setError(tApi("invalidPassphrase"));
+      setLoading(false);
+      return;
+    }
+
+    const secretKey = getSecretKey();
+    const accountSalt = getAccountSalt();
+    if (!secretKey || !accountSalt) {
+      setError(t("vaultMustBeUnlocked"));
+      setLoading(false);
+      return;
+    }
+
+    const result = await generateRecoveryKeyFlow(passphrase, secretKey, accountSalt, vaultLockedSinceStart);
 
     if (result.ok) {
       setFormattedKey(result.formattedKey);
       setStep("display");
-    } else if (result.errorCode === API_ERROR.INVALID_PASSPHRASE) {
-      setError(tApi("invalidPassphrase"));
+    } else if ("notStartedVaultLocked" in result) {
+      toast.warning(t("recoveryKeyNotStartedVaultLocked"), { duration: Infinity });
+      handleOpenChange(false);
+    } else if ("committedVaultLocked" in result) {
+      toast.error(
+        t(hadRecoveryKey ? "recoveryKeyCommittedVaultLocked" : "recoveryKeyCommittedVaultLockedFirstKey"),
+        { duration: Infinity },
+      );
+      handleOpenChange(false);
+    } else if ("outcomeUnknown" in result) {
+      const notice = t(hadRecoveryKey ? "recoveryKeyOutcomeUnknown" : "recoveryKeyOutcomeUnknownFirstKey");
+      if (vaultLockedSinceStart()) {
+        // The lock unmounted this dialog: the notice must outlive it.
+        toast.error(notice, { duration: Infinity });
+        handleOpenChange(false);
+      } else {
+        setError(notice);
+      }
+    } else if (
+      result.errorCode === API_ERROR.VAULT_WRAP_CONFLICT ||
+      result.errorCode === API_ERROR.INVALID_PASSPHRASE
+    ) {
+      // Another writer moved the wrap (a lost compare-and-swap), or the
+      // server's verifier refused the passphrase the local wrap accepted:
+      // this tab's salt, wrap and key are stale. Lock, as the key-changing
+      // flows do; locking unmounts this dialog, so the notice is a toast.
+      lock();
+      toast.error(t("vaultChangedElsewhere"), { duration: Infinity });
+      handleOpenChange(false);
     } else if (result.errorCode) {
       setError(tApi(apiErrorToI18nKey(result.errorCode)));
     } else {

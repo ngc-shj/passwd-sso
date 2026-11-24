@@ -71,4 +71,23 @@ describe("SoftwareLicenseFields", () => {
     fireEvent.change(screen.getByPlaceholderText("LkPH"), { target: { value: "ABCD-1234" } });
     expect(onLicenseKeyChange).toHaveBeenCalledWith("ABCD-1234");
   });
+
+  const fieldHandlers = [
+    ["Software", "onSoftwareNameChange", "Editor Pro"],
+    ["License key", "onLicenseKeyChange", "ABCD-1234"],
+    ["Version", "onVersionChange", "2.1"],
+    ["Licensee", "onLicenseeChange", "Acme"],
+    ["Purchase", "onPurchaseDateChange", "2024-01-01"],
+    ["Expiry", "onExpirationDateChange", "2026-01-01"],
+  ] as const;
+
+  it.each(fieldHandlers)("routes a change in the %s field to %s only", (label, handler, value) => {
+    const handlers = Object.fromEntries(fieldHandlers.map(([, name]) => [name, vi.fn()]));
+    render(<SoftwareLicenseFields {...baseProps} {...handlers} />);
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    expect(handlers[handler]).toHaveBeenCalledWith(value);
+    for (const [name, fn] of Object.entries(handlers)) {
+      if (name !== handler) expect(fn).not.toHaveBeenCalled();
+    }
+  });
 });

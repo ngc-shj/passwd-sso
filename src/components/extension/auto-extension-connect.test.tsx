@@ -339,6 +339,51 @@ describe("AutoExtensionConnect", () => {
     expect(screen.queryByText("connectReauthFailed")).not.toBeInTheDocument();
   });
 
+  it.each([
+    ["PASSKEY_REAUTH_UNAVAILABLE", "reauthUnavailable"],
+    ["PASSKEY_REAUTH_CREDENTIAL_MISMATCH", "reauthCredentialMismatch"],
+  ])("switches a %s reauth refusal to the sign-in-again card instead of a passkey retry", async (error, messageKey) => {
+    setSearchParams("?ext_connect=1");
+    mockRequestExtensionConnect.mockResolvedValue({
+      ok: false,
+      errorCode: "SESSION_STEP_UP_REQUIRED",
+    });
+    mockCanUsePasskeyRecovery.mockResolvedValue(true);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: false, error });
+    await renderAndClickAllow();
+    const user = userEvent.setup();
+    await user.click(await screen.findByText("connectReauthAction"));
+
+    await waitFor(() => {
+      expect(screen.getByText("connectRecentSessionTitle")).toBeInTheDocument();
+    });
+    expect(screen.getByText(messageKey)).toBeInTheDocument();
+    expect(screen.queryByText("connectReauthFailed")).not.toBeInTheDocument();
+
+    // The card's action is now a fresh sign-in, not another ceremony.
+    await user.click(screen.getByRole("button", { name: "connectRecentSessionAction" }));
+    await waitFor(() => expect(mockSignOut).toHaveBeenCalledTimes(1));
+    expect(mockReauthenticateWithPasskey).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps the passkey retry for a reauth failure another ceremony can fix", async () => {
+    setSearchParams("?ext_connect=1");
+    mockRequestExtensionConnect.mockResolvedValue({
+      ok: false,
+      errorCode: "SESSION_STEP_UP_REQUIRED",
+    });
+    mockCanUsePasskeyRecovery.mockResolvedValue(true);
+    mockReauthenticateWithPasskey.mockResolvedValue({ ok: false, error: "PASSKEY_REAUTH_FAILED" });
+    await renderAndClickAllow();
+    const user = userEvent.setup();
+    await user.click(await screen.findByText("connectReauthAction"));
+
+    await waitFor(() => {
+      expect(screen.getByText("connectReauthFailed")).toBeInTheDocument();
+    });
+    expect(screen.getByText("connectReauthTitle")).toBeInTheDocument();
+  });
+
   it("shows a passkey-verifying label and a cancel control that aborts the in-flight ceremony", async () => {
     setSearchParams("?ext_connect=1");
     mockRequestExtensionConnect.mockResolvedValue({

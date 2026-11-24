@@ -25,6 +25,10 @@
  */
 import { readFileSync, readdirSync, existsSync } from "node:fs";
 import { join } from "node:path";
+import { SyntaxKind, ts } from "ts-morph";
+import { createAstProject } from "./lib/ast-project.mjs";
+import { createModuleResolver, loadArgumentMayName, loaderArgument, loaderNodes, templateAllowlist } from "./lib/module-specifier.mjs";
+import { bindingIndex, visibleBinding } from "./lib/scope-bindings.mjs";
 
 // PR 2: moved from scripts/ to scripts/checks/ — bump one extra level up.
 const ROOT = new URL("../..", import.meta.url).pathname;
@@ -262,10 +266,17 @@ export function checkAeadAadAllowlist(files) {
  *
  * Comment/block-comment lines are stripped before matching (mirror existing checks).
  *
+ * INITIAL_VAULT_KEY_VERSION, the named first version, is held to the same rule
+ * by refusal (see initialVersionFindings): one `keyVersion:` value in each
+ * setup site, and no other spelling of it, or of a module object holding it,
+ * anywhere.
+ *
  * @param {Array<{rel: string, content: string}>} files - {rel, content} pairs
+ * @param {{ whole?: boolean }} [options] - `whole`: `files` is the entire scan,
+ *   so a template-loader allowlist entry whose file is absent is stale too
  * @returns {string[]} error messages
  */
-export function checkKeyVersionHardcode(files) {
+export function checkKeyVersionHardcode(files, { whole = false } = {}) {
   // Sites where a literal keyVersion is correct by design.
   const KEY_VERSION_HARDCODE_ALLOWLIST = new Set([
     "src/app/api/vault/setup/route.ts",   // brand-new vault: first key is v1
@@ -278,23 +289,253 @@ export function checkKeyVersionHardcode(files) {
   // This avoids false positives from ternary expressions like `... ? data.keyVersion : 1`.
   const keyVersionLiteralRe = /(?:^|[,{])\s*keyVersion\s*:\s*\d/m;
   const errors = [];
+  const templates = templateAllowlist(INITIAL_VERSION_TEMPLATE_LOADERS);
 
   for (const { rel, content } of files) {
-    if (KEY_VERSION_HARDCODE_ALLOWLIST.has(rel)) continue;
     const activeLines = content
       .split("\n")
       .filter((line) => {
         const trimmed = line.trimStart();
         return !trimmed.startsWith("//") && !trimmed.startsWith("*");
-      })
-      .join("\n");
-    if (keyVersionLiteralRe.test(activeLines)) {
+      });
+    // Every file, not a text prefilter: a default import (`import C from`), a
+    // comment inside `import /**/ *` or an escaped name (`…VERSIO\u004e`)
+    // reaches the constant past any regex over the text.
+    errors.push(...initialVersionFindings(rel, content, templates));
+    if (KEY_VERSION_HARDCODE_ALLOWLIST.has(rel)) continue;
+    if (keyVersionLiteralRe.test(activeLines.join("\n"))) {
       errors.push(
         `Check E: hardcoded keyVersion literal found in non-allowlisted file: ${rel} — thread the live key version instead`
       );
     }
   }
+  // Then every file a specifier reached outside `files`, to a fixpoint.
+  const scanned = new Set(files.map(({ rel }) => rel));
+  let rel;
+  while ((rel = [...initialVersionReached].find((r) => !scanned.has(r)))) {
+    scanned.add(rel);
+    errors.push(...initialVersionFindings(rel, readFileSync(join(ROOT, rel), "utf-8"), templates));
+  }
+  errors.push(...templates.stale(scanned, whole).map((m) => `Check E: ${m}`));
   return errors;
+}
+
+// The named first version replaces the literal at the two setup sites, so it is
+// held to the same rule. Following it through aliases lost to a new spelling
+// three rounds running (a ternary, `??`, `+ 0`, a default, `||=`, a computed
+// key), so it is not followed: every spelling other than the shapes below is
+// refused, wherever it is.
+const INITIAL_VERSION = "INITIAL_VAULT_KEY_VERSION";
+const INITIAL_VERSION_SETUP_SITES = new Set([
+  "src/app/api/vault/setup/route.ts",
+  "src/lib/vault/vault-context.tsx",
+]);
+const INITIAL_VERSION_DEFINITION = "src/lib/constants/vault/vault.ts";
+const INITIAL_VERSION_INDEX = "src/lib/constants/index.ts";
+const INITIAL_VERSION_MODULES = [INITIAL_VERSION_DEFINITION, INITIAL_VERSION_INDEX];
+
+/** The files collectStructuralFiles scans: non-test .ts/.tsx under src/ and extension/src/. */
+function isStructuralFile(rel) {
+  return /^(src|extension\/src)\/.*\.(ts|tsx)$/.test(rel) && !/\.test\.|__tests__\//.test(rel);
+}
+
+// The template loaders (`import(`…${x}…`)`) Check E accepts: a template with a
+// substitution may load any module (lib/module-specifier), so each is named here
+// by its exact text, with why its substitutions cannot leave its directory.
+export const INITIAL_VERSION_TEMPLATE_LOADERS = [
+  {
+    file: "src/i18n/messages.ts",
+    template: "`../../messages/${safe}/${ns}.json`",
+    count: 2,
+    reason: "safe is safeLocale()'s output (a member of routing.locales) and ns is checked against NAMESPACES before the load",
+  },
+];
+
+let initialVersionProject = null;
+let initialVersionResolver = null;
+// Repo source files outside the structural scan that a scanned file's specifier
+// resolves to (src/instrumentation.ts imports ../sentry.server.config). Each is
+// pulled into Check E's scan rather than left undecided, so it is held to the
+// same rule and a re-export of either module in it is refused there.
+const initialVersionReached = new Set();
+const REACHABLE_SOURCE_RE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+
+function initialVersionScans(rel) {
+  if (isStructuralFile(rel)) return true;
+  if (!REACHABLE_SOURCE_RE.test(rel)) return false;
+  initialVersionReached.add(rel);
+  return true;
+}
+
+/**
+ * Which of initialVersionFindings' node walks `node` (a compiler node) has
+ * anything for: the name, a string key, a loader call. A raw compiler walk, so
+ * the wrapped walks below run only on the files that need them — every file is
+ * parsed, and wrapping each node of each one cost seconds.
+ */
+function initialVersionCandidates(node, acc = { name: false, key: false, loader: false }) {
+  const k = node.kind;
+  if (k === ts.SyntaxKind.Identifier) {
+    if (node.text === INITIAL_VERSION) acc.name = true;
+  } else if (k === ts.SyntaxKind.StringLiteral || k === ts.SyntaxKind.NoSubstitutionTemplateLiteral) {
+    if (node.text === INITIAL_VERSION) acc.key = true;
+  } else if (k === ts.SyntaxKind.ImportEqualsDeclaration) {
+    acc.loader = true;
+  } else if (k === ts.SyntaxKind.CallExpression) {
+    // Every callee moduleLoaderOf may accept: import(…), require(…), require.context(…).
+    let callee = node.expression;
+    if (callee.kind === ts.SyntaxKind.PropertyAccessExpression) callee = callee.expression;
+    if (callee.kind === ts.SyntaxKind.ImportKeyword || (callee.kind === ts.SyntaxKind.Identifier && callee.text === "require")) acc.loader = true;
+  }
+  ts.forEachChild(node, (child) => {
+    initialVersionCandidates(child, acc);
+  });
+  return acc;
+}
+
+/**
+ * Check E's INITIAL_VAULT_KEY_VERSION findings for one file, from its AST.
+ *
+ * The name may appear only as (a) its declaration in the definition module,
+ * (b) the index module's `export { INITIAL_VAULT_KEY_VERSION } from
+ * "./vault/vault"`, (c) a named import by its own name, and (d) in each setup
+ * site, once, as the whole value of a `keyVersion` property (`keyVersion:
+ * INITIAL_VAULT_KEY_VERSION`). Any other occurrence — inside an expression, a
+ * default, an alias, an export, a type, a second declaration — is refused.
+ *
+ * It is reachable without spelling its name only through a module object, so
+ * that is refused too: a namespace import of the definition module, a
+ * namespace import of the index used other than as `C.<name>`, an `export *`
+ * of either, an `import()` / `require()` / `import x = require()` /
+ * `require.context()` that may load either, and a string key
+ * `"INITIAL_VAULT_KEY_VERSION"` in a member read or a computed destructuring
+ * key. Comments are not nodes. Every structural file is parsed: a text
+ * prefilter missed a default import, `import /**\/ *` and an escaped name.
+ *
+ * "May load" is decided by resolving the specifier (lib/module-specifier): it
+ * names a module when TypeScript resolves it to that file, however spelled
+ * (`@/lib/../lib/constants`, `@/lib/constants/`); it may name either when it
+ * does not resolve, resolves outside the repository, or to a declaration file.
+ * A repo source file outside the structural scan that a specifier resolves to
+ * is scanned too (initialVersionReached). A non-`const` argument, and a
+ * template with a substitution, may load either — except a template named in
+ * INITIAL_VERSION_TEMPLATE_LOADERS, which goes stale when its file holds it a
+ * different number of times.
+ *
+ * Not refused: a module loaded by a runtime loader the bundler does not see
+ * (`createRequire`, `eval`), which cannot resolve `@/…` in a bundle.
+ */
+function initialVersionFindings(rel, content, templates) {
+  initialVersionProject ??= createAstProject();
+  // A file Check E does not scan could re-export either module unchecked, so a
+  // specifier resolving to one is undecided (lib/module-specifier).
+  initialVersionResolver ??= createModuleResolver({ root: ROOT, isScanned: initialVersionScans });
+  const resolver = initialVersionResolver;
+  const sf = initialVersionProject.createSourceFile(`/${rel}`, content, { overwrite: true });
+  let index = null;
+  const bindings = () => (index ??= bindingIndex(sf));
+  const findings = [];
+  const refuse = (node, what) =>
+    findings.push(
+      `Check E: ${INITIAL_VERSION} ${what} at ${rel}:${node.getStartLineNumber()} — only vault setup may install the first version, as \`keyVersion: ${INITIAL_VERSION}\`; thread the live key version instead`
+    );
+  const namesExportingModule = (spec) => resolver.mayName(spec, rel, INITIAL_VERSION_MODULES);
+  let setupUses = 0;
+  const has = initialVersionCandidates(sf.compilerNode);
+
+  for (const id of has.name ? sf.getDescendantsOfKind(SyntaxKind.Identifier) : []) {
+    if (id.getText() !== INITIAL_VERSION) continue;
+    const parent = id.getParent();
+    const kind = parent?.getKind();
+    if (kind === SyntaxKind.ImportSpecifier) {
+      const alias = parent.getAliasNode();
+      if (parent.getName() !== INITIAL_VERSION || (alias && alias.getText() !== INITIAL_VERSION)) refuse(id, "renamed import");
+      continue;
+    }
+    if (kind === SyntaxKind.ExportSpecifier) {
+      const decl = parent.getExportDeclaration();
+      const from = decl.getModuleSpecifierValue();
+      const isIndexReExport =
+        rel === INITIAL_VERSION_INDEX &&
+        !parent.getAliasNode() &&
+        from !== undefined &&
+        resolver.names(from, rel, [INITIAL_VERSION_DEFINITION]);
+      if (!isIndexReExport) refuse(id, "exported");
+      continue;
+    }
+    if (
+      kind === SyntaxKind.VariableDeclaration &&
+      parent.getNameNode() === id &&
+      rel === INITIAL_VERSION_DEFINITION &&
+      parent.getVariableStatement()?.getParent() === sf &&
+      parent.getVariableStatement()?.isExported()
+    ) {
+      continue;
+    }
+    if (
+      INITIAL_VERSION_SETUP_SITES.has(rel) &&
+      kind === SyntaxKind.PropertyAssignment &&
+      parent.getInitializer() === id &&
+      parent.getName() === "keyVersion"
+    ) {
+      setupUses += 1;
+      if (setupUses > 1) refuse(id, "installed a second time");
+      continue;
+    }
+    refuse(id, "used");
+  }
+
+  // `C["INITIAL_VAULT_KEY_VERSION"]`, `{ ["INITIAL_VAULT_KEY_VERSION"]: v } = C`
+  for (const lit of has.key
+    ? [...sf.getDescendantsOfKind(SyntaxKind.StringLiteral), ...sf.getDescendantsOfKind(SyntaxKind.NoSubstitutionTemplateLiteral)]
+    : []) {
+    if (lit.getLiteralText() !== INITIAL_VERSION) continue;
+    const kind = lit.getParent()?.getKind();
+    if (kind === SyntaxKind.ElementAccessExpression || kind === SyntaxKind.ComputedPropertyName) refuse(lit, "read by a string key");
+  }
+
+  for (const decl of sf.getImportDeclarations()) {
+    if (decl.isTypeOnly()) continue;
+    const spec = decl.getModuleSpecifierValue();
+    const ns = decl.getNamespaceImport();
+    if (resolver.mayName(spec, rel, [INITIAL_VERSION_DEFINITION])) {
+      if (ns) refuse(decl, "reachable through a namespace import of its definition module");
+      if (decl.getDefaultImport()) refuse(decl, "reachable through a default import of its definition module");
+      continue;
+    }
+    if (!resolver.mayName(spec, rel, [INITIAL_VERSION_INDEX])) continue;
+    if (decl.getDefaultImport()) refuse(decl, "reachable through a default import of src/lib/constants");
+    if (!ns) continue;
+    // The index namespace is a plain object of many constants; only `C.<name>`
+    // reads one by a name this check can see.
+    const name = ns.getText();
+    for (const id of sf.getDescendantsOfKind(SyntaxKind.Identifier)) {
+      if (id === ns || id.getText() !== name) continue;
+      const p = id.getParent();
+      const pk = p?.getKind();
+      if (pk === SyntaxKind.PropertyAccessExpression && p.getNameNode() === id) continue; // `x.C`
+      if ((pk === SyntaxKind.PropertyAssignment || pk === SyntaxKind.PropertySignature) && p.getNameNode() === id) continue;
+      if (id.getFirstAncestorByKind(SyntaxKind.TypeQuery) || pk === SyntaxKind.QualifiedName) continue;
+      if (visibleBinding(name, id, bindings)) continue; // a local of the same name
+      if (pk === SyntaxKind.PropertyAccessExpression && p.getExpression() === id) continue;
+      refuse(id, `reachable through namespace ${name} of src/lib/constants used other than as ${name}.<name>`);
+    }
+  }
+
+  for (const decl of sf.getExportDeclarations()) {
+    const spec = decl.getModuleSpecifierValue();
+    if (spec && !decl.isTypeOnly() && !decl.hasNamedExports() && namesExportingModule(spec)) {
+      refuse(decl, "re-exported by export *");
+    }
+  }
+
+  for (const { node, loader } of has.loader ? loaderNodes(sf) : []) {
+    if (loadArgumentMayName(loaderArgument(node), rel, INITIAL_VERSION_MODULES, bindings, resolver, templates)) {
+      refuse(node, `reachable through an ${loader} that may load its module`);
+    }
+  }
+
+  return findings;
 }
 
 /**
@@ -678,7 +919,7 @@ function main() {
   errors.push(...checkBErrors);
 
   // ── Check E: keyVersion hardcode guard ─────────────────────────────────────
-  const checkEErrors = checkKeyVersionHardcode(structuralFiles);
+  const checkEErrors = checkKeyVersionHardcode(structuralFiles, { whole: true });
   errors.push(...checkEErrors);
 
   // ── Check G: server authHash compare containment ───────────────────────────

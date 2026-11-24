@@ -94,6 +94,9 @@ export const NON_PRODUCTION_SCRIPTS = [
   // Deploy preflight: reads _prisma_migrations as the migration role.
   "scripts/rls-enforce-preflight.mjs",
   "scripts/lib/denied-privileges.mjs",
+  // Integration-test runner: creates, prepares and drops a per-run scratch
+  // database as the superuser, then hands the suite to vitest.
+  "scripts/run-integration-tests.mjs",
   // Repository maintenance and fixture generators, outside the Program.
   "scripts/check-blame-ignore-revs.mjs",
   "scripts/check-codeowners-drift.mjs",

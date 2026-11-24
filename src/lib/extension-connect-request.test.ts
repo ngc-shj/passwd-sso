@@ -1,4 +1,4 @@
-// @vitest-environment node
+// @vitest-environment jsdom
 /**
  * Unit tests for extension-connect-request helpers.
  *
@@ -8,10 +8,16 @@
  * allowlist is correct.
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import {
+  EXT_CONNECT_READY_MSG_TYPE,
+  EXT_CONNECT_REQUEST_MSG_TYPE,
+} from "@/lib/constants";
 import {
   coerceErrorCode,
+  requestExtensionConnect,
   EXTENSION_CONNECT_ERROR_CODE,
+  type ExtensionConnectResult,
 } from "./extension-connect-request";
 
 describe("coerceErrorCode", () => {
@@ -53,5 +59,137 @@ describe("coerceErrorCode", () => {
     expect(coerceErrorCode("GENERIC_FAILURE")).toBe(
       EXTENSION_CONNECT_ERROR_CODE.GENERIC_FAILURE,
     );
+  });
+});
+
+describe("requestExtensionConnect", () => {
+  // postMessage is the browser boundary: capture the outgoing request instead
+  // of delivering it, and play the content-script relay's reply by hand.
+  let posted: Array<{ message: { type: string; reqId: string }; targetOrigin: string }>;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    posted = [];
+    vi.spyOn(window, "postMessage").mockImplementation(((message: { type: string; reqId: string }, targetOrigin: string) => {
+      posted.push({ message, targetOrigin });
+    }) as typeof window.postMessage);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  function reply(data: unknown, init: { origin?: string; source?: Window | null } = {}) {
+    window.dispatchEvent(
+      new MessageEvent("message", {
+        data,
+        origin: init.origin ?? window.location.origin,
+        source: init.source === undefined ? window : init.source,
+      }),
+    );
+  }
+
+  function readyFor(reqId: string, extra: Record<string, unknown>) {
+    return { type: EXT_CONNECT_READY_MSG_TYPE, reqId, ...extra };
+  }
+
+  async function settledWithin(promise: Promise<ExtensionConnectResult>, ms: number) {
+    let result: ExtensionConnectResult | undefined;
+    void promise.then((r) => {
+      result = r;
+    });
+    await vi.advanceTimersByTimeAsync(ms);
+    return result;
+  }
+
+  it("posts the connect request to its own origin", () => {
+    void requestExtensionConnect();
+    expect(posted).toHaveLength(1);
+    expect(posted[0].message.type).toBe(EXT_CONNECT_REQUEST_MSG_TYPE);
+    expect(posted[0].targetOrigin).toBe(window.location.origin);
+  });
+
+  it("resolves ok on a matching READY reply", async () => {
+    const promise = requestExtensionConnect();
+    reply(readyFor(posted[0].message.reqId, { ok: true }));
+    await expect(promise).resolves.toEqual({ ok: true });
+  });
+
+  it("passes an allowlisted error code through", async () => {
+    const promise = requestExtensionConnect();
+    reply(readyFor(posted[0].message.reqId, { ok: false, errorCode: "PASSKEY_REQUIRED" }));
+    await expect(promise).resolves.toEqual({ ok: false, errorCode: "PASSKEY_REQUIRED" });
+  });
+
+  it("coerces an unknown error code to GENERIC_FAILURE", async () => {
+    const promise = requestExtensionConnect();
+    reply(readyFor(posted[0].message.reqId, { ok: false, errorCode: "<script>" }));
+    await expect(promise).resolves.toEqual({ ok: false, errorCode: "GENERIC_FAILURE" });
+  });
+
+  it("treats a truthy non-true ok as a failure", async () => {
+    const promise = requestExtensionConnect();
+    reply(readyFor(posted[0].message.reqId, { ok: "true" }));
+    await expect(promise).resolves.toEqual({ ok: false, errorCode: "GENERIC_FAILURE" });
+  });
+
+  it("ignores a reply for another request id", async () => {
+    const promise = requestExtensionConnect({ timeoutMs: 100 });
+    reply(readyFor("someone-else", { ok: true }));
+    await expect(settledWithin(promise, 100)).resolves.toEqual({ ok: false, errorCode: "EXTENSION_ABSENT" });
+  });
+
+  it("ignores a reply from another origin", async () => {
+    const promise = requestExtensionConnect({ timeoutMs: 100 });
+    reply(readyFor(posted[0].message.reqId, { ok: true }), { origin: "https://evil.example" });
+    await expect(settledWithin(promise, 100)).resolves.toEqual({ ok: false, errorCode: "EXTENSION_ABSENT" });
+  });
+
+  it("ignores a reply whose source is not this window", async () => {
+    const promise = requestExtensionConnect({ timeoutMs: 100 });
+    reply(readyFor(posted[0].message.reqId, { ok: true }), { source: null });
+    await expect(settledWithin(promise, 100)).resolves.toEqual({ ok: false, errorCode: "EXTENSION_ABSENT" });
+  });
+
+  it("ignores a message of another type and a null payload", async () => {
+    const promise = requestExtensionConnect({ timeoutMs: 100 });
+    const reqId = posted[0].message.reqId;
+    reply({ type: EXT_CONNECT_REQUEST_MSG_TYPE, reqId, ok: true });
+    reply(null);
+    await expect(settledWithin(promise, 100)).resolves.toEqual({ ok: false, errorCode: "EXTENSION_ABSENT" });
+  });
+
+  it("keeps the first reply when a second one arrives", async () => {
+    const promise = requestExtensionConnect();
+    const reqId = posted[0].message.reqId;
+    reply(readyFor(reqId, { ok: true }));
+    reply(readyFor(reqId, { ok: false, errorCode: "PASSKEY_REQUIRED" }));
+    await expect(promise).resolves.toEqual({ ok: true });
+  });
+
+  it("waits the default 8 seconds before reporting the extension absent", async () => {
+    const promise = requestExtensionConnect();
+    await expect(settledWithin(promise, 7_999)).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(promise).resolves.toEqual({ ok: false, errorCode: "EXTENSION_ABSENT" });
+  });
+
+  it("removes its message listener once settled", async () => {
+    const removeSpy = vi.spyOn(window, "removeEventListener");
+    const promise = requestExtensionConnect();
+    reply(readyFor(posted[0].message.reqId, { ok: true }));
+    await promise;
+    expect(removeSpy).toHaveBeenCalledWith("message", expect.any(Function));
+  });
+
+  it("falls back to a generated request id without crypto.randomUUID", async () => {
+    vi.stubGlobal("crypto", {});
+    const promise = requestExtensionConnect();
+    const reqId = posted[0].message.reqId;
+    expect(reqId).toMatch(/^req-[a-z0-9]+-\d+$/);
+    reply(readyFor(reqId, { ok: true }));
+    await expect(promise).resolves.toEqual({ ok: true });
   });
 });

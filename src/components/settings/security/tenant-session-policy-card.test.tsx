@@ -5,6 +5,7 @@ import "@testing-library/jest-dom/vitest";
 import {
   SESSION_IDLE_TIMEOUT_MIN,
   SESSION_IDLE_TIMEOUT_MAX,
+  VAULT_AUTO_LOCK_DEFAULT,
 } from "@/lib/validations/common";
 
 const { mockFetch, mockToast, mockCanUsePasskeyRecovery, mockReauthenticateWithPasskey } = vi.hoisted(() => ({
@@ -182,5 +183,87 @@ describe("TenantSessionPolicyCard", () => {
 
     expect(await screen.findByTestId("recent-session-dialog")).toBeInTheDocument();
     expect(mockToast.error).not.toHaveBeenCalled();
+  });
+  it("shows only the translated failure, never the server's diagnostic text, when a save is refused", async () => {
+    const SERVER_TEXT = "vaultAutoLockMinutes (60) must be <= sessionIdleTimeoutMinutes";
+    mockFetch.mockImplementation((_url: string, init?: RequestInit) => {
+      if (!init || init.method === undefined || init.method === "GET") {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve(DEFAULT_DATA),
+        });
+      }
+      return Promise.resolve({
+        ok: false,
+        status: 400,
+        json: () =>
+          Promise.resolve({ error: "VALIDATION_ERROR", details: { message: SERVER_TEXT } }),
+      });
+    });
+    render(<TenantSessionPolicyCard />);
+    const save = await screen.findByRole("button", {
+      name: "sessionPolicySave",
+    });
+
+    const idle = document.getElementById("idle-timeout") as HTMLInputElement;
+    fireEvent.change(idle, { target: { value: "120" } });
+    fireEvent.click(save);
+
+    expect(await screen.findByText("sessionPolicySaveFailed")).toBeInTheDocument();
+    expect(mockToast.error).toHaveBeenCalledWith("sessionPolicySaveFailed");
+    expect(screen.queryByText(SERVER_TEXT)).not.toBeInTheDocument();
+    expect(mockToast.error).not.toHaveBeenCalledWith(SERVER_TEXT);
+  });
+  describe("auto-lock disabled: the server's default auto-lock still caps the idle timeouts", () => {
+    const patchCalls = () =>
+      mockFetch.mock.calls.filter(
+        (c) => (c[1] as RequestInit | undefined)?.method === "PATCH",
+      );
+    const capMessage = `vaultAutoLockDefaultExceedsIdleCap:${JSON.stringify({ n: VAULT_AUTO_LOCK_DEFAULT })}`;
+
+    it("refuses an idle timeout below the default auto-lock with the translated cap message and sends no PATCH", async () => {
+      setupGet();
+      render(<TenantSessionPolicyCard />);
+      const save = await screen.findByRole("button", { name: "sessionPolicySave" });
+
+      const idle = document.getElementById("idle-timeout") as HTMLInputElement;
+      fireEvent.change(idle, { target: { value: String(VAULT_AUTO_LOCK_DEFAULT - 5) } });
+      fireEvent.click(save);
+
+      expect(await screen.findByText(capMessage)).toBeInTheDocument();
+      expect(patchCalls()).toHaveLength(0);
+    });
+
+    it("refuses a client app idle timeout below the default auto-lock with the translated cap message and sends no PATCH", async () => {
+      setupGet();
+      render(<TenantSessionPolicyCard />);
+      const save = await screen.findByRole("button", { name: "sessionPolicySave" });
+
+      const extIdle = document.getElementById("extension-idle") as HTMLInputElement;
+      fireEvent.change(extIdle, { target: { value: String(VAULT_AUTO_LOCK_DEFAULT - 5) } });
+      fireEvent.click(save);
+
+      expect(await screen.findByText(capMessage)).toBeInTheDocument();
+      expect(patchCalls()).toHaveLength(0);
+    });
+
+    it("saves idle timeouts equal to the default auto-lock, as the server's strict comparison allows", async () => {
+      setupGet();
+      render(<TenantSessionPolicyCard />);
+      const save = await screen.findByRole("button", { name: "sessionPolicySave" });
+
+      const idle = document.getElementById("idle-timeout") as HTMLInputElement;
+      const extIdle = document.getElementById("extension-idle") as HTMLInputElement;
+      fireEvent.change(idle, { target: { value: String(VAULT_AUTO_LOCK_DEFAULT) } });
+      fireEvent.change(extIdle, { target: { value: String(VAULT_AUTO_LOCK_DEFAULT) } });
+      fireEvent.click(save);
+
+      await waitFor(() => expect(patchCalls()).toHaveLength(1));
+      const body = JSON.parse(String((patchCalls()[0][1] as RequestInit).body));
+      expect(body.vaultAutoLockMinutes).toBeNull();
+      expect(body.sessionIdleTimeoutMinutes).toBe(VAULT_AUTO_LOCK_DEFAULT);
+      expect(screen.queryByText(capMessage)).not.toBeInTheDocument();
+    });
   });
 });

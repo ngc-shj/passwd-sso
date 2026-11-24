@@ -148,6 +148,64 @@ describe("ApiKeyManager", () => {
     expect(screen.getByDisplayValue("api-token-xyz")).toBeInTheDocument();
   });
 
+  describe("when the created key's response body cannot be read", () => {
+    function setupUnreadableCreate() {
+      mockFetch.mockImplementation((url: string, init?: RequestInit) => {
+        if (!init || init.method === undefined || init.method === "GET") {
+          return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve([]) });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 201,
+          json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+        });
+      });
+    }
+
+    async function submitCreate() {
+      render(<ApiKeyManager />);
+      await screen.findByText("noKeys");
+      fireEvent.click(screen.getByRole("button", { name: /createKey/ }));
+      fireEvent.change(screen.getByPlaceholderText("namePlaceholder"), {
+        target: { value: "my-key" },
+      });
+      const buttons = screen.getAllByRole("button", { name: /createKey/ });
+      fireEvent.click(buttons[buttons.length - 1]);
+    }
+
+    it("says the key was created but cannot be shown", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      expect(await screen.findByText("createdTokenUnavailable")).toBeInTheDocument();
+      expect(mockToast.error).not.toHaveBeenCalled();
+    });
+
+    it("still completes the creation (success toast and list refresh)", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      await screen.findByText("createdTokenUnavailable");
+      expect(mockToast.success).toHaveBeenCalledWith("created");
+      const listCalls = mockFetch.mock.calls.filter(([, init]) => !init || init.method === undefined);
+      expect(listCalls).toHaveLength(2);
+    });
+
+    it("shows no token and offers nothing to copy", async () => {
+      setupUnreadableCreate();
+      await submitCreate();
+      await screen.findByText("createdTokenUnavailable");
+      expect(screen.queryByText("tokenReady")).not.toBeInTheDocument();
+      expect(screen.queryByTestId("copy-button")).not.toBeInTheDocument();
+    });
+
+    it("shows the token and its copy button when the body is readable", async () => {
+      setupKeysList([]);
+      await submitCreate();
+      expect(await screen.findByText("tokenReady")).toBeInTheDocument();
+      expect(screen.getByTestId("copy-button")).toHaveAttribute("data-value", "api-token-xyz");
+      expect(screen.queryByText("createdTokenUnavailable")).not.toBeInTheDocument();
+    });
+  });
+
   it("sends an expiry of exactly the chosen elapsed days, across a DST fall-back", async () => {
     // New York, mid-October: 90 days ahead crosses the November fall-back, so a
     // local calendar step would land an hour past the server's elapsed bound.

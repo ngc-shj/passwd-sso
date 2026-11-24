@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { API_PATH } from "@/lib/constants";
 import { fetchApi } from "@/lib/url-helpers";
+import { parseLines } from "@/lib/format/parse-lines";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { TAILNET_NAME_MAX_LENGTH, MAX_CIDRS } from "@/lib/validations";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
@@ -92,15 +93,8 @@ export function TenantAccessRestrictionCard() {
     void fetchPolicy();
   }, [fetchPolicy]);
 
-  const parseCidrs = (): string[] => {
-    return cidrsText
-      .split("\n")
-      .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-  };
-
   const validate = (): string | null => {
-    const cidrs = parseCidrs();
+    const cidrs = parseLines(cidrsText);
     if (cidrs.length > MAX_CIDRS) {
       return t("allowedCidrsValidationMax", { max: MAX_CIDRS });
     }
@@ -130,7 +124,7 @@ export function TenantAccessRestrictionCard() {
     setError(null);
     setSaving(true);
     try {
-      const cidrs = parseCidrs();
+      const cidrs = parseLines(cidrsText);
       const body: Record<string, unknown> = {
         allowedCidrs: cidrs,
         tailscaleEnabled,

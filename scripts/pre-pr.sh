@@ -33,7 +33,7 @@ detect_web_changes() {
   # match `eslint.extension.config.mjs`, so without it a PR editing only that file
   # (which is what adding an entry to its two-file override audit surface looks
   # like) would skip the self-test that proves the gate can still fail.
-  local app_paths='^(Dockerfile|docker-compose.*\.yml|src/|prisma/|proxy\.ts|instrumentation\.ts|messages/|package\.json|package-lock\.json|tsconfig.*\.json|vitest\.config\.|eslint\.config\.|eslint\.extension\.config\.|next\.config\.|scripts/|docs/operations/|infra/k8s/|infra/terraform/|CLAUDE\.md)'
+  local app_paths='^(Dockerfile|docker-compose.*\.yml|src/|prisma/|proxy\.ts|instrumentation\.ts|instrumentation-client\.ts|sentry\.(client|server)\.config\.ts|messages/|package\.json|package-lock\.json|tsconfig.*\.json|vitest\.config\.|eslint\.config\.|eslint\.extension\.config\.|next\.config\.|scripts/|docs/operations/|infra/k8s/|infra/terraform/|CLAUDE\.md)'
   local base diff ref
   # Prefer origin/main (CI's base; survives a stale local main) and fall back to
   # local main only if the remote ref is absent.
@@ -462,6 +462,9 @@ queue_step "Static: limited-subquery-write" node scripts/checks/check-limited-su
 queue_step "Static: cli-shell-safety" node scripts/checks/check-cli-shell-safety.mjs
 queue_step "Static: client-credential-fetch" node scripts/checks/check-client-credential-fetch.mjs
 queue_step "Static: gate-selftest-coverage" bash scripts/checks/check-gate-selftest-coverage.sh
+queue_step "Static: coverage-ignore hints" node scripts/checks/check-coverage-ignore-hints.mjs
+queue_step "Static: state-updater purity" node scripts/checks/check-state-updater-purity.mjs
+queue_step "Static: mutation-response read" node scripts/checks/check-mutation-response-read.mjs
 queue_step "Static: no-pipe-into-grep-q" bash scripts/checks/check-no-pipe-into-grep-q.sh
 queue_step "Static: doc-paths" node scripts/checks/check-doc-paths.mjs
 queue_step "Static: destructive-wrapper-derivation" node scripts/checks/check-destructive-wrapper-derivation.mjs

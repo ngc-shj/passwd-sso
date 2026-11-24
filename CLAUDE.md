@@ -54,33 +54,48 @@ npm run worker:audit-outbox    # Run the outbox worker (requires OUTBOX_WORKER_D
 npm run worker:retention-gc    # Run the retention GC worker (requires RETENTION_GC_DATABASE_URL)
 npm run worker:audit-anchor-publisher  # Run the audit-anchor publisher (AUDIT_ANCHOR_PUBLISHER_ENABLED=true + DEPLOYMENT_ID, AUDIT_ANCHOR_SIGNING_KEY, AUDIT_ANCHOR_TAG_SECRET, a destination; production requires AUDIT_ANCHOR_PUBLISHER_DATABASE_URL)
 npm run worker:audit-chain-verify      # Run the audit-chain verify worker (AUDIT_CHAIN_VERIFY_DATABASE_URL — passwd_audit_chain_verifier; DATABASE_URL fallback outside production only)
-npm run test:integration       # Run real-DB integration tests (requires running Postgres)
+npm run test:integration       # Run real-DB integration tests on a scratch database created and dropped per run (requires running Postgres; `-- <vitest args>` filters)
 ```
 
-**Integration tests and the outbox worker cannot share a database.** These tests
-drive worker functions (`processWebhookDeliveryBatch`, the outbox drain, the
-reapers) against real rows, and those claims are `FOR UPDATE SKIP LOCKED` over
-the whole table — not tenant-scoped — while the retention sweep deletes delivery
-rows outright. A live worker on the same database therefore competes for the rows
-a test just inserted and wins some of the time, producing a ~50% flake that
-surfaces as an unrelated assertion failure. `npm run docker:up` starts
-`audit-outbox-worker` against the dev database, so the normal local state is the
-racing one. `src/__tests__/db-integration/setup.ts` detects this by
-`application_name` in `pg_stat_activity` and refuses to run, naming each
-detected worker and how to stop that one. The dev compose workers touch these
-tables, so stop both:
+**Integration tests run only on a scratch database and a claimed Redis database.**
+These tests write and delete rows and drive worker functions
+(`processWebhookDeliveryBatch`, the outbox drain, the reapers) whose claims are
+`FOR UPDATE SKIP LOCKED` over the whole table, and they drive Redis rate-limit
+buckets and session-cache entries (e.g. `rl:mcp:token:ip:unknown`) the live
+instance reads; on shared stores a live worker races them, the live instance's
+limiters are reset, and state a crashed run left behind breaks later runs.
+`npm run test:integration` (`scripts/run-integration-tests.mjs`) therefore:
 
-```bash
-docker compose stop audit-outbox-worker retention-gc-worker
-npm run test:integration
-docker compose start audit-outbox-worker retention-gc-worker
-```
+- creates an empty database (`passwd_it_<stamp>_<pid>_<hex>`) on the cluster
+  `MIGRATION_DATABASE_URL` names, holds a keeper connection to it
+  (`passwd-sso-integration-keeper`) for the whole run, marks it with
+  `COMMENT ON DATABASE`, applies the per-database half of
+  `bootstrap-rds-roles.mjs`, `prisma migrate deploy`, `--denied-only` and
+  `db:check-drift`, and points every `*_DATABASE_URL` at it;
+- with `REDIS_URL` set, claims an empty Redis logical database no client has
+  selected (never the index `REDIS_URL` names; `REDIS_SENTINEL=true` and a
+  `REDIS_URL` with a query string, from which ioredis reads `?db=N`, are refused)
+  by setting a claim key on it atomically, points `REDIS_URL` at it and exports
+  the claim's marker as `INTEGRATION_REDIS_CLAIM`;
+- afterwards FLUSHDBs the Redis database if it still carries this run's claim and
+  drops the scratch database, however the run ends. A failed drop or flush, or a
+  database present after a CREATE whose reply was lost, prints
+  `INTEGRATION_CLEANUP_INCOMPLETE` and exits nonzero. A SIGKILLed run's leftovers
+  (marked or claimed, with no connection left) are removed by the next run on
+  the same host.
 
-The audit-anchor-publisher is a compose service only in `docker-compose.workers.yml`; if that overlay
-is running on this host, stop it with `docker compose -f docker-compose.yml -f docker-compose.workers.yml stop audit-anchor-publisher`,
-or stop the process if you started one by hand.
-
-CI runs no worker container alongside the integration job, so the check is silent there.
+Isolated per run: the Postgres database and one Redis keyspace. Not isolated:
+Postgres roles (cluster-wide; they must already exist — initdb locally — and the
+runner fails if a migration changed an existing role's cluster-wide state, or if
+it found no role to compare), the Redis server's memory and eviction, and the
+services tests reach by their own URL (MinIO, Jackson).
+`src/__tests__/db-integration/setup.ts` refuses any database without the name
+and the marker, and any Redis database without this run's claim, so a bare
+`vitest --config vitest.integration.config.ts` against the dev database fails
+fast (pinned by `harness-scratch-refusal.integration.test.ts` and a CI step). The
+compose workers keep running: nothing points them at the scratch database. CI
+uses the same runner, after bootstrapping the roles and migrating its default
+database once, so its cluster is in the already-migrated state a developer's is.
 
 Docker (dev): `npm run docker:up` (wraps `docker compose -f docker-compose.yml -f docker-compose.override.yml up`). Stop with `npm run docker:down`.
 
@@ -132,6 +147,7 @@ route handlers own application-layer concerns.
 - `cors-gate.ts` — Bearer-bypass route detection + preflight wiring.
 - `csrf-gate.ts` — baseline CSRF (Origin) for cookie-bearing mutating requests. **Request-attribute-based, NOT path-classification-based** — fires whenever cookie + mutating method, regardless of route classification. This is what closes the "did this route call assertOrigin?" gap structurally.
 - `security-headers.ts` — CSP / HSTS / X-Frame-Options application.
+- `expected-user-gate.ts` — expected-user binding. `fetchApi` names the page's user in `x-passwd-expected-user`, bound once per page load by `ExpectedUserSync` (in `src/components/providers/session-provider.tsx`) to the first user `useSession` names; a later different user reloads the page instead of re-binding. The gate decides, before any route and for every method, on whose session the cookie is (`getSessionInfo`'s `identity`, from the same `/api/auth/session` field `useSession` reads), not on its validity: another user → 409 `SESSION_CHANGED` (`fetchApi` rejects with `SessionChangedError` and reloads); the named user (even one the session gate will refuse) → continue; no user → continue with every session cookie stripped from the request the route sees (Auth.js also answers "no user" when its own lookup throws, so the route must not re-read the cookie); session read failed → 503; ambiguous cookie → 401. Requests without the header or without a session cookie (Bearer, extension, CLI, SCIM) are not affected. It binds `fetchApi` requests only; a flow's own checks between awaits still decide whether it may continue.
 
 **SSoT principle**: routes do NOT call `assertOrigin` for baseline CSRF — the proxy CSRF gate handles it for any cookie-bearing mutating request. Routes only call `assertOrigin` (or stricter variants) when they receive cookieless requests outside the proxy gate's threat model.
 

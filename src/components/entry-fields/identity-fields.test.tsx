@@ -125,4 +125,43 @@ describe("IdentityFields", () => {
     fireEvent.change(screen.getByPlaceholderText("PhonePH"), { target: { value: "555-1234" } });
     expect(onPhoneChange).toHaveBeenCalledWith("555-1234");
   });
+
+  const fieldHandlers = [
+    ["Family name", "onFamilyNameChange", "Yamada"],
+    ["Given name", "onGivenNameChange", "Taro"],
+    ["Middle name", "onMiddleNameChange", "Q"],
+    ["Family kana", "onFamilyNameKanaChange", "ヤマダ"],
+    ["Given kana", "onGivenNameKanaChange", "タロウ"],
+    ["Full name", "onFullNameChange", "Taro Yamada"],
+    ["Address line 1", "onAddressLine1Change", "1-2-3 Chiyoda"],
+    ["Address line 2", "onAddressLine2Change", "Room 4"],
+    ["City", "onCityChange", "Tokyo"],
+    ["State", "onStateChange", "Tokyo-to"],
+    ["Postal code", "onPostalCodeChange", "100-0001"],
+    ["Country", "onCountryChange", "Japan"],
+    ["Address", "onAddressChange", "combined address"],
+    ["Email", "onEmailChange", "taro@example.com"],
+    ["DOB", "onDateOfBirthChange", "1990-01-02"],
+    ["Nationality", "onNationalityChange", "JP"],
+    ["ID number", "onIdNumberChange", "AB1234567"],
+    ["Issue", "onIssueDateChange", "2020-01-01"],
+    ["Expiry", "onExpiryDateChange", "2030-01-01"],
+  ] as const;
+
+  it.each(fieldHandlers)("routes a change in the %s field to %s only", (label, handler, value) => {
+    const handlers = Object.fromEntries(fieldHandlers.map(([, name]) => [name, vi.fn()]));
+    render(<IdentityFields {...baseProps} {...handlers} />);
+    fireEvent.change(screen.getByLabelText(label), { target: { value } });
+    expect(handlers[handler]).toHaveBeenCalledWith(value);
+    for (const [name, fn] of Object.entries(handlers)) {
+      if (name !== handler) expect(fn).not.toHaveBeenCalled();
+    }
+  });
+
+  it("masks the ID number until showIdNumber is set", () => {
+    const { rerender } = render(<IdentityFields {...baseProps} idNumber="X1" />);
+    expect(screen.getByLabelText("ID number")).toHaveAttribute("type", "password");
+    rerender(<IdentityFields {...baseProps} idNumber="X1" showIdNumber />);
+    expect(screen.getByLabelText("ID number")).toHaveAttribute("type", "text");
+  });
 });

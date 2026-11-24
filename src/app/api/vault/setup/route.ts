@@ -36,6 +36,7 @@ import {
   KDF_ARGON2_PARALLELISM_MAX,
 } from "@/lib/validations/common.server";
 import { MS_PER_MINUTE } from "@/lib/constants/time";
+import { INITIAL_VAULT_KEY_VERSION } from "@/lib/constants/vault/vault";
 import { TEAM_KEY_RECIPIENT_GUARD_ARM, teamKeyRecipientGuardArm } from "@/lib/team/team-key-recipient-guard";
 import { PBKDF2_ITERATIONS } from "@/lib/crypto/crypto-params";
 
@@ -155,7 +156,7 @@ async function handlePOST(request: NextRequest) {
             secretKeyAuthTag: data.secretKeyAuthTag,
             masterPasswordServerHash: serverHash,
             masterPasswordServerSalt: serverSalt,
-            keyVersion: 1,
+            keyVersion: INITIAL_VAULT_KEY_VERSION,
             kdfType,
             kdfIterations,
             kdfMemory,

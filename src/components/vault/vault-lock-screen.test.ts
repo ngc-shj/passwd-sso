@@ -4,7 +4,10 @@ vi.mock("@/i18n/navigation", () => ({
   Link: "a",
 }));
 
-import { formatLockedUntil } from "./vault-lock-screen";
+import { formatLockedUntil, resolveUnlockError } from "./vault-lock-screen";
+import { VaultUnlockError, VAULT_UNLOCK_INTERRUPTED } from "@/lib/vault/vault-context";
+import { API_ERROR } from "@/lib/http/api-error-codes";
+import { SessionChangedError } from "@/lib/url-helpers";
 
 /**
  * Minimal t() mock that mirrors next-intl interpolation.
@@ -82,5 +85,92 @@ describe("formatLockedUntil", () => {
     expect(result).toContain("hours");
     expect(result).toContain("count=24");
     vi.useRealTimers();
+  });
+});
+
+describe("resolveUnlockError", () => {
+  const SENTINEL = "SENTINEL-7f3a-do-not-render";
+  const msgs = {
+    lockedUntil: (lockedUntil: string | null | undefined) => `locked:${lockedUntil ?? "none"}`,
+    rateLimited: "rate-limited",
+    unavailable: "unavailable",
+    interrupted: "interrupted",
+    sessionChanged: "session-changed",
+    fallback: "fallback",
+  };
+
+  it("reports a changed session, not a wrong passphrase or the fallback, for SessionChangedError", () => {
+    expect(resolveUnlockError(new SessionChangedError(), msgs)).toEqual({
+      kind: "message",
+      message: "session-changed",
+    });
+  });
+
+  it("reports an expired session for UNAUTHORIZED", () => {
+    expect(resolveUnlockError(new VaultUnlockError(API_ERROR.UNAUTHORIZED), msgs)).toEqual({
+      kind: "sessionExpired",
+    });
+  });
+
+  it("passes the lockout date to lockedUntil for ACCOUNT_LOCKED", () => {
+    const until = "2026-02-16T01:00:00.000Z";
+    expect(resolveUnlockError(new VaultUnlockError(API_ERROR.ACCOUNT_LOCKED, until), msgs)).toEqual({
+      kind: "message",
+      message: `locked:${until}`,
+    });
+  });
+
+  it("calls lockedUntil without a date for ACCOUNT_LOCKED with no date", () => {
+    expect(resolveUnlockError(new VaultUnlockError(API_ERROR.ACCOUNT_LOCKED), msgs)).toEqual({
+      kind: "message",
+      message: "locked:none",
+    });
+  });
+
+  it("returns the rate-limited message for RATE_LIMIT_EXCEEDED", () => {
+    expect(resolveUnlockError(new VaultUnlockError(API_ERROR.RATE_LIMIT_EXCEEDED), msgs)).toEqual({
+      kind: "message",
+      message: "rate-limited",
+    });
+  });
+
+  it("returns the unavailable message for SERVICE_UNAVAILABLE", () => {
+    expect(resolveUnlockError(new VaultUnlockError(API_ERROR.SERVICE_UNAVAILABLE), msgs)).toEqual({
+      kind: "message",
+      message: "unavailable",
+    });
+  });
+
+  it("reports an interrupted unlock as interrupted, not as a failed attempt", () => {
+    expect(resolveUnlockError(new VaultUnlockError(VAULT_UNLOCK_INTERRUPTED), msgs)).toEqual({
+      kind: "message",
+      message: "interrupted",
+    });
+  });
+
+  it("returns the fallback for an unknown code", () => {
+    expect(resolveUnlockError(new VaultUnlockError("SOMETHING_ELSE"), msgs)).toEqual({
+      kind: "message",
+      message: "fallback",
+    });
+  });
+
+  it("returns the fallback for an error that is not a VaultUnlockError", () => {
+    expect(resolveUnlockError(new TypeError("boom"), msgs)).toEqual({
+      kind: "message",
+      message: "fallback",
+    });
+  });
+
+  it("does not surface an unknown code's text", () => {
+    const resolved = resolveUnlockError(new VaultUnlockError(`UNKNOWN_${SENTINEL}`), msgs);
+    expect(resolved).toEqual({ kind: "message", message: "fallback" });
+    expect(JSON.stringify(resolved)).not.toContain(SENTINEL);
+  });
+
+  it("does not surface a plain Error's message", () => {
+    const resolved = resolveUnlockError(new Error(SENTINEL), msgs);
+    expect(resolved).toEqual({ kind: "message", message: "fallback" });
+    expect(JSON.stringify(resolved)).not.toContain(SENTINEL);
   });
 });

@@ -37,8 +37,9 @@ import { toast } from "sonner";
 import { apiPath } from "@/lib/constants";
 import { MCP_SCOPES, isAcceptableRedirectUri } from "@/lib/constants/auth/mcp";
 import { fetchApi } from "@/lib/url-helpers";
-import { readApiErrorBody, getApiErrorDetail } from "@/lib/http/read-api-error-body";
+import { readApiErrorBody, getApiErrorDetail, parseJsonBodyOnce } from "@/lib/http/read-api-error-body";
 import { formatDateTime } from "@/lib/format/format-datetime";
+import { parseLines } from "@/lib/format/parse-lines";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
@@ -67,6 +68,17 @@ interface McpClient {
 interface NewClientCredentials {
   clientId: string;
   clientSecret: string;
+}
+
+/** The credentials in a create response (`{ client: {...} }`), or null when they are not there. */
+function readNewCredentials(data: unknown): NewClientCredentials | null {
+  if (typeof data !== "object" || data === null) return null;
+  const created: unknown = "client" in data ? data.client : data;
+  if (typeof created !== "object" || created === null) return null;
+  if (!("clientId" in created) || !("clientSecret" in created)) return null;
+  const { clientId, clientSecret } = created;
+  if (typeof clientId !== "string" || typeof clientSecret !== "string" || clientSecret === "") return null;
+  return { clientId, clientSecret };
 }
 
 interface ValidationTreeNode {
@@ -116,6 +128,8 @@ export function McpClientCard() {
   const [createUriError, setCreateUriError] = useState("");
   const [createScopeError, setCreateScopeError] = useState("");
   const [newCredentials, setNewCredentials] = useState<NewClientCredentials | null>(null);
+  // The client was registered but its one-time secret could not be read.
+  const [credentialsUnavailable, setCredentialsUnavailable] = useState(false);
   // Inline step-up reauth — create/edit/delete are all server-side
   // step-up-gated. The retry arg (owned by the hook) records which mutation
   // was in flight so the post-reauth retry replays the same one.
@@ -170,13 +184,7 @@ export function McpClientCard() {
     fetchClients();
   }, [fetchClients]);
 
-  const parseUris = (raw: string): string[] =>
-    raw
-      .split("\n")
-      .map((u) => u.trim())
-      .filter(Boolean);
-
-  const createUris = parseUris(createRedirectUris);
+  const createUris = parseLines(createRedirectUris);
   const createFormReady =
     !!createName.trim() &&
     createUris.length > 0 &&
@@ -198,7 +206,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
       setCreateNameError(t("mcpNameRequired"));
       valid = false;
     }
-    const uris = parseUris(createRedirectUris);
+    const uris = parseLines(createRedirectUris);
     if (uris.length === 0) {
       setCreateUriError(t("mcpRedirectUriRequired"));
       valid = false;
@@ -255,14 +263,13 @@ const toastUpdateApiError = (errorCode: unknown) => {
         }
         return;
       }
-      const data = await res.json();
-      const created = data.client ?? data;
-      setNewCredentials({
-        clientId: created.clientId,
-        clientSecret: created.clientSecret,
-      });
+      // The client exists from here on: nothing below may be reported as a
+      // failed registration.
       toast.success(t("mcpCreated"));
       fetchClients();
+      const credentials = readNewCredentials(await parseJsonBodyOnce(res));
+      if (credentials) setNewCredentials(credentials);
+      else setCredentialsUnavailable(true);
     } catch {
       toast.error(t("mcpCreateFailed"));
     } finally {
@@ -297,7 +304,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
       setEditNameError(t("mcpNameRequired"));
       valid = false;
     }
-    const uris = parseUris(editRedirectUris);
+    const uris = parseLines(editRedirectUris);
     if (uris.length > 0 && !validateRedirectUris(uris)) {
       setEditUriError(t("mcpRedirectUriInvalid"));
       valid = false;
@@ -424,6 +431,7 @@ const toastUpdateApiError = (errorCode: unknown) => {
     setCreateUriError("");
     setCreateScopeError("");
     setNewCredentials(null);
+    setCredentialsUnavailable(false);
   };
 
   const renderClientItem = (client: McpClient) => (
@@ -621,6 +629,13 @@ const toastUpdateApiError = (errorCode: unknown) => {
               <p className="text-xs text-amber-600 dark:text-amber-400 font-medium">
                 {t("mcpClientSecretWarning")}
               </p>
+              <Button variant="outline" size="sm" onClick={closeCreateDialog}>
+                OK
+              </Button>
+            </div>
+          ) : credentialsUnavailable ? (
+            <div className="space-y-4 py-2">
+              <p role="alert" className="text-sm">{t("mcpCreatedSecretUnavailable")}</p>
               <Button variant="outline" size="sm" onClick={closeCreateDialog}>
                 OK
               </Button>

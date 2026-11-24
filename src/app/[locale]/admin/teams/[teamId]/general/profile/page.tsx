@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, use } from "react";
+import { use } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -11,22 +11,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { CopyButton } from "@/components/passwords/shared/copy-button";
 import { Link } from "@/i18n/navigation";
 import { Loader2, User } from "lucide-react";
-import { toast } from "sonner";
-import { TEAM_ROLE, apiPath } from "@/lib/constants";
-import { fetchApi } from "@/lib/url-helpers";
-import { notifyTeamDataChanged } from "@/lib/events";
 import { NAME_MAX_LENGTH, DESCRIPTION_MAX_LENGTH } from "@/lib/validations";
-import { useFormDirty } from "@/hooks/form/use-form-dirty";
-import { useBeforeUnloadGuard } from "@/hooks/form/use-before-unload-guard";
+import { useTeamProfileForm } from "@/hooks/team/use-team-profile-form";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
-
-interface TeamInfo {
-  id: string;
-  name: string;
-  slug: string;
-  description: string | null;
-  role: string;
-}
 
 export default function TeamGeneralProfilePage({
   params,
@@ -36,75 +23,18 @@ export default function TeamGeneralProfilePage({
   const { teamId } = use(params);
   const t = useTranslations("Team");
   const tCommon = useTranslations("Common");
-
-  const [team, setTeam] = useState<TeamInfo | null>(null);
-  const [loadError, setLoadError] = useState(false);
-  const [prevTeamId, setPrevTeamId] = useState(teamId);
-  if (teamId !== prevTeamId) {
-    setPrevTeamId(teamId);
-    setTeam(null);
-    setLoadError(false);
-  }
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [initialGeneral, setInitialGeneral] = useState<Record<string, unknown> | null>(null);
-
-  const currentGeneral = useMemo(() => ({ name, description }), [name, description]);
-  const hasChanges = useFormDirty(currentGeneral, initialGeneral);
-  useBeforeUnloadGuard(hasChanges);
-
-  const fetchTeam = () => {
-    void (async () => {
-      try {
-        const res = await fetchApi(apiPath.teamById(teamId));
-        if (!res.ok) throw new Error("Forbidden");
-        const d = await res.json();
-        const desc = d.description ?? "";
-        setTeam(d);
-        setName(d.name);
-        setDescription(desc);
-        setInitialGeneral({ name: d.name, description: desc });
-        setLoadError(false);
-      } catch {
-        setTeam(null);
-        setLoadError(true);
-      }
-    })();
-  };
-
-  useEffect(() => {
-    fetchTeam();
-  }, [teamId]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const isOwner = team?.role === TEAM_ROLE.OWNER;
-  const isAdmin = team?.role === TEAM_ROLE.ADMIN || isOwner;
-
-  const handleUpdateTeam = async () => {
-    if (!name.trim()) return;
-    setSaving(true);
-    try {
-      const res = await fetchApi(apiPath.teamById(teamId), {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), description: description.trim() }),
-      });
-      if (res.status === 400) {
-        toast.error(t("validationError"));
-        setSaving(false);
-        return;
-      }
-      if (!res.ok) throw new Error("Failed");
-      toast.success(t("updated"));
-      setInitialGeneral({ ...currentGeneral });
-      notifyTeamDataChanged();
-      fetchTeam();
-    } catch {
-      toast.error(t("updateFailed"));
-    } finally {
-      setSaving(false);
-    }
-  };
+  const {
+    team,
+    loadError,
+    isAdmin,
+    name,
+    setName,
+    description,
+    setDescription,
+    saving,
+    hasChanges,
+    handleUpdateTeam,
+  } = useTeamProfileForm(teamId);
 
   if (!team) {
     if (loadError) {

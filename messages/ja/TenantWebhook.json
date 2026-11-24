@@ -9,6 +9,7 @@
   "secret": "署名シークレット",
   "secretCopied": "シークレットをコピーしました。安全に保管してください。再表示はできません。",
   "created": "Webhook を作成しました",
+  "createdSecretUnavailable": "Webhook は作成されましたが、署名シークレットを表示できませんでした。この Webhook を削除して、もう一度作成してください。",
   "deleted": "Webhook を削除しました",
   "deleteConfirm": "この Webhook を削除しますか？",
   "noWebhooks": "Webhook が設定されていません",

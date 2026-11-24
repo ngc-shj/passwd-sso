@@ -28,6 +28,7 @@ async function handleGET() {
       },
       select: {
         id: true,
+        ownerId: true,
         granteeId: true,
         granteePublicKey: true,
         keyAlgorithm: true,

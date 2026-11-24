@@ -12,6 +12,7 @@
   "create": "リンクを作成",
   "createSuccess": "共有リンクを作成しました",
   "createError": "共有リンクの作成に失敗しました",
+  "createdLinkUnavailable": "共有リンクは作成されましたが、表示できませんでした。下の一覧からこのリンクを取り消して、新しく作成してください。",
   "createAnother": "別のリンクを作成",
   "shareUrl": "共有URL",
   "existingLinks": "既存のリンク",
@@ -110,6 +111,7 @@
   "sendDropzone": "ファイルをドロップまたはクリック",
   "sendMaxFileSize": "最大 10 MB",
   "sendCreateSuccess": "Sendを作成しました",
+  "sendCreatedLinkUnavailable": "Sendは作成されましたが、リンクを表示できませんでした。共有ページでこのSendを取り消して、新しく作成してください。",
   "newSend": "新規Send",
   "newSendDesc": "テキストまたはファイルを一時リンクで安全に送信します。",
   "sendEncryptionNotice": "Sendはサーバー上で暗号化されて保存・転送されます。保管庫内のエントリーで使用されるエンドツーエンド暗号化とは異なります。",
@@ -143,5 +145,7 @@
   "unlock": "ロック解除",
   "wrongPassword": "パスワードが正しくありません。もう一度お試しください。",
   "tooManyAttempts": "試行回数が多すぎます。しばらく待ってから再度お試しください。",
+  "linkUnavailable": "この共有リンクは利用できなくなりました。",
+  "verifyRetryLater": "現在パスワードを確認できません。しばらくしてから再度お試しください。",
   "contentLoadError": "コンテンツの読み込みに失敗しました。もう一度お試しください。"
 }

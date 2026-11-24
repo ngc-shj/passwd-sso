@@ -118,7 +118,7 @@ describe("PasswordEditDialogLoader", () => {
     expect(screen.getByTestId("attachments-count")).toHaveTextContent("1");
   });
 
-  it("shows an error when decrypted payload is invalid JSON", async () => {
+  it("shows the translated load error, never the plaintext a JSON SyntaxError quotes", async () => {
     mockFetch.mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -128,7 +128,7 @@ describe("PasswordEditDialogLoader", () => {
         tagIds: [],
       }),
     });
-    mockDecryptData.mockResolvedValue("{invalid json");
+    mockDecryptData.mockResolvedValue("hunter2-plaintext is not json");
 
     render(
       <PasswordEditDialogLoader
@@ -139,10 +139,24 @@ describe("PasswordEditDialogLoader", () => {
       />,
     );
 
-    await waitFor(() => {
-      expect(screen.getByText(/Unexpected token|Expected property name/i)).toBeInTheDocument();
-    });
-
+    expect(await screen.findByText("loadError")).toBeInTheDocument();
+    expect(screen.queryByText(/hunter2-plaintext/)).not.toBeInTheDocument();
     expect(screen.queryByTestId("edit-dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows notFound when the entry fetch is refused", async () => {
+    mockFetch.mockResolvedValue({ ok: false, json: async () => ({}) });
+
+    render(
+      <PasswordEditDialogLoader
+        id="entry-1"
+        open={true}
+        onOpenChange={vi.fn()}
+        onSaved={vi.fn()}
+      />,
+    );
+
+    expect(await screen.findByText("notFound")).toBeInTheDocument();
+    expect(mockDecryptData).not.toHaveBeenCalled();
   });
 });

@@ -33,7 +33,7 @@ Compare passwd-sso with major password managers (1Password, Bitwarden, LastPass,
 - Rate limiting (Redis + in-memory fallback)
 - CSP + nonce + security headers (HSTS, X-Frame-Options, etc.)
 - Passphrase verifier (HMAC-based)
-- Clipboard auto-clear (30 sec, Web UI)
+- Clipboard clear attempt (30 sec, Web UI; effective on Chromium only)
 - Master-password reprompt (`requireReprompt`) for view/copy/edit
 - Passkey vault unlock (WebAuthn PRF-based passwordless unlock)
 - Travel Mode (hide sensitive entries at border crossings)
@@ -125,7 +125,7 @@ Legend: 1P=1Password, BW=Bitwarden, LP=LastPass, DL=Dashlane, KP=KeePassXC, PP=P
 
 #### ~~S-1 Clipboard auto-clear~~ — Implemented (2026-02-20)
 
-Implemented as 30-second auto-clear (`navigator.clipboard.writeText("")`) in `CopyButton` (Web UI).
+Implemented as a 30-second clear attempt in `copySecretToClipboard` (`src/lib/clipboard/copy-secret.ts`, used by `CopyButton`), with one retry when the tab regains focus. It only takes effect on Chromium: Firefox and Safari require a user gesture for every clipboard write, so the value stays until overwritten.
 
 #### ~~S-2 Master-password reprompt~~ — Implemented (2026-02-18)
 

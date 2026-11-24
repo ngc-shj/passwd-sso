@@ -227,100 +227,33 @@ jobs:
       - name: Generate Prisma Client
         run: npx prisma generate
 
-      # Round 4 T23 fix: use `migrate deploy` (idempotent, non-interactive) —
-      # NOT `migrate dev` which is dev-only and may prompt on drift.
-      # Matches precedent at ci.yml:270,337,423.
-      - name: Apply database migrations
-        run: npx prisma migrate deploy
-
-      # The part of the migrated database that Prisma models (tables, columns,
-      # defaults, indexes, foreign keys, enums) must match schema.prisma.
-      # Otherwise `prisma migrate dev` asks every developer for a new
-      # migration. The prev_hash bytea default once did this: Prisma reads it
-      # back in a different spelling, and eight migrations re-issued one no-op
-      # ALTER. The step also catches a schema edit committed without its
-      # migration. RLS policies, grants, functions, CHECK constraints and
-      # partial indexes are outside what migrate diff compares. Run the same
-      # check locally with `npm run db:check-drift`.
-      - name: Check schema.prisma matches the migrated database
-        run: npm run db:check-drift
-
-      # GitHub Actions service containers do not mount initdb scripts, so the
-      # `passwd_app` role (created by infra/postgres/initdb/02-create-app-role.sql
-      # in dev) does not exist here. The `passwd_outbox_worker` role is created
-      # by migration 20260412100001 but without a password. Bootstrap both
-      # roles so the integration tests' role-specific connection strings
-      # (helpers.ts:getConnectionString) can authenticate.
+      # Roles are cluster-wide, so they are created here, once, before any
+      # database is migrated — the order RDS production uses
+      # (bootstrap-rds-roles.mjs, then `prisma migrate deploy`). GitHub Actions
+      # service containers do not mount initdb scripts, and the migrations
+      # create the worker roles without a password and never create passwd_app.
+      # The full convergent run also applies its per-database privileges to
+      # passwd_test, which no test uses: the suite runs on a database the
+      # runner creates (next steps).
       #
-      # Round 4 S22: passwords below are CI-only ephemeral credentials
+      # Round 4 S22: passwords are the job-level CI-only ephemeral credentials
       # (service container is destroyed per run; port 5432 binds to runner
-      # localhost only). DO NOT reuse outside this CI runner. Values match
-      # the dev fallback constants in 02-create-app-role.sql so the tests'
-      # base→role substitution in helpers.ts works without additional env
-      # vars. Tests still run as NOSUPERUSER/NOBYPASSRLS roles, so RLS
-      # enforcement assertions remain valid.
-      - name: Bootstrap application DB roles
+      # localhost only). DO NOT reuse outside this CI runner. Tests still run as
+      # NOSUPERUSER/NOBYPASSRLS roles, so RLS enforcement assertions remain
+      # valid.
+      - name: Create the application DB roles
+        run: node scripts/bootstrap-rds-roles.mjs
         env:
-          PGPASSWORD: postgres
-        run: |
-          psql -h localhost -U postgres -d passwd_test <<EOF
-          -- Defense-in-depth: revoke default PUBLIC CREATE on the public schema
-          -- (mirrors infra/postgres/initdb/02-create-app-role.sql:24).
-          REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+          MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
 
-          -- passwd_outbox_worker: created by migration without password; set it now.
-          ALTER ROLE passwd_outbox_worker WITH LOGIN PASSWORD '${PASSWD_OUTBOX_WORKER_PASSWORD}';
-
-          -- passwd_dcr_cleanup_worker: retired by migration 20261023010000 (NOLOGIN,
-          -- no password, no grants); scripts/audit-db-grants.mjs asserts that, so it
-          -- is deliberately NOT given a login here.
-
-          -- passwd_retention_gc_worker: created by migration without password; set it now.
-          ALTER ROLE passwd_retention_gc_worker WITH LOGIN PASSWORD '${PASSWD_RETENTION_GC_WORKER_PASSWORD}';
-
-          -- passwd_anchor_publisher: created by migration without password; set it now.
-          ALTER ROLE passwd_anchor_publisher WITH LOGIN PASSWORD '${PASSWD_ANCHOR_PUBLISHER_PASSWORD}';
-
-          -- passwd_audit_chain_verifier: created by migration without password; set it now.
-          ALTER ROLE passwd_audit_chain_verifier WITH LOGIN PASSWORD '${PASSWD_AUDIT_CHAIN_VERIFIER_PASSWORD}';
-
-          -- passwd_app: not created by any migration (lives in initdb only).
-          -- Replicate the role + grants the integration tests rely on.
-          DO \$\$ BEGIN
-            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'passwd_app') THEN
-              CREATE ROLE passwd_app WITH LOGIN NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE PASSWORD '${PASSWD_APP_PASSWORD}';
-            END IF;
-          END \$\$;
-          GRANT CONNECT ON DATABASE passwd_test TO passwd_app;
-          GRANT USAGE ON SCHEMA public TO passwd_app;
-          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO passwd_app;
-          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO passwd_app;
-          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO passwd_app;
-          ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO passwd_app;
-          -- The migrations that create these routines ran before passwd_app
-          -- existed here, so their IF EXISTS grants skipped it. The RLS policies
-          -- call the rls_bypass_* functions for every reading role; the two
-          -- SECURITY DEFINER audit routines are the app role's only write path
-          -- to audit_logs (same set as bootstrap-rds-roles.mjs ROUTINE_EXECUTE).
-          GRANT EXECUTE ON FUNCTION public.rls_bypass_enforced() TO passwd_app;
-          GRANT EXECUTE ON FUNCTION public.rls_bypass_admits(text) TO passwd_app;
-          GRANT EXECUTE ON FUNCTION public.audit_log_purge(uuid, timestamptz) TO passwd_app;
-          GRANT EXECUTE ON PROCEDURE public.audit_log_tenant_migrate(uuid, uuid, uuid) TO passwd_app;
-          GRANT EXECUTE ON FUNCTION public.share_creator_admitted(uuid) TO passwd_app;
-          EOF
-
-      # The GRANT above is table-blind and runs AFTER `prisma migrate deploy`, so
-      # it re-grants exactly what 20260522000200_audit_log_revoke_via_definer
-      # revoked on audit_logs / audit_chain_anchors (C13 / OWASP A04-2). Left
-      # alone, every integration run tested a database whose audit tables the app
-      # role can rewrite — and the assertions that would have caught it were the
-      # ones failing.
-      #
-      # Applied from the single declaration rather than spelled again here: a
-      # fourth copy of the policy is how the first one came to be undone. See
-      # scripts/checks/app-role-denied-privileges.json.
-      - name: Re-apply the must-never-be-granted policy (post-migration)
-        run: node scripts/bootstrap-rds-roles.mjs --denied-only
+      # Brings the cluster to the state a developer's has: roles created, then
+      # migrated once. The migrations' role statements (e.g. the verifier's
+      # CONNECTION LIMIT) change cluster-wide state on their first run only;
+      # after this step the runner's check that preparing its scratch database
+      # leaves every existing role unchanged holds here as it does locally, so
+      # CI runs that check rather than switching it off.
+      - name: Migrate the cluster's default database once
+        run: npx prisma migrate deploy
         env:
           MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
 
@@ -351,8 +284,19 @@ jobs:
           echo "MinIO did not become ready within 30s" >&2
           exit 1
 
+      # scripts/run-integration-tests.mjs, the same runner local runs use:
+      # creates an empty scratch database on this cluster, applies the
+      # per-database half of bootstrap-rds-roles.mjs, `prisma migrate deploy`,
+      # `bootstrap-rds-roles.mjs --denied-only` (the must-never-be-granted
+      # policy, re-applied post-migration: scripts/checks/app-role-denied-privileges.json),
+      # `npm run db:check-drift` (schema.prisma must match the migrated database;
+      # RLS policies, grants, functions, CHECK constraints and partial indexes
+      # are outside what migrate diff compares), then the suite, then drops it.
       - name: Run integration tests
         env:
+          # The runner points these at its scratch database; passwd_test here
+          # supplies only the host, port and credentials.
+          #
           # The superuser, for the test harness: helpers.ts seeds and cleans up
           # through MIGRATION_DATABASE_URL.
           MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
@@ -367,6 +311,31 @@ jobs:
           # next step reads it. A fresh path per run: the harness only appends.
           RLS_GRANT_EVIDENCE_FILE: ${{ runner.temp }}/rls-grant-evidence.jsonl
         run: npm run test:integration
+
+      # setup.ts's refusal, reached the way a hand-started run reaches it: the
+      # harness without the runner, on passwd_test (a database the runner did
+      # not create). It must exit nonzero with the refusal; the scratch-named
+      # unmarked case and the Redis case run inside the suite
+      # (harness-scratch-refusal.integration.test.ts).
+      - name: Check the harness refuses a database the runner did not create
+        env:
+          MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
+          DATABASE_URL: postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_test
+          INTEGRATION_REFUSAL_PROBE_CHILD: "1"
+        run: |
+          set +e
+          out=$(npx vitest run --config vitest.integration.config.ts src/__tests__/db-integration/harness-scratch-refusal.integration.test.ts 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$out" | tail -n 30
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the integration harness ran on passwd_test instead of refusing it"
+            exit 1
+          fi
+          if ! printf '%s\n' "$out" | grep -qF 'Refusing to run integration tests: database "passwd_test" is not a scratch integration database'; then
+            echo "::error::the integration harness failed on passwd_test without its scratch refusal"
+            exit 1
+          fi
 
       # Runs only when the suite passed: the file then describes a run where any
       # bypass report or refusal failed a test.

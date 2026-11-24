@@ -23,6 +23,16 @@ export class EmergencyAccessPage {
       .getByRole("button", { name: /Create|作成/i });
   }
 
+  get doneButton() {
+    return this.page
+      .locator("[role='dialog']")
+      .getByRole("button", { name: /^(Done|完了)$/ });
+  }
+
+  get inviteUrlInput() {
+    return this.page.locator("#grant-invite-url");
+  }
+
   get grantList() {
     // Both "Trusted Contacts" and "Trusted By Others" sections render GrantCard components
     return this.page.locator("[data-slot='card']");
@@ -66,6 +76,10 @@ export class EmergencyAccessPage {
       .click();
 
     await this.createGrantButton.click();
+    // The dialog stays open on the created state, showing the invite link
+    // until the user dismisses it.
+    await this.inviteUrlInput.waitFor({ timeout: 10_000 });
+    await this.doneButton.click();
     await this.page.locator("[role='dialog']").waitFor({
       state: "hidden",
       timeout: 10_000,

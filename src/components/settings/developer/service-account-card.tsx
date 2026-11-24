@@ -44,7 +44,8 @@ import { MAX_SA_TOKEN_EXPIRY_DAYS, SA_TOKEN_SCOPES } from "@/lib/constants/auth/
 import { formatDateTime } from "@/lib/format/format-datetime";
 import { ScopeBadges } from "@/components/settings/developer/scope-badges";
 import { fetchApi } from "@/lib/url-helpers";
-import { readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
+import { readNonEmptyStringField } from "@/lib/http/read-body-field";
 import { tokenMintApiErrorKey } from "@/lib/http/token-mint-error";
 import { useFormDirty } from "@/hooks/form/use-form-dirty";
 import { FormDirtyBadge } from "@/components/settings/account/form-dirty-badge";
@@ -125,6 +126,8 @@ export function ServiceAccountCard() {
   const [tokenNameError, setTokenNameError] = useState("");
   const [tokenScopeError, setTokenScopeError] = useState("");
   const [newTokenSecret, setNewTokenSecret] = useState<string | null>(null);
+  // The token was created but its one-time secret could not be read.
+  const [tokenSecretUnavailable, setTokenSecretUnavailable] = useState(false);
   // Inline step-up reauth — SA edit/delete and token create/revoke are all
   // server-side step-up-gated. The retry arg (owned by the hook) records
   // which mutation was in flight so the post-reauth retry replays the same one.
@@ -196,6 +199,17 @@ export function ServiceAccountCard() {
       }
       return next;
     });
+  };
+
+  // Cancel calls this too: a controlled open change does not fire
+  // onOpenChange, so a direct setter would reopen with the old input.
+  const handleCreateOpenChange = (open: boolean) => {
+    setCreateOpen(open);
+    if (!open) {
+      setCreateName("");
+      setCreateDescription("");
+      setCreateNameError("");
+    }
   };
 
   const handleCreate = async () => {
@@ -325,6 +339,7 @@ export function ServiceAccountCard() {
     setTokenNameError("");
     setTokenScopeError("");
     setNewTokenSecret(null);
+    setTokenSecretUnavailable(false);
     setTokenCreateOpen(true);
   };
 
@@ -387,10 +402,13 @@ export function ServiceAccountCard() {
         }
         return;
       }
-      const data = await res.json();
-      setNewTokenSecret(data.token ?? null);
+      // The token exists from here on: nothing below may be reported as a
+      // failed creation.
       toast.success(t("tokenCreated"));
       fetchTokens(tokenForSaId);
+      const token = readNonEmptyStringField(await parseJsonBodyOnce(res), "token");
+      if (token) setNewTokenSecret(token);
+      else setTokenSecretUnavailable(true);
     } catch {
       toast.error(t("tokenCreateFailed"));
     } finally {
@@ -829,14 +847,7 @@ export function ServiceAccountCard() {
       {/* Create SA dialog */}
       <Dialog
         open={createOpen}
-        onOpenChange={(open) => {
-          setCreateOpen(open);
-          if (!open) {
-            setCreateName("");
-            setCreateDescription("");
-            setCreateNameError("");
-          }
-        }}
+        onOpenChange={handleCreateOpenChange}
       >
         <DialogContent>
           <DialogHeader>
@@ -868,7 +879,7 @@ export function ServiceAccountCard() {
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
+            <Button variant="outline" onClick={() => handleCreateOpenChange(false)}>
               {tCommon("cancel")}
             </Button>
             <Button onClick={handleCreate} disabled={creating || !createName.trim()}>
@@ -972,6 +983,7 @@ export function ServiceAccountCard() {
             setTokenNameError("");
             setTokenScopeError("");
             setNewTokenSecret(null);
+            setTokenSecretUnavailable(false);
           }
         }}
       >
@@ -1000,6 +1012,20 @@ export function ServiceAccountCard() {
                 onClick={() => {
                   setTokenCreateOpen(false);
                   setNewTokenSecret(null);
+                }}
+              >
+                OK
+              </Button>
+            </div>
+          ) : tokenSecretUnavailable ? (
+            <div className="space-y-3 py-2">
+              <p role="alert" className="text-sm">{t("tokenCreatedSecretUnavailable")}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setTokenCreateOpen(false);
+                  setTokenSecretUnavailable(false);
                 }}
               >
                 OK

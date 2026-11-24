@@ -5,7 +5,7 @@ import { useTranslations } from "next-intl";
 import { toast } from "sonner";
 import { reauthenticateWithPasskey } from "@/lib/auth/webauthn/passkey-reauth-client";
 import { canUsePasskeyRecovery } from "@/lib/auth/webauthn/can-use-passkey-recovery";
-import { API_ERROR } from "@/lib/http/api-error-codes";
+import { passkeyReauthDeadEndKey } from "@/lib/auth/webauthn/passkey-reauth-dead-end";
 
 interface InlineReauthDialogProps {
   open: boolean;
@@ -97,19 +97,13 @@ export function useInlineReauth<T = void>(
     try {
       const result = await reauthenticateWithPasskey();
       if (!result.ok) {
-        // Neither code can ever be resolved by retrying the ceremony (no
-        // binding, the bound credential is gone, or the wrong key was
-        // presented) — staying in this dialog would strand the user, so
-        // route them to a fresh sign-in instead.
-        if (
-          result.error === API_ERROR.PASSKEY_REAUTH_UNAVAILABLE ||
-          result.error === API_ERROR.PASSKEY_REAUTH_CREDENTIAL_MISMATCH
-        ) {
-          toast.error(
-            result.error === API_ERROR.PASSKEY_REAUTH_UNAVAILABLE
-              ? tAuth("reauthUnavailable")
-              : tAuth("reauthCredentialMismatch"),
-          );
+        // None of these can ever be resolved by retrying the ceremony (the
+        // session expired, has no binding, the bound credential is gone, or
+        // the wrong key was presented) — staying in this dialog would strand
+        // the user, so route them to a fresh sign-in instead.
+        const deadEndKey = passkeyReauthDeadEndKey(result.error);
+        if (deadEndKey) {
+          toast.error(tAuth(deadEndKey));
           setReauthOpen(false);
           setRecentSessionOpen(true);
           return;

@@ -186,4 +186,69 @@ describe("useEntryActions", () => {
     const pw = await callbacks.fetchPassword();
     expect(pw).toBe("s3cr3t");
   });
+
+  it.each([
+    ["onCopyContent", "note content"],
+    ["onCopyCardNumber", "4111111111111111"],
+    ["onCopyCvv", "123"],
+    ["onCopyCredentialId", "cred-abc"],
+    ["onCopyAccountNumber", "00012345"],
+    ["onCopyLicenseKey", "XXXX-YYYY"],
+    ["onCopyFingerprint", "ab:cd:ef"],
+    ["onCopyPublicKey", "ssh-rsa AAAA..."],
+    ["onCopyIdNumber", "ID123"],
+  ] as const)("%s copies its own field from the decrypted detail", async (callback, expected) => {
+    const { result } = renderHook(() => useEntryActions(getDetailFor));
+    result.current.buildCallbacks(minimalEntry)[callback]();
+    await flush();
+
+    expect(writeText).toHaveBeenCalledWith(expected);
+    expect(toastSuccess).toHaveBeenCalledWith("CopyButton.copied");
+  });
+
+  it("each field fetcher resolves the field it names", async () => {
+    const { result } = renderHook(() => useEntryActions(getDetailFor));
+    const callbacks = result.current.buildCallbacks(minimalEntry);
+
+    await expect(callbacks.fetchContent()).resolves.toBe("note content");
+    await expect(callbacks.fetchCardField("cvv")).resolves.toBe("123");
+    await expect(callbacks.fetchIdentityField("idNumber")).resolves.toBe("ID123");
+    await expect(callbacks.fetchPasskeyField("username")).resolves.toBe("user@example.com");
+    await expect(callbacks.fetchBankField("routingNumber")).resolves.toBe("021000021");
+    await expect(callbacks.fetchLicenseField("licenseKey")).resolves.toBe("XXXX-YYYY");
+    await expect(callbacks.fetchSshField("publicKey")).resolves.toBe("ssh-rsa AAAA...");
+  });
+
+  it("a missing field resolves to an empty string and is reported as empty on copy", async () => {
+    const sparse = { ...decryptedDetail, password: undefined, cvv: undefined } as unknown as InlineDetailData;
+    const { result } = renderHook(() => useEntryActions(() => async () => sparse));
+    const callbacks = result.current.buildCallbacks(minimalEntry);
+
+    await expect(callbacks.fetchPassword()).resolves.toBe("");
+    callbacks.onCopyCvv();
+    await flush();
+    expect(writeText).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith("CopyButton.copyEmpty");
+  });
+
+  it("onOpenUrl opens nothing when the entry has no url", async () => {
+    const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null);
+    const noUrl = { ...decryptedDetail, url: null } as unknown as InlineDetailData;
+    const { result } = renderHook(() => useEntryActions(() => async () => noUrl));
+
+    await result.current.buildCallbacks(minimalEntry).onOpenUrl();
+
+    expect(windowOpen).not.toHaveBeenCalled();
+    expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("onOpenUrl shows networkError when the detail cannot be fetched", async () => {
+    const windowOpen = vi.spyOn(window, "open").mockImplementation(() => null);
+    const { result } = renderHook(() => useEntryActions(lockedGetDetailFor));
+
+    await result.current.buildCallbacks(minimalEntry).onOpenUrl();
+
+    expect(windowOpen).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith("PasswordCard.networkError");
+  });
 });

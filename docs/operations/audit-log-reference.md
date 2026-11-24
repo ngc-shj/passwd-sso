@@ -114,6 +114,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 | `RECOVERY_KEY_CREATED` | PERSONAL | — | `{ keyVersion }` | — (export-only) |
 | `RECOVERY_KEY_REGENERATED` | PERSONAL | — | `{ keyVersion }` | — (export-only) |
 | `RECOVERY_PASSPHRASE_RESET` | PERSONAL | — | `{ keyVersion, recoveryKeyRegenerated, lockoutReset }` | — (export-only) |
+| `VAULT_PASSPHRASE_CHANGE` | PERSONAL | — | committed: `{ phase: "committed" }`; completed: `{ phase: "completed", invalidationFailed, invalidatedSessions, invalidatedExtensionTokens, invalidatedApiKeys, invalidatedMcpAccessTokens, invalidatedMcpRefreshTokens, invalidatedDelegationSessions, invalidatedOperatorTokens, cacheTombstoneFailures }` (counts are null when invalidation failed) | — (export-only) |
 | `VAULT_RESET_EXECUTED` | PERSONAL | — | `{ deletedEntries, deletedAttachments }` | deletedEntries |
 
 **Notes:**
@@ -412,7 +413,7 @@ These user-meaningful fields should be rendered in `getTargetLabel()` with i18n 
 
 | Group | Actions |
 |-------|---------|
-| `group:auth` | AUTH_LOGIN, AUTH_LOGOUT, VAULT_UNLOCK_FAILED, VAULT_LOCKOUT_TRIGGERED, RECOVERY_KEY_CREATED, RECOVERY_KEY_REGENERATED, RECOVERY_PASSPHRASE_RESET, VAULT_SETUP, VAULT_RESET_EXECUTED, SESSION_REVOKE, SESSION_REVOKE_ALL, SESSION_EVICTED, WATCHTOWER_ALERT_SENT, ADMIN_VAULT_RESET_INITIATE, ADMIN_VAULT_RESET_EXECUTE, ADMIN_VAULT_RESET_REVOKE |
+| `group:auth` | AUTH_LOGIN, AUTH_LOGOUT, VAULT_UNLOCK_FAILED, VAULT_LOCKOUT_TRIGGERED, RECOVERY_KEY_CREATED, RECOVERY_KEY_REGENERATED, RECOVERY_PASSPHRASE_RESET, VAULT_PASSPHRASE_CHANGE, VAULT_SETUP, VAULT_RESET_EXECUTED, SESSION_REVOKE, SESSION_REVOKE_ALL, SESSION_EVICTED, WATCHTOWER_ALERT_SENT, ADMIN_VAULT_RESET_INITIATE, ADMIN_VAULT_RESET_EXECUTE, ADMIN_VAULT_RESET_REVOKE |
 | `group:entry` | ENTRY_CREATE, ENTRY_UPDATE, ENTRY_TRASH, ENTRY_PERMANENT_DELETE, ENTRY_RESTORE |
 | `group:bulk` | ENTRY_BULK_TRASH, ENTRY_EMPTY_TRASH, ENTRY_BULK_ARCHIVE, ENTRY_BULK_UNARCHIVE, ENTRY_BULK_RESTORE |
 | `group:transfer` | ENTRY_IMPORT, ENTRY_EXPORT |

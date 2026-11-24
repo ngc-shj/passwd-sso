@@ -32,7 +32,8 @@ vi.mock("@/components/ui/collapsible", () => ({
   CollapsibleTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-import { FolderTreeNode, CollapsibleSectionHeader, SectionLabel } from "./sidebar-shared";
+import { FolderTreeNode, TagTreeNode, CollapsibleSectionHeader, SectionLabel } from "./sidebar-shared";
+import type { SidebarTeamTagItem } from "@/hooks/sidebar/use-sidebar-data";
 
 describe("FolderTreeNode", () => {
   it("expands when active folder is a descendant", () => {
@@ -154,6 +155,157 @@ describe("FolderTreeNode", () => {
   });
 });
 
+describe("FolderTreeNode menu and counts", () => {
+  const folder = { id: "f1", name: "Work", parentId: null, sortOrder: 0, entryCount: 3 };
+
+  function renderFolder(props: Partial<React.ComponentProps<typeof FolderTreeNode>> = {}) {
+    return render(
+      <FolderTreeNode
+        folder={folder}
+        folders={[folder]}
+        activeFolderId={null}
+        depth={0}
+        linkHref={(id) => `/dashboard?folder=${id}`}
+        onNavigate={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        {...props}
+      />,
+    );
+  }
+
+  it("shows the entry count next to the folder menu", () => {
+    renderFolder();
+    expect(screen.getByRole("button", { name: "Work menu" })).toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
+  });
+
+  it("hides the menu but keeps the count when showMenu is false", () => {
+    renderFolder({ showMenu: false });
+    expect(screen.queryByRole("button", { name: "Work menu" })).not.toBeInTheDocument();
+    expect(screen.getByText("3")).toBeInTheDocument();
+  });
+
+  it("renders neither menu nor count for an empty folder when showMenu is false", () => {
+    renderFolder({ showMenu: false, folder: { ...folder, entryCount: 0 } });
+    expect(screen.queryByRole("button", { name: "Work menu" })).not.toBeInTheDocument();
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
+  });
+
+  it("navigates through the folder link", () => {
+    const onNavigate = vi.fn();
+    renderFolder({ onNavigate });
+    const link = screen.getByRole("link", { name: /Work/ });
+    expect(link).toHaveAttribute("href", "/dashboard?folder=f1");
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("expands children without navigating", () => {
+    const onNavigate = vi.fn();
+    const child = { id: "f2", name: "Sub", parentId: "f1", sortOrder: 1, entryCount: 0 };
+    renderFolder({ folders: [folder, child], onNavigate });
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Work" }));
+
+    expect(screen.getByRole("link", { name: /Sub/ })).toBeInTheDocument();
+    expect(onNavigate).not.toHaveBeenCalled();
+  });
+
+  it("expands every ancestor of a deeply nested active folder", () => {
+    const mid = { id: "f2", name: "Mid", parentId: "f1", sortOrder: 1, entryCount: 0 };
+    const leaf = { id: "f3", name: "Leaf", parentId: "f2", sortOrder: 2, entryCount: 0 };
+    renderFolder({ folders: [folder, mid, leaf], activeFolderId: "f3" });
+
+    expect(screen.getByRole("link", { name: /Leaf/ })).toBeInTheDocument();
+  });
+});
+
+describe("TagTreeNode", () => {
+  const parent: SidebarTeamTagItem = { id: "t1", name: "Infra", color: "#ff0000", parentId: null, count: 2 };
+  const child: SidebarTeamTagItem = { id: "t2", name: "DB", color: null, parentId: "t1", count: 0 };
+  const grandchild: SidebarTeamTagItem = { id: "t3", name: "Replica", color: null, parentId: "t2", count: 0 };
+
+  function renderTag(props: Partial<React.ComponentProps<typeof TagTreeNode>> = {}) {
+    return render(
+      <TagTreeNode
+        tag={parent}
+        tags={[parent, child, grandchild]}
+        activeTagId={null}
+        depth={0}
+        linkHref={(id) => `/dashboard/teams/x?tag=${id}`}
+        showMenu
+        onNavigate={() => {}}
+        onEdit={() => {}}
+        onDelete={() => {}}
+        {...props}
+      />,
+    );
+  }
+
+  it("starts collapsed and toggles its children", () => {
+    renderTag();
+    expect(screen.queryByRole("link", { name: /DB/ })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Infra" }));
+    expect(screen.getByRole("link", { name: /DB/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Infra" }));
+    expect(screen.queryByRole("link", { name: /DB/ })).toBeNull();
+  });
+
+  it("expands every ancestor of a deeply nested active tag", () => {
+    renderTag({ activeTagId: "t3" });
+    expect(screen.getByRole("button", { name: "Collapse Infra" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("link", { name: /Replica/ })).toBeInTheDocument();
+  });
+
+  it("links to the tag and reports navigation", () => {
+    const onNavigate = vi.fn();
+    renderTag({ onNavigate });
+    const link = screen.getByRole("link", { name: /Infra/ });
+    expect(link).toHaveAttribute("href", "/dashboard/teams/x?tag=t1");
+    fireEvent.click(link);
+    expect(onNavigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("invokes edit and delete callbacks from the tag menu", () => {
+    const onEdit = vi.fn();
+    const onDelete = vi.fn();
+    renderTag({ tags: [parent], onEdit, onDelete });
+
+    fireEvent.click(screen.getByRole("button", { name: "edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "deleteTag" }));
+
+    expect(onEdit).toHaveBeenCalledWith(parent);
+    expect(onDelete).toHaveBeenCalledWith(parent);
+  });
+
+  it("shows the count without a menu when showMenu is false", () => {
+    renderTag({ tags: [parent], showMenu: false });
+    expect(screen.queryByRole("button", { name: "Infra menu" })).not.toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("shows the menu and count when showMenu is true", () => {
+    renderTag({ tags: [parent] });
+    expect(screen.getByRole("button", { name: "Infra menu" })).toBeInTheDocument();
+    expect(screen.getByText("2")).toBeInTheDocument();
+  });
+
+  it("renders nothing beside an unused tag when showMenu is false", () => {
+    const { container } = renderTag({ tag: child, tags: [child], showMenu: false });
+    expect(container.querySelector(".w-7")).toBeNull();
+  });
+
+  it("applies the tag color class and depth padding", () => {
+    renderTag({ tags: [parent], depth: 1 });
+    const link = screen.getByRole("link", { name: /Infra/ });
+    expect(link.querySelector(".tag-color-ff0000")).not.toBeNull();
+    expect(link.closest("div")).toHaveStyle({ paddingLeft: "12px" });
+  });
+});
+
 describe("sidebar shared headers", () => {
   it("renders collapsible header with aria-expanded", () => {
     render(<CollapsibleSectionHeader isOpen>{"section"}</CollapsibleSectionHeader>);
@@ -164,4 +316,10 @@ describe("sidebar shared headers", () => {
     render(<SectionLabel>{"label"}</SectionLabel>);
     expect(screen.getByText("label")).toBeInTheDocument();
   });
+
+  it("marks a closed collapsible header as not expanded", () => {
+    render(<CollapsibleSectionHeader isOpen={false}>{"section"}</CollapsibleSectionHeader>);
+    expect(screen.getByRole("button", { name: /section/ })).toHaveAttribute("aria-expanded", "false");
+  });
 });
+

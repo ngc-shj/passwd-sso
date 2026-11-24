@@ -137,6 +137,27 @@ describe("AcceptInvitePage", () => {
     });
   });
 
+  describe("an accepted invitation whose response body cannot be read", () => {
+    it("shows the invitation as accepted and points to the sidebar", async () => {
+      mockUseVault.mockReturnValue({ status: "UNLOCKED" });
+      mockFetchApi.mockResolvedValue({
+        ok: true,
+        status: 200,
+        json: () => Promise.reject(new SyntaxError("Unexpected end of JSON input")),
+      });
+
+      await act(async () => {
+        renderPage();
+      });
+
+      expect(await screen.findByText("acceptedOpenFromSidebar")).toBeInTheDocument();
+      expect(screen.getByText("accepted")).toBeInTheDocument();
+      expect(mockToast.success).toHaveBeenCalledWith("accepted");
+      expect(mockNotifyTeamDataChanged).toHaveBeenCalled();
+      expect(screen.queryByText("networkError")).not.toBeInTheDocument();
+    });
+  });
+
   describe("vault is NOT UNLOCKED", () => {
     it("shows vault required message and does NOT call fetchApi when vault is SETUP_REQUIRED", async () => {
       mockUseVault.mockReturnValue({ status: "SETUP_REQUIRED" });
