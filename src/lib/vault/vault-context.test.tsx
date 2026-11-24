@@ -1665,6 +1665,32 @@ describe("VaultProvider — session-driven status", () => {
     expect(result.current.status).toBe(VAULT_STATUS.SETUP_REQUIRED);
   });
 
+  // An unread body keeps the request loading in the browser (Chromium never
+  // reports it finished), so a dropped response must still release its body.
+  it.each([
+    ["superseded by a later request", true],
+    ["an error status", false],
+  ] as const)("releases the body of a status response it drops (%s)", async (_kind, superseded) => {
+    const { hold } = heldStatusEnv();
+    const held = { reached: deferred(), gate: deferred() };
+    const dropped = superseded
+      ? new Response(JSON.stringify({ setupRequired: false }), { status: 200 })
+      : new Response(JSON.stringify({ error: "INTERNAL_ERROR" }), { status: 500 });
+    hold.next = { reached: held.reached, respond: () => held.gate.promise.then(() => dropped) };
+    const { rerender } = renderHook(() => useVault(), { wrapper });
+    await act(async () => {
+      await held.reached.promise;
+    });
+    if (superseded) await recheckStatus(rerender);
+
+    held.gate.resolve();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    expect(dropped.bodyUsed).toBe(true);
+  });
+
   // Moving into unauthenticated moves the lock epoch whatever was held (an
   // update() refetch also passes through loading), so only the settle is pinned.
   it("settles a loading vault to LOCKED when the session resolves unauthenticated", async () => {

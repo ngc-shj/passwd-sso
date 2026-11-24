@@ -583,8 +583,12 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       const isLatest = () => request === statusRequestRef.current;
       try {
         const res = await fetchApi(API_PATH.VAULT_STATUS);
-        if (!isLatest()) return;
-        if (!res.ok) {
+        if (!isLatest() || !res.ok) {
+          // A body nobody reads keeps its request loading in Chromium until the
+          // Response is collected, and this effect re-runs on every session
+          // update, so most page loads supersede one check. Release it unread.
+          res.body?.cancel().catch(() => {});
+          if (!isLatest()) return;
           setVaultStatus((prev) => prev === VAULT_STATUS.UNLOCKED ? prev : VAULT_STATUS.LOCKED);
           return;
         }
