@@ -228,7 +228,13 @@ belongs to another user (another user signed in in another tab). An empty
 header names nobody and is refused the same way. `POST
 /api/emergency-access/[id]/confirm` also returns it, before the grant changes,
 when the body's `ownerId` is not the session user. Either way nothing was
-written.
+written. These are the only two emitters.
+
+`POST /api/mcp/authorize/consent` binds the same way but does not answer
+`SESSION_CHANGED`: its form is a native browser POST, which carries no header
+and would land on a raw JSON page. It echoes the page's user in
+`expected_user_id` instead, and a mismatch (or a missing value) is answered
+like a stale step-up — see §5.1.
 
 The gate decides on whose session the cookie is, as `/api/auth/session` names
 it — the same field `useSession` reports — not on whether the proxy accepts
@@ -404,6 +410,18 @@ Error responses are typically delivered as redirects with the `error` and
 `error_description` query parameters appended to the registered redirect URI
 (per RFC 6749 §4.1.2.1) — the JSON body shape is used only when the redirect
 URI itself cannot be resolved.
+
+`POST /api/mcp/authorize/consent` has one answer outside this list. When the
+session needs step-up, or the form's `expected_user_id` is missing or names a
+user other than the session's (another user signed in after the page was
+rendered), it answers `303` to the self-origin `GET /api/mcp/authorize` with
+the validated `client_id`, `redirect_uri` and the submitted `state`, `scope`
+and PKCE parameters, and writes nothing: no code, no DCR claim, no denial and
+no audit row. The authorize GET then re-runs sign-in and step-up and renders
+consent for whoever the session now belongs to, who decides for themselves.
+The bounce runs only after the parameters are validated (the client, its
+registered `redirect_uri`, and on Allow the PKCE challenge and scope); a
+request failing those checks keeps its `400` JSON answer.
 
 ### 5.2 Token + revoke endpoints (RFC 6749 §5.2; RFC 7009 §2.2)
 

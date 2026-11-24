@@ -707,15 +707,25 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     const setupVerdictsAtStart = setupVerdictCountRef.current;
     // Every write below is bound to the state the setup started under. Once
     // the vault was locked (page hide, unmount) or the session ended or
-    // switched to another user, nothing is sent, and a response writes
-    // nothing: the vault may exist on the server now, but this provider may
-    // serve another user, so the current session's status is asked again and
-    // decides. The setup throws VAULT_UNLOCK_INTERRUPTED (UNAUTHORIZED once
-    // the session has ended, which is asked nothing).
+    // switched to another user before the POST, nothing is sent; the current
+    // session's status is asked again and decides. The setup throws
+    // VAULT_UNLOCK_INTERRUPTED (UNAUTHORIZED once the session has ended, which
+    // is asked nothing).
     const refuseIfInterrupted = () => {
       if (!lockedSince(lockEpoch)) return;
       if (sessionStatusRef.current !== "unauthenticated") requestStatusCheck();
       throw installRefusedError();
+    };
+    // After the POST committed (201, or the vault already exists), only a
+    // session that ended or moved to another user refuses: this provider may
+    // now serve someone else. A same-user lock does not — the vault exists for
+    // this user — and the caller leaves it LOCKED instead of installing.
+    const movedRefusal = () => {
+      if (sessionStatusRef.current !== "unauthenticated") requestStatusCheck();
+      return installRefusedError();
+    };
+    const refuseIfSessionMoved = () => {
+      if (sessionMovedFrom(startUserId)) throw movedRefusal();
     };
     // Checked after the POST's response, before any write. A setupRequired
     // verdict applied while the POST was in flight cannot be ordered against
@@ -724,7 +734,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     // after the commit — and the setup writes only if the vault still exists
     // and no further verdict arrived meanwhile.
     const refuseIfStale = async () => {
-      refuseIfInterrupted();
+      refuseIfSessionMoved();
       if (setupVerdictCountRef.current === setupVerdictsAtStart) return;
       const verdictsAtAsk = setupVerdictCountRef.current;
       let exists = false;
@@ -737,7 +747,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       } catch {
         // Unanswered: the vault is not confirmed, so nothing is written.
       }
-      refuseIfInterrupted();
+      refuseIfSessionMoved();
       if (!exists || setupVerdictCountRef.current !== verdictsAtAsk) {
         requestStatusCheck();
         throw new VaultUnlockError(VAULT_UNLOCK_INTERRUPTED);
@@ -797,10 +807,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // for this user. Only a session that ended or moved to another user is
       // refused as an interruption, as this provider may now serve someone else.
       const outcomeUnknown = () => {
-        if (sessionMovedFrom(startUserId)) {
-          if (sessionStatusRef.current !== "unauthenticated") requestStatusCheck();
-          return installRefusedError();
-        }
+        if (sessionMovedFrom(startUserId)) return movedRefusal();
         requestStatusCheck();
         return new VaultUnlockError(VAULT_SETUP_OUTCOME_UNKNOWN);
       };
@@ -837,7 +844,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           throw outcomeUnknown();
         }
         // The vault exists (this setup's 201 was lost and it was retried, or
-        // another tab set it up): leave it LOCKED for an unlock.
+        // another tab set it up): leave it LOCKED for an unlock, whether or not
+        // a same-user lock came meanwhile.
         if (err?.error === API_ERROR.VAULT_ALREADY_SETUP) {
           await refuseIfStale();
           setupRequiredRef.current = false;
@@ -848,6 +856,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       }
       await refuseIfStale();
       setupRequiredRef.current = false;
+      // Committed for this user, but locked since it started (page hide and
+      // bfcache restore, auto-lock): nothing is installed, and the vault is
+      // left LOCKED for an unlock with the passphrase just entered — as when
+      // the vault already exists — not reported as an interrupted unlock.
+      if (lockedSince(lockEpoch)) {
+        setVaultStatus((prev) => (prev === VAULT_STATUS.UNLOCKED ? prev : VAULT_STATUS.LOCKED));
+        return;
+      }
 
       // 10. Store secretKey, keyVersion, accountSalt, wrappedKey, ECDH keys, and
       // encryption key in memory. Not synchronous with the checks above:

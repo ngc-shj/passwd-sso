@@ -15,6 +15,7 @@ import {
 import { classifyRoute, ROUTE_POLICY_KIND } from "./route-policy";
 import { shouldEnforceCsrf, assertSessionCsrf } from "./csrf-gate";
 import { assertExpectedUser } from "./expected-user-gate";
+import { withoutSessionCookies } from "@/lib/auth/session/session-cookie";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
 import { errorResponse } from "@/lib/http/api-response";
@@ -30,7 +31,13 @@ import {
   isSessionGateTierB,
 } from "./session-passkey-gate";
 
-export async function handleApiAuth(request: NextRequest) {
+/**
+ * `incomingHeaders` are the headers the request arrived with, before
+ * normalizeForwardedHeaders rewrote Host and X-Forwarded-*. A pass-through
+ * that overrides the route's headers builds on them, so the route sees what
+ * any other pass-through forwards, less what the override removes.
+ */
+export async function handleApiAuth(request: NextRequest, incomingHeaders: Headers = request.headers) {
   const { pathname } = request.nextUrl;
   const policy = classifyRoute(pathname);
   // Bearer-bypass eligibility is a code-path concern (which dispatch
@@ -62,14 +69,15 @@ export async function handleApiAuth(request: NextRequest) {
   const readSession = () => (sessionRead ??= getSessionInfo(request));
 
   // Expected-user gate: before every route, whatever its classification. A
-  // page that names its user is never served under another user's cookie.
+  // request that names its user is never served under another user's cookie.
   const cookieHeader = request.headers.get("cookie") ?? "";
   const cookiePresent = hasSessionCookie(cookieHeader);
   const expectedUser = await assertExpectedUser(request, cookiePresent, readSession);
   if (expectedUser.refusal) return applyCorsHeaders(request, expectedUser.refusal);
-  // Every pass-through below hands the route the headers the gate decided on.
-  // The gates below still read the request as it arrived.
-  const { forwardHeaders } = expectedUser;
+  // Every pass-through below hands the route the headers the gate decided on:
+  // the incoming ones, less the session cookies when the gate removed them.
+  // The gates below still read the request.
+  const forwardHeaders = expectedUser.stripSessionCookies ? withoutSessionCookies(incomingHeaders) : null;
   const passOn = () =>
     forwardHeaders ? NextResponse.next({ request: { headers: forwardHeaders } }) : NextResponse.next();
 

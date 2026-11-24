@@ -39,11 +39,25 @@ afterEach(() => {
 });
 
 // Every fixture tree is resolved as the repository is: a tsconfig.json mapping
-// `@/` to src/, and the packages its rows load installed under node_modules.
+// `@/` to src/, and the packages its rows load installed under node_modules
+// from the registry, as the lockfile records them.
+const PACKAGES = ["some-package", "hash-wasm", "@scope/pkg", "next"];
 const TREE = {
+  "package-lock.json": JSON.stringify({
+    lockfileVersion: 3,
+    packages: {
+      "": { name: "fixture" },
+      ...Object.fromEntries(
+        PACKAGES.map((pkg) => [
+          `node_modules/${pkg}`,
+          { version: "1.0.0", resolved: `https://registry.npmjs.org/${pkg}/-/${pkg.split("/").pop()}-1.0.0.tgz`, integrity: "sha512-fixture" },
+        ]),
+      ),
+    },
+  }),
   "tsconfig.json": JSON.stringify({ compilerOptions: { module: "esnext", moduleResolution: "bundler", allowJs: true, jsx: "react-jsx", paths: { "@/*": ["./src/*"] } } }),
   ...Object.fromEntries(
-    ["some-package", "hash-wasm", "@scope/pkg"].flatMap((pkg) => [
+    PACKAGES.filter((pkg) => pkg !== "next").flatMap((pkg) => [
       [`node_modules/${pkg}/package.json`, JSON.stringify({ name: pkg, types: "index.d.ts" })],
       [`node_modules/${pkg}/index.d.ts`, "export declare function send(path: string): Promise<Response>;\n"],
     ]),

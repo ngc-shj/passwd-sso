@@ -884,3 +884,56 @@ All findings were valid and are resolved. Red-proof ledgers live in the session 
 ### Simplify pass (round 8 fixes)
 - **Accepted.** The gate's cookie strip and the Auth.js callback wrapper's strip were the same code. Both now use `withoutSessionCookies` and `isSessionCookieKey` in `session-cookie.ts`, which `hasAnySessionCookie` also uses. The strip keeps removing empty-valued session cookies, which `hasAnySessionCookie` does not count; a pin covers that difference.
 - **Checked, no change.** The module-specifier walks are memoised per directory and per package, so the added manifest reads do not repeat per specifier. No shared user-id schema exists for the consent check to reuse.
+
+# Review round 9
+
+Scope: `git diff a62199a20..d7a35e671` (review(9)). Round-8 findings were re-verified as resolved, except F8-4 (partly) and S8-2 (a new shape). The gate redesign, the cookie strip, the consent binding and the runner's Redis index were probed by execution and hold: no cookie-bearing request reaches a route under another user's session.
+
+## Findings
+
+- **S9-1 [Major, escalated] The resolver decides "none" when the compiler resolves `@types/<pkg>` and the runtime loads `<pkg>`.** For a JS package with an `@types` companion, the realpath and `packageEscape` checks ran on `@types/<pkg>`, so a linked or escaping `<pkg>` was never examined. Executed on a scratch tree: Node loads the repo file, the resolver answers "none". The third escape of this resolver (S7, S8-2, S9-1); no instance in the tree.
+- **S9-2 [Minor]** An installed package's own code is never examined. `patch-package` turns repo-authored patches into package code that neither gate reads.
+- **F9-4 / S9-3 [Minor]** On the "none" path the route receives the normalized Host and X-Forwarded-* headers; every other pass-through forwards the originals.
+- **F9-1 [Minor]** A consent submission refused for another user ends on a raw JSON page, and `error-handling.md` does not list the consent route as a SESSION_CHANGED emitter.
+- **F9-2 [Minor]** A setup that committed (201 or VAULT_ALREADY_SETUP) during a same-user lock still reports "Unlocking was interrupted"; the F8-4 resolution claimed more than the code did.
+- **F9-3 [Minor]** The url-helpers binding comment says every request the document sends is bound; only `fetchApi` requests are.
+- **T9-1 [Minor]** The S3 ledger row ran against pre-simplify code and cannot be reproduced. Re-proved on the committed code by the reviewer (K1–K4 killed).
+- **T9-2 [Minor]** Six of the seven `passOn()` sites have no pin.
+- **T9-3 [Minor]** Nothing pins that the reload is marked pending before the navigation starts; the guard test mocks url-helpers.
+- **T9-4 [Minor]** The moved-session arm of setup's `outcomeUnknown` is partly pinned (the status check, and sign-out during the POST).
+- **T9-5 [Minor]** Adding `browser`, `module` or `typesVersions` to the inert allowlist breaks no test.
+- **T9-6 [Minor]** `setup.ts`'s refusal when the claim marker is unset is never exercised at integration level.
+
+## Process note — the "none" verdict now rests on what the runtime loads
+
+S9-1 was the third escape of the resolver. Instead of a fourth case, the verdict changed basis: a bare specifier is "none" only when the package a runtime looks up by name, and the package that holds the compiler's file, both pass the same checks. These are a real path under `node_modules`, no manifest field target that leaves it, not patched, not depending on a patched package, and installed from the registry with integrity according to the governing lockfile. Installed code is trusted only as registry-published content, which is stated in the code; anything the repository could have authored is "opaque".
+
+## Resolution Status (round 9)
+
+All findings were valid and are resolved. Ledgers: `r10-spec/`, `r9-gate/` (re-run on the committed code, mirrored in `r10-gate/`), `r10-consent/`, `r10-runner/`. Every listed mutant is killed or recorded as equivalent (`P5`, the Bearer-bypass `passOn`, unreachable on the "none" path; `V6`, a status request while signed out, which the status effect never sends), and each control is green.
+
+### S9-1 / S9-2 — resolved by changing the basis of "none"
+- **Runtime package.** Found by name, walking `node_modules/<name>` up from the importer; `@types/x` maps back to `x`; a subpath that leaves the package, or no installed package, is "opaque". A relative or `#imports` path into `node_modules` is "opaque".
+- **Shared checks** on the runtime package and the compiler's package: real path under `node_modules`; every string in every non-inert manifest field stays inside it, under any condition; not named by `patches/`; no dependency closure (from the governing lockfile) reaching a patched package; a registry tarball with integrity in the lockfile (`inBundle` entries inherit their parent). An unreadable lockfile or `patches/` makes every installed-package verdict "opaque".
+- **Real tree.** Both gates exit 0. The only changed rows are the 33 `sonner` imports per gate (patched), now "opaque"; every one is a named import, which "opaque" does not refuse.
+- **Trusted by design, stated in the code.** The contents of registry-published packages pinned by integrity. Residuals recorded: a custom `--patch-dir` is not read (postinstall uses none), and a self-hosted registry in npm's tarball URL form counts as a registry.
+
+### Minors
+- **F9-4 / S9-3.** The "none" path forwards the original incoming headers minus the session cookies; `src/proxy.ts` passes them to `handleApiAuth`. Pinned under Tailscale normalization with a control showing the normalization happens.
+- **F9-1.** A mismatched or missing consent id is checked after client and `redirect_uri` validation, before every write, and is answered with the stale step-up's 303 to the self-origin authorize GET. The route no longer sends `SESSION_CHANGED`; `error-handling.md` lists the two remaining senders and the consent bounce.
+- **F9-2.** A setup that committed while the same user's vault was locked now resolves with the vault LOCKED; the gate shows the lock screen, where the passphrase just entered unlocks it. A switched or ended session is still an interruption.
+- **F9-3.** The binding comments now say `fetchApi` requests, and name next-auth's own calls as outside the binding.
+- **T9-1.** The `r9-gate` ledger was retargeted at the post-simplify code and fully re-run; every anchor is asserted to exist.
+- **T9-2.** Every `passOn()` branch has a "none" pin.
+- **T9-3.** A test mounts the real `useBeforeUnloadGuard` and dispatches `beforeunload` from the navigation, asserting the reload is pending and not prevented.
+- **T9-4.** The moved arm is pinned for a switch (status re-asked) and a sign-out (`UNAUTHORIZED`, no status request).
+- **T9-5.** One fixture per non-inert manifest field.
+- **T9-6.** A harness case runs the child without `INTEGRATION_REDIS_CLAIM` and expects the refusal.
+
+### Simplify pass (round 9 fixes)
+- **Accepted.**
+  - `taintedKeys` appends to each dependent list in place instead of copying it per edge, and returns early when nothing is patched.
+  - The runtime-package lookup (`installedDirOf`) is memoised per directory and name.
+  - Setup's two "session moved" arms share `movedRefusal()`; unlock's check is left alone, because it does not re-ask the status.
+  - Each change keeps the verdict or the thrown error unchanged; the module-specifier and vault suites and both gates pass unchanged.
+- **Not taken.** `decide`'s `node_modules` segment test and `insideNodeModules` differ on a final segment literally named `node_modules`, so they are not merged.

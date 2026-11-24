@@ -506,36 +506,38 @@ describe("VaultProvider — setup whose outcome is unknown", () => {
   );
 });
 
-// F8-4: a lock while the setup POST is in flight moves the lock epoch. Only a
-// session that ended or moved to another user makes that an interruption; a
-// same-user lock (page hide and bfcache restore, auto-lock) leaves the outcome
-// unknown, since the setup may have committed for this user.
-describe("VaultProvider — setup whose outcome is unknown after a lock during the POST", () => {
+// F8-4 / F9-2: a lock while the setup POST is in flight moves the lock epoch.
+// Only a session that ended or moved to another user makes that an
+// interruption. After a same-user lock (page hide and bfcache restore,
+// auto-lock) an unanswered POST leaves the outcome unknown, and a committed
+// one (201, or the vault already exists) leaves the vault LOCKED for an unlock.
+describe("VaultProvider — setup after a lock during the POST", () => {
   /**
-   * Run setup whose POST commits on the server and then gets `response`, with
-   * `during` run while the POST is held. Counts the vault status requests sent
-   * after the POST.
+   * Run setup whose POST commits on the server and then gets `response` (the
+   * server's own 201 when omitted), with `during` run while the POST is held.
+   * Counts the vault status requests sent once the POST was answered — not
+   * the one a session change itself starts while the POST is held.
    */
   async function setupLockedDuringPost(
     during: (rerender: () => void) => void,
-    response: MockFetchResponse | Error,
+    response?: MockFetchResponse | Error,
   ) {
     const { fetchMock } = makeFetchEnv(null);
     const baseHandler = fetchMock.getMockImplementation();
     if (!baseHandler) throw new Error("fetch env has no base handler");
     const reached = deferred();
     const gate = deferred();
-    const counts = { posted: false, statusAfterPost: 0 };
+    const counts = { answered: false, statusAfterPost: 0 };
     globalThis.fetch = (async (url: string, init?: RequestInit) => {
       if (url === "/api/vault/setup") {
-        counts.posted = true;
         reached.resolve();
         await gate.promise;
-        await baseHandler(url, init);
+        const committed = await baseHandler(url, init);
+        counts.answered = true;
         if (response instanceof Error) throw response;
-        return response;
+        return response ?? committed;
       }
-      if (url === "/api/vault/status" && counts.posted) counts.statusAfterPost += 1;
+      if (url === "/api/vault/status" && counts.answered) counts.statusAfterPost += 1;
       return baseHandler(url, init);
     }) as unknown as typeof fetch;
 
@@ -571,6 +573,10 @@ describe("VaultProvider — setup whose outcome is unknown after a lock during t
     });
     rerender();
   };
+  const signedOut = (rerender: () => void) => {
+    mockUseSession.mockReturnValue({ data: null, status: "unauthenticated", update: vi.fn() });
+    rerender();
+  };
 
   it.each([
     ["a POST rejected in transit", new TypeError("Failed to fetch")],
@@ -588,12 +594,76 @@ describe("VaultProvider — setup whose outcome is unknown after a lock during t
     30_000,
   );
 
-  it("reports a POST rejected in transit after a switch to another user as an interruption", async () => {
-    const { result, caught } = await setupLockedDuringPost(switchedToAnotherUser, new TypeError("Failed to fetch"));
+  // T9-4: the moved-session arm asks the new user's status again, so that
+  // session's own answer decides what its page shows.
+  it("reports a POST rejected in transit after a switch to another user as an interruption and asks the status again", async () => {
+    const { result, caught, counts } = await setupLockedDuringPost(switchedToAnotherUser, new TypeError("Failed to fetch"));
 
     expect((caught as VaultUnlockError).code).toBe(VAULT_UNLOCK_INTERRUPTED);
+    expect(counts.statusAfterPost).toBeGreaterThan(0);
     expect(result.current.getSecretKey()).toBeNull();
   }, 30_000);
+
+  it("reports a POST rejected in transit after a sign-out as UNAUTHORIZED and asks no status", async () => {
+    const { result, caught, counts } = await setupLockedDuringPost(signedOut, new TypeError("Failed to fetch"));
+
+    expect((caught as VaultUnlockError).code).toBe(API_ERROR.UNAUTHORIZED);
+    expect(counts.statusAfterPost).toBe(0);
+    expect(result.current.getSecretKey()).toBeNull();
+  }, 30_000);
+
+  const alreadySetUp = {
+    ok: false,
+    status: 409,
+    json: async () => ({ error: API_ERROR.VAULT_ALREADY_SETUP }),
+  } as const;
+
+  it.each([
+    ["a 201", undefined],
+    ["a VAULT_ALREADY_SETUP 409", alreadySetUp],
+  ] as const)(
+    "leaves the vault LOCKED for an unlock, without throwing, when %s answers after a same-user lock",
+    async (_kind, response) => {
+      const { result, caught } = await setupLockedDuringPost(pageHidden, response);
+
+      expect(caught).toBeUndefined();
+      expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
+      expect(result.current.encryptionKey).toBeNull();
+      expect(result.current.getSecretKey()).toBeNull();
+      expect(result.current.getEcdhPrivateKeyBytes()).toBeNull();
+    },
+    30_000,
+  );
+
+  it.each([
+    ["a 201", undefined],
+    ["a VAULT_ALREADY_SETUP 409", alreadySetUp],
+  ] as const)(
+    "reports %s after a switch to another user as an interruption and asks the status again",
+    async (_kind, response) => {
+      const { result, caught, counts } = await setupLockedDuringPost(switchedToAnotherUser, response);
+
+      expect((caught as VaultUnlockError).code).toBe(VAULT_UNLOCK_INTERRUPTED);
+      expect(counts.statusAfterPost).toBeGreaterThan(0);
+      expect(result.current.encryptionKey).toBeNull();
+      expect(result.current.getSecretKey()).toBeNull();
+    },
+    30_000,
+  );
+
+  it.each([
+    ["a 201", undefined],
+    ["a VAULT_ALREADY_SETUP 409", alreadySetUp],
+  ] as const)(
+    "reports %s after a sign-out as UNAUTHORIZED",
+    async (_kind, response) => {
+      const { result, caught } = await setupLockedDuringPost(signedOut, response);
+
+      expect((caught as VaultUnlockError).code).toBe(API_ERROR.UNAUTHORIZED);
+      expect(result.current.getSecretKey()).toBeNull();
+    },
+    30_000,
+  );
 });
 
 describe("VaultProvider — setup zeroizes its local key material", () => {
@@ -3480,9 +3550,10 @@ describe("VaultProvider — a page hide while setting up or unlocking installs n
     60_000,
   );
 
-  // The setup reports an interruption (not success) and asks the status again,
-  // which finds the committed vault: LOCKED, for an unlock.
-  it("setup reports an interruption and leaves the committed vault locked, not set up in memory, when the page is hidden during the setup POST", async () => {
+  // F9-2: the POST committed for this user, so the setup resolves with the
+  // vault LOCKED for an unlock with the passphrase just entered, rather than
+  // reporting an interrupted unlock for a vault that now exists.
+  it("setup leaves the committed vault locked, not set up in memory, when the page is hidden during the setup POST", async () => {
     const { fetchMock } = makeFetchEnv(null);
     const baseHandler = fetchMock.getMockImplementation();
     globalThis.fetch = (async (url: string, init?: RequestInit) => {
@@ -3494,15 +3565,15 @@ describe("VaultProvider — a page hide while setting up or unlocking installs n
     await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.SETUP_REQUIRED));
 
     await act(async () => {
-      await expect(result.current.setup(PASSPHRASE)).rejects.toMatchObject({ code: VAULT_UNLOCK_INTERRUPTED });
+      await expect(result.current.setup(PASSPHRASE)).resolves.toBeUndefined();
     });
-    await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.LOCKED));
+    expect(result.current.status).toBe(VAULT_STATUS.LOCKED);
     expect(result.current.encryptionKey).toBeNull();
     expect(result.current.getSecretKey()).toBeNull();
   }, 60_000);
 
-  // An ended session needs a new sign-in, as for the unlock paths; a page hide
-  // (above) is an interruption, and setup resolves with the vault left LOCKED.
+  // An ended session needs a new sign-in, as for the unlock paths; after a
+  // page hide (above) setup resolves with the vault left LOCKED.
   it("setup throws UNAUTHORIZED and installs nothing when the session ends during the setup POST", async () => {
     const { fetchMock } = makeFetchEnv(null);
     const baseHandler = fetchMock.getMockImplementation();

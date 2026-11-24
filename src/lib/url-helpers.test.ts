@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { CLIENT_LOG_EVENT, opaque } from "@/lib/logger/client";
+import { renderHook } from "@testing-library/react";
 
 /**
  * BASE_PATH is evaluated at module load time from process.env.NEXT_PUBLIC_BASE_PATH.
@@ -836,6 +837,40 @@ describe("fetchApi expected-user binding", () => {
         await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
         expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
       });
+    });
+
+    // A browser fires beforeunload inside the href assignment, so the app's
+    // guards read the pending mark there: it must be set before navigating.
+    it("marks the reload pending before it navigates, so a dirty form's guard lets it through", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => sessionChanged());
+      const { fetchApi, setExpectedUser, SessionChangedError, isSessionChangedReloadPending } =
+        await loadHelpers();
+      const { useBeforeUnloadGuard } = await import("@/hooks/form/use-before-unload-guard");
+      const { unmount } = renderHook(() => useBeforeUnloadGuard(true));
+      const beforeUnloadPrevented = () => {
+        const event = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      const atNavigation: { pending: boolean; prevented: boolean }[] = [];
+      let href = location.href;
+      Object.defineProperty(location, "href", {
+        get: () => href,
+        set: (next: string) => {
+          atNavigation.push({ pending: isSessionChangedReloadPending(), prevented: beforeUnloadPrevented() });
+          href = next;
+        },
+        configurable: true,
+      });
+      setExpectedUser("user-a");
+
+      // Control: the mounted guard holds any other navigation.
+      expect(beforeUnloadPrevented()).toBe(true);
+      await expect(fetchApi("/api/vault/status")).rejects.toBeInstanceOf(SessionChangedError);
+
+      expect(atNavigation).toEqual([{ pending: true, prevented: false }]);
+      expect(href).toBe(`${ORIGIN}/ja/dashboard`);
+      unmount();
     });
 
     // The gate's answer when it could not read the session: a fault, which a

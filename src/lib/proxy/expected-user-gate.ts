@@ -43,20 +43,23 @@ import { EXPECTED_USER_HEADER } from "@/lib/constants/auth/expected-user";
 import { errorResponse } from "@/lib/http/api-response";
 import { NO_STORE_HEADERS } from "@/lib/http/cache-headers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
-import { withoutSessionCookies } from "@/lib/auth/session/session-cookie";
 import { SESSION_IDENTITY, type ProxySessionInfo } from "./auth-gate";
 
 export interface ExpectedUserDecision {
   /** The refusal, or null to continue. */
   refusal: NextResponse | null;
-  /** The request headers the route must see instead of the request's own, or null to forward those untouched. */
-  forwardHeaders: Headers | null;
+  /**
+   * Whether the route must see the request without its session cookies. The
+   * caller removes them from the headers the request arrived with, so the
+   * route sees those headers with nothing else changed.
+   */
+  stripSessionCookies: boolean;
 }
 
-const CONTINUE: ExpectedUserDecision = { refusal: null, forwardHeaders: null };
+const CONTINUE: ExpectedUserDecision = { refusal: null, stripSessionCookies: false };
 
 function refuse(response: NextResponse): ExpectedUserDecision {
-  return { refusal: response, forwardHeaders: null };
+  return { refusal: response, stripSessionCookies: false };
 }
 
 /**
@@ -78,7 +81,7 @@ export async function assertExpectedUser(
         ? CONTINUE
         : refuse(errorResponse(API_ERROR.SESSION_CHANGED, undefined, undefined, NO_STORE_HEADERS));
     case SESSION_IDENTITY.NONE:
-      return { refusal: null, forwardHeaders: withoutSessionCookies(request.headers) };
+      return { refusal: null, stripSessionCookies: true };
     case SESSION_IDENTITY.AMBIGUOUS:
       return refuse(errorResponse(API_ERROR.UNAUTHORIZED, undefined, undefined, NO_STORE_HEADERS));
     case SESSION_IDENTITY.UNAVAILABLE:

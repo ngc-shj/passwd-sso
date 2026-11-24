@@ -56,6 +56,7 @@ import {
 } from "./helpers/proxy-session-fixtures";
 import { _resetSessionPasskeyAuditForTests } from "../lib/proxy/session-passkey-gate";
 import { getCachedSession } from "../lib/auth/session/session-cache";
+import { normalizeForwardedHeaders } from "../lib/proxy/forwarded-headers";
 
 const dummyOptions = { cspHeader: "default-src 'self'", nonce: "test-nonce" };
 
@@ -1319,6 +1320,40 @@ describe("proxy — expected-user gate", () => {
       expect(forwardedCookie(res)).toBeNull();
     });
 
+    // Every branch that passes a request on hands the route the gate's headers.
+    // The Bearer-bypass branch is not listed: it requires no session cookie,
+    // so the gate never decides "nobody" on a request that reaches it.
+    describe("on every pass-through branch", () => {
+      beforeEach(() => {
+        vi.stubEnv("EXTENSION_BRIDGE_CODE_ALLOWED_ORIGINS", CHROME_EXT_ALLOWED);
+        __resetAllowlistForTests();
+      });
+
+      afterEach(() => {
+        __resetAllowlistForTests();
+      });
+
+      it.each([
+        ["the public API", "/api/v1/openapi.json", "GET", {}],
+        ["the extension bridge-code route", "/api/extension/bridge-code", "POST", { origin: CHROME_EXT_ALLOWED }],
+        ["a public share", "/api/share-links/link-1/content", "GET", {}],
+        ["the public CSP report receiver", "/api/csp-report", "POST", {}],
+        ["the extension token exchange", "/api/extension/token/exchange", "POST", {}],
+        ["an api-default route", "/api/mobile/authorize", "GET", {}],
+      ])("hands %s no session cookie, and keeps the others", async (_label, path, method, extra) => {
+        const res = await proxy(
+          request(path, method, {
+            Cookie: `theme=dark; ${cookie()}; lang=ja`,
+            "x-passwd-expected-user": "user-a",
+            ...extra,
+          }),
+          dummyOptions,
+        );
+        expect(reachedRoute(res)).toBe(true);
+        expect(forwardedCookie(res)).toBe("theme=dark; lang=ja");
+      });
+    });
+
     it("leaves a session-required route to the session gate's 401", async () => {
       const res = await proxy(
         request("/api/emergency-access/grant-1/confirm", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-a" }),
@@ -1668,6 +1703,56 @@ describe("proxy — Tailscale forwarded-header normalization wire-in", () => {
     expect(res.status).toBe(200);
     expect(res.headers.get("Cache-Control")).toBe("private, no-store");
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // The expected-user gate overrides the route's headers only to remove the
+  // session cookie. Built from the normalized request, the override would
+  // also hand the route the canonical Host and X-Forwarded-*, which no other
+  // pass-through forwards.
+  describe("a cookie-bearing request the expected-user gate passes on", () => {
+    const backendHeaders = {
+      ...TS_HEADERS,
+      host: "localhost:3001",
+      "x-forwarded-host": "app.example.com",
+      "x-forwarded-port": "3001",
+      "x-forwarded-proto": "https",
+    };
+    const apiRequest = (headers: Record<string, string>) =>
+      new NextRequest("https://localhost:3001/api/mobile/authorize", {
+        headers: { ...backendHeaders, ...headers },
+      } as ConstructorParameters<typeof NextRequest>[1]);
+
+    beforeEach(() => {
+      vi.stubEnv("TRUST_TAILSCALE_SERVE_HEADERS", "true");
+    });
+
+    it("control: the proxy normalizes this request's Host and X-Forwarded-Port", () => {
+      const normalized = normalizeForwardedHeaders(apiRequest({}));
+      expect(normalized.headers.get("host")).toBe("app.example.com");
+      expect(normalized.headers.get("x-forwarded-port")).toBeNull();
+    });
+
+    it("hands the route the original Host and X-Forwarded-Port when it removes the session cookie", async () => {
+      fetchSpy.mockImplementation(dispatchFetch(sessionRoute(null)));
+      const res = await proxy(
+        apiRequest({ Cookie: "theme=dark; authjs.session-token=e0e0-7a11", "x-passwd-expected-user": "user-a" }),
+        dummyOptions,
+      );
+      expect(res.headers.get("x-middleware-override-headers")?.split(",")).toContain("host");
+      expect(res.headers.get("x-middleware-request-cookie")).toBe("theme=dark");
+      expect(res.headers.get("x-middleware-request-host")).toBe("localhost:3001");
+      expect(res.headers.get("x-middleware-request-x-forwarded-port")).toBe("3001");
+    });
+
+    it("leaves the named user's request untouched", async () => {
+      fetchSpy.mockImplementation(dispatchFetch(sessionRoute(sessionResponseBody("user-a"))));
+      const res = await proxy(
+        apiRequest({ Cookie: "theme=dark; authjs.session-token=e0e0-7a12", "x-passwd-expected-user": "user-a" }),
+        dummyOptions,
+      );
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+      expect(res.headers.get("x-middleware-override-headers")).toBeNull();
+    });
   });
 
   it("page route: Tailscale headers flow through handlePageRoute (security headers applied)", async () => {

@@ -143,8 +143,11 @@ async function reactToPasskeyRequired(res: Response): Promise<void> {
 // names. Unset until then: no request before that can carry anything bound to
 // a user. Never re-pointed and never cleared — a page that saw its session end
 // still holds what it held. When useSession later names another user, the
-// binding stays on the first one and the page reloads: no request this
-// document sends once bound is served under another user's session.
+// binding stays on the first one and the page reloads: no fetchApi request
+// this document sends once bound is served under another user's session.
+// Requests that do not go through fetchApi carry no header and are outside
+// the binding — next-auth's own calls among them (signIn, signOut, useSession's
+// session fetch), and any plain fetch or form post.
 
 let expectedUserId: string | null = null;
 
@@ -225,8 +228,8 @@ async function isSessionChanged(res: Response): Promise<boolean> {
  * Fetch wrapper that automatically prepends basePath.
  * Client-side only — do NOT use inside server-side route handlers.
  *
- * Once the page knows its user, every same-origin request names it (see the
- * binding above). A 409 SESSION_CHANGED rejects with SessionChangedError —
+ * Once the page knows its user, every same-origin request sent through here
+ * names it (see the binding above). A 409 SESSION_CHANGED rejects with SessionChangedError —
  * so no caller can mistake it for its own business refusal, and a multi-step
  * flow stops at the first refused step — and reloads the page, rebuilding it
  * for whoever the session now belongs to. Other proxy refusals (a 503 when the

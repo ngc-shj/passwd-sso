@@ -3,8 +3,8 @@
  * the way a developer would start it by hand (vitest with the integration
  * config, no runner), exits nonzero with "Refusing to run integration tests"
  * on a database scripts/run-integration-tests.mjs did not create, and on a
- * Redis database it did not claim for this run (unclaimed, or claimed under
- * another run's marker). The pure predicates are unit-tested in
+ * Redis database it did not claim for this run (unclaimed, claimed under
+ * another run's marker, or read with no marker to compare). The pure predicates are unit-tested in
  * scripts/__tests__; this holds that setup.ts calls them and that a refusal
  * stops the run.
  *
@@ -137,7 +137,18 @@ describe.skipIf(isChild)("integration harness scratch refusal", () => {
     );
   }, CHILD_TIMEOUT_MS);
 
-  // Positive control for the case above: the same child with this run's own
+  // The run's own claimed database, read by a child holding no marker at all:
+  // a claim that is present is not proof it is this run's. Nothing is written
+  // to any Redis database.
+  it.skipIf(!process.env.REDIS_URL)("refuses a claimed Redis database when the run's marker is not set", async () => {
+    const env = childEnv(currentDatabase);
+    delete env[REDIS_CLAIM_ENV];
+    const { code, output } = await runHarness(env);
+    expect(code).not.toBe(0);
+    expect(output).toContain(`Refusing to run integration tests: ${REDIS_CLAIM_ENV} is not set`);
+  }, CHILD_TIMEOUT_MS);
+
+  // Positive control for the cases above: the same child with this run's own
   // marker is admitted, so the refusal is the marker's doing.
   it.skipIf(!process.env.REDIS_URL)("admits this run's claimed Redis database under this run's marker", async () => {
     const { code, output } = await runHarness(childEnv(currentDatabase));

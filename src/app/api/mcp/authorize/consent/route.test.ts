@@ -299,14 +299,16 @@ describe("POST /api/mcp/authorize/consent", () => {
     expect(url.searchParams.has("error")).toBe(false);
   });
 
-  // S8-3: the consent form is a native POST and cannot carry the expected-user
-  // header, so it echoes the user the page was rendered for. A page rendered
-  // for A and submitted after B signed in elsewhere must change nothing on B's
-  // account. Each refusal arm arranges an unclaimed DCR client, so a request
-  // that got past the binding would claim it as well as mint.
+  // S8-3 / F9-1: the consent form is a native POST and cannot carry the
+  // expected-user header, so it echoes the user the page was rendered for. A
+  // page rendered for A and submitted after B signed in elsewhere must change
+  // nothing on B's account, and must not strand the browser on a JSON page: it
+  // is bounced to the authorize GET, which renders consent for B. Each refusal
+  // arm arranges an unclaimed DCR client, so a request that got past the
+  // binding would claim it as well as mint.
   describe("expected-user binding", () => {
-    // Persistent rather than Once: a refusal never reads the client, and an
-    // unconsumed Once would leak into the next test.
+    // Persistent rather than Once: the stale-session arm reads the client too,
+    // and an unconsumed Once would leak into the next test.
     const arrangeUnclaimed = () =>
       mockFindFirst.mockResolvedValue({ ...VALID_CLIENT, isDcr: true, tenantId: null });
     const consentAs = (fields: Record<string, string>) =>
@@ -319,10 +321,20 @@ describe("POST /api/mcp/authorize/consent", () => {
       expect(mockTxDelete).not.toHaveBeenCalled();
       expect(mockLogAudit).not.toHaveBeenCalled();
     };
-    const expectSessionChangedRefusal = async (res: Response) => {
-      expect(res.status).toBe(409);
-      expect(res.headers.get("location")).toBeNull();
-      expect((await res.json()).error).toBe("SESSION_CHANGED");
+    const expectAuthorizeBounce = (res: Response, fields: Record<string, string>) => {
+      expect(res.status).toBe(303);
+      const url = new URL(res.headers.get("location") ?? "");
+      expect(url.origin).toBe("https://example.test");
+      expect(url.pathname).toBe(API_PATH.MCP_AUTHORIZE);
+      expect(url.searchParams.get("client_id")).toBe(fields.client_id);
+      expect(url.searchParams.get("redirect_uri")).toBe(fields.redirect_uri);
+      expect(url.searchParams.get("response_type")).toBe("code");
+      expect(url.searchParams.get("state")).toBe(fields.state);
+      expect(url.searchParams.get("code_challenge")).toBe(fields.code_challenge ?? null);
+      expect(url.searchParams.get("scope")).toBe(fields.scope ?? null);
+      // Nothing of the client's redirect_uri leaks into the bounce target.
+      expect(url.searchParams.get("code")).toBeNull();
+      expect(url.searchParams.get("error")).toBeNull();
     };
 
     it("mints a code when the form names the session's user", async () => {
@@ -336,44 +348,75 @@ describe("POST /api/mcp/authorize/consent", () => {
       );
     });
 
-    it("refuses an Allow rendered for another user: no claim, no code, no audit", async () => {
+    it("bounces an Allow rendered for another user to the authorize GET: no claim, no code, no audit", async () => {
       arrangeUnclaimed();
-      const res = await consentAs({ ...VALID_FORM_FIELDS, expected_user_id: "user-the-page-was-for" });
+      const fields = { ...VALID_FORM_FIELDS, expected_user_id: "user-the-page-was-for" };
+      const res = await consentAs(fields);
 
-      await expectSessionChangedRefusal(res);
+      expectAuthorizeBounce(res, fields);
       expectNothingWritten();
     });
 
-    it("refuses an Allow that names no user", async () => {
+    it("bounces an Allow that names no user to the authorize GET", async () => {
       arrangeUnclaimed();
       const { expected_user_id: _removed, ...fields } = VALID_FORM_FIELDS;
       const res = await consentAs(fields);
 
-      await expectSessionChangedRefusal(res);
+      expectAuthorizeBounce(res, fields);
       expectNothingWritten();
     });
 
-    it("refuses a Deny rendered for another user: no denial recorded, no redirect to the client", async () => {
-      const res = await consentAs({
+    it("bounces a Deny rendered for another user: no denial recorded, no redirect to the client", async () => {
+      arrangeUnclaimed();
+      const fields = {
         action: "deny",
         client_id: "mcpc_testclient",
         expected_user_id: "user-the-page-was-for",
         redirect_uri: "https://example.com/callback",
         state: "random-state-value",
-      });
+      };
+      const res = await consentAs(fields);
 
-      await expectSessionChangedRefusal(res);
+      expectAuthorizeBounce(res, fields);
       expectNothingWritten();
     });
 
-    it("refuses a mismatch on a stale session instead of bouncing it to the authorize GET", async () => {
+    it("bounces a mismatch on a stale session the same way", async () => {
+      arrangeUnclaimed();
       mockRequireRecentCurrentAuthMethod.mockResolvedValue(Response.json(
         { error: "SESSION_STEP_UP_REQUIRED" },
         { status: 403 },
       ));
+      const fields = { ...VALID_FORM_FIELDS, expected_user_id: "user-the-page-was-for" };
+      const res = await consentAs(fields);
+
+      expectAuthorizeBounce(res, fields);
+      expectNothingWritten();
+    });
+
+    // The bounce echoes client_id and redirect_uri into a self-origin URL, so
+    // it runs only once both are validated: an unknown client or an
+    // unregistered redirect_uri keeps its own answer.
+    it("keeps invalid_client for an unknown client on a mismatch", async () => {
+      mockFindFirst.mockResolvedValue(null);
       const res = await consentAs({ ...VALID_FORM_FIELDS, expected_user_id: "user-the-page-was-for" });
 
-      await expectSessionChangedRefusal(res);
+      expect(res.status).toBe(400);
+      expect((await res.json()).error).toBe("invalid_client");
+      expectNothingWritten();
+    });
+
+    it("keeps invalid_request for an unregistered redirect_uri on a mismatch", async () => {
+      arrangeUnclaimed();
+      const res = await consentAs({
+        ...VALID_FORM_FIELDS,
+        expected_user_id: "user-the-page-was-for",
+        redirect_uri: "https://attacker.example/callback",
+      });
+
+      expect(res.status).toBe(400);
+      expect(res.headers.get("location")).toBeNull();
+      expect((await res.json()).error).toBe("invalid_request");
       expectNothingWritten();
     });
   });
