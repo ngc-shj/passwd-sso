@@ -15,5 +15,7 @@
   "invalidRecoveryKey": "Invalid Recovery Key.",
   "invalidChecksum": "Invalid Recovery Key (checksum mismatch). Please check for typos.",
   "recoveryKeyNotSet": "No Recovery Key has been set up for this account.",
+  "resetOutcomeUnknown": "We couldn't confirm whether the reset finished. It may have completed: try unlocking your vault with the new passphrase you just entered before trying again.",
+  "resetCompletedEarlier": "An earlier attempt has already reset your vault. Unlock it with the new passphrase you entered in that attempt.",
   "continueToDashboard": "Continue to dashboard"
 }

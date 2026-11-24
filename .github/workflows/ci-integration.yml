@@ -246,6 +246,17 @@ jobs:
         env:
           MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
 
+      # Brings the cluster to the state a developer's has: roles created, then
+      # migrated once. The migrations' role statements (e.g. the verifier's
+      # CONNECTION LIMIT) change cluster-wide state on their first run only;
+      # after this step the runner's check that preparing its scratch database
+      # leaves every existing role unchanged holds here as it does locally, so
+      # CI runs that check rather than switching it off.
+      - name: Migrate the cluster's default database once
+        run: npx prisma migrate deploy
+        env:
+          MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
+
       # MinIO stands in for S3 (audit-anchor-s3-destination.integration.test.ts,
       # which fails rather than skips without it). A step, not a service
       # container: a service cannot pass the `server /data` command. Same image
@@ -283,11 +294,6 @@ jobs:
       # are outside what migrate diff compares), then the suite, then drops it.
       - name: Run integration tests
         env:
-          # The runner refuses a migration that changes an existing role's
-          # cluster-wide state, which would reach the dev database on a shared
-          # cluster. This cluster is created for the job and its first migration
-          # run sets the verifier's CONNECTION LIMIT, so the check is off here.
-          INTEGRATION_ALLOW_CLUSTER_ROLE_CHANGES: "1"
           # The runner points these at its scratch database; passwd_test here
           # supplies only the host, port and credentials.
           #
@@ -305,6 +311,31 @@ jobs:
           # next step reads it. A fresh path per run: the harness only appends.
           RLS_GRANT_EVIDENCE_FILE: ${{ runner.temp }}/rls-grant-evidence.jsonl
         run: npm run test:integration
+
+      # setup.ts's refusal, reached the way a hand-started run reaches it: the
+      # harness without the runner, on passwd_test (a database the runner did
+      # not create). It must exit nonzero with the refusal; the scratch-named
+      # unmarked case and the Redis case run inside the suite
+      # (harness-scratch-refusal.integration.test.ts).
+      - name: Check the harness refuses a database the runner did not create
+        env:
+          MIGRATION_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/passwd_test
+          DATABASE_URL: postgresql://passwd_app:passwd_app_pass@localhost:5432/passwd_test
+          INTEGRATION_REFUSAL_PROBE_CHILD: "1"
+        run: |
+          set +e
+          out=$(npx vitest run --config vitest.integration.config.ts src/__tests__/db-integration/harness-scratch-refusal.integration.test.ts 2>&1)
+          rc=$?
+          set -e
+          printf '%s\n' "$out" | tail -n 30
+          if [ "$rc" -eq 0 ]; then
+            echo "::error::the integration harness ran on passwd_test instead of refusing it"
+            exit 1
+          fi
+          if ! printf '%s\n' "$out" | grep -qF 'Refusing to run integration tests: database "passwd_test" is not a scratch integration database'; then
+            echo "::error::the integration harness failed on passwd_test without its scratch refusal"
+            exit 1
+          fi
 
       # Runs only when the suite passed: the file then describes a run where any
       # bypass report or refusal failed a test.

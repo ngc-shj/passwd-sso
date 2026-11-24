@@ -48,6 +48,12 @@ async function handlePOST(
 
   const result = await parseBody(req, confirmEmergencyGrantSchema);
   if (!result.ok) return result.response;
+  // The escrow wraps the secret key of the user the client built it for. A
+  // client whose cookie moved to another user would otherwise arm this
+  // session's grant with someone else's key: refuse before the transition.
+  if (result.data.ownerId !== session.user.id) {
+    return errorResponse(API_ERROR.SESSION_CHANGED);
+  }
   const { ownerEphemeralPublicKey, encryptedSecretKey, secretKeyIv, secretKeyAuthTag, hkdfSalt, wrapVersion } = result.data;
 
   // Validate keyAlgorithm is compatible with wrapVersion

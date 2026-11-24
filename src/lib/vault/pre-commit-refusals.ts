@@ -1,15 +1,29 @@
 import { API_ERROR } from "@/lib/http/api-error-codes";
 
 // Codes the proxy returns before any API route runs (src/lib/proxy/api-route.ts
-// session gate, src/lib/auth/session/csrf.ts), so they prove a POST wrote
-// nothing.
+// session gate, src/lib/auth/session/csrf.ts, src/lib/proxy/expected-user-gate.ts),
+// so they prove a POST wrote nothing. fetchApi rejects SESSION_CHANGED with
+// SessionChangedError rather than returning it; it is listed for any caller
+// that reads the response another way.
 export const PROXY_PRE_ROUTE_REFUSALS = [
   API_ERROR.UNAUTHORIZED,
+  API_ERROR.SESSION_CHANGED,
   API_ERROR.ACCESS_DENIED,
   API_ERROR.PASSKEY_REQUIRED,
   API_ERROR.INVALID_ORIGIN,
   API_ERROR.SERVICE_UNAVAILABLE,
 ] as const;
+
+const PROXY_PRE_ROUTE_REFUSAL_SET: ReadonlySet<string> = new Set(PROXY_PRE_ROUTE_REFUSALS);
+
+/**
+ * Whether a 5xx response was refused before its route ran. A 5xx with any other
+ * code, or with no app envelope (a proxy's 502/504 page, the 500 Next renders
+ * for an uncaught throw), may follow the route's commit.
+ */
+export function is5xxPreRouteRefusal(errorCode: string | undefined): boolean {
+  return errorCode !== undefined && PROXY_PRE_ROUTE_REFUSAL_SET.has(errorCode);
+}
 
 // Codes that every vault key-changing POST (change-passphrase, rotate-key,
 // recovery-key/generate) can only return before anything committed. Each

@@ -10,6 +10,7 @@ import {
   VaultChangeOutcomeUnknownError,
 } from "@/lib/vault/vault-context";
 import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
+import { SessionChangedError } from "@/lib/url-helpers";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -99,6 +100,12 @@ export function ChangePassphraseDialog({
       }
       handleOpenChange(false);
     } catch (err: unknown) {
+      // Refused before any route ran (the page is reloading for the session
+      // that replaced this one): nothing changed.
+      if (err instanceof SessionChangedError) {
+        setError(tApi("sessionChanged"));
+        return;
+      }
       if (err instanceof VaultChangeOutcomeUnknownError) {
         // The vault is now locked, which unmounts this dialog: a persistent
         // toast is the only place the user still sees what happened.

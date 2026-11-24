@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useTranslations } from "next-intl";
-import { useVault } from "@/lib/vault/vault-context";
+import { useVault, VaultUnlockError } from "@/lib/vault/vault-context";
+import { VAULT_SETUP_OUTCOME_UNKNOWN } from "@/lib/vault/vault-unlock-codes";
 import { resolveUnlockError } from "./vault-lock-screen";
 import { SessionExpiredCard } from "./session-expired-card";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
@@ -26,6 +27,7 @@ interface VaultSetupWizardProps {
 
 export function VaultSetupWizard({ contextMessage }: VaultSetupWizardProps) {
   const t = useTranslations("Vault");
+  const tApi = useTranslations("ApiErrors");
   const { setup } = useVault();
 
   const [passphrase, setPassphrase] = useState("");
@@ -48,6 +50,12 @@ export function VaultSetupWizard({ contextMessage }: VaultSetupWizardProps) {
     try {
       await setup(passphrase);
     } catch (err) {
+      // The vault may now exist with this passphrase: a retry with another one
+      // would leave this one in effect, so the user is told to unlock with it.
+      if (err instanceof VaultUnlockError && err.code === VAULT_SETUP_OUTCOME_UNKNOWN) {
+        setError(t("setupOutcomeUnknown"));
+        return;
+      }
       // Setup throws UNAUTHORIZED when the session was refused or has ended:
       // retrying cannot succeed, so route to sign-in as the lock screen does.
       const setupError = t("setupError");
@@ -56,6 +64,7 @@ export function VaultSetupWizard({ contextMessage }: VaultSetupWizardProps) {
         rateLimited: setupError,
         unavailable: setupError,
         interrupted: setupError,
+        sessionChanged: tApi("sessionChanged"),
         fallback: setupError,
       });
       if (resolved.kind === "sessionExpired") {

@@ -83,6 +83,7 @@ describe("GET /api/emergency-access/pending-confirmations", () => {
       },
       select: {
         id: true,
+        ownerId: true,
         granteeId: true,
         granteePublicKey: true,
         keyAlgorithm: true,

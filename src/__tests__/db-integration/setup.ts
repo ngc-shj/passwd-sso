@@ -53,6 +53,33 @@ try {
       ].join("\n"),
     );
   }
+  // The same for Redis: the suite drives rate-limit buckets and session-cache
+  // entries the live instance on the dev Redis reads, so only the logical
+  // database the runner claimed for this run (scripts/run-integration-tests.mjs).
+  const redisUrl = process.env.REDIS_URL;
+  if (redisUrl) {
+    const { default: IORedis } = await import("ioredis");
+    const { REDIS_CLAIM_KEY, scratchRedisRefusal } = await import("../../../scripts/lib/integration-scratch-db.mjs");
+    const redis = new IORedis(redisUrl, { lazyConnect: true, maxRetriesPerRequest: 1, retryStrategy: () => null });
+    let claim: string | null = null;
+    try {
+      await redis.connect();
+      claim = await redis.get(REDIS_CLAIM_KEY);
+    } finally {
+      redis.disconnect();
+    }
+    const redisRefusal = scratchRedisRefusal(claim, { sentinel: process.env.REDIS_SENTINEL === "true" });
+    if (redisRefusal) {
+      throw new Error(
+        [
+          `Refusing to run integration tests: ${redisRefusal}.`,
+          ``,
+          `Run them with \`npm run test:integration\`, which claims an empty Redis logical database for the run`,
+          `on the server REDIS_URL names and points REDIS_URL at it (or unset REDIS_URL to skip the Redis cells).`,
+        ].join("\n"),
+      );
+    }
+  }
   // The RLS policies call these for every reading role; without EXECUTE every
   // statement on an RLS table fails with "permission denied for function"
   // (a role created after the migration misses its grant).

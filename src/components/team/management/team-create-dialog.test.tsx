@@ -50,7 +50,8 @@ vi.mock("next-intl", () => ({
 
 vi.mock("sonner", () => ({ toast: mockToast }));
 
-vi.mock("@/lib/url-helpers", () => ({
+vi.mock("@/lib/url-helpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/url-helpers")>()),
   fetchApi: (...args: unknown[]) => mockFetch(...args),
 }));
 
@@ -97,6 +98,7 @@ if (!originalCrypto?.randomUUID) {
 import { TeamCreateDialog } from "./team-create-dialog";
 import { VaultUnlockError } from "@/lib/vault/vault-context";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { SessionChangedError } from "@/lib/url-helpers";
 
 const ECDH_PUBLIC_KEY_JWK = '{"kty":"EC","crv":"P-256","x":"x-coord","y":"y-coord"}';
 
@@ -400,6 +402,21 @@ describe("TeamCreateDialog", () => {
       submitUnlock("pass");
 
       expect(await screen.findByText("unlockError")).toBeInTheDocument();
+    });
+
+    it("renders the changed-session message inline when the unlock is refused for a changed session", async () => {
+      setupVault({
+        status: VAULT_STATUS.LOCKED,
+        unlock: vi.fn(async () => {
+          throw new SessionChangedError();
+        }),
+      });
+      openDialog();
+
+      submitUnlock("pass");
+
+      expect(await screen.findByText("sessionChanged")).toBeInTheDocument();
+      expect(screen.queryByText("wrongPassphrase")).toBeNull();
     });
 
     it("closes the dialog with a session-expired toast on UNAUTHORIZED", async () => {

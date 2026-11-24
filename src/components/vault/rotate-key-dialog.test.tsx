@@ -82,6 +82,7 @@ vi.mock("@/components/ui/label", () => ({
 
 import { RotateKeyDialog } from "./rotate-key-dialog";
 import { VaultChangedElsewhereError, VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
+import { SessionChangedError } from "@/lib/url-helpers";
 
 describe("RotateKeyDialog", () => {
   let onOpenChange: ReturnType<typeof vi.fn<(open: boolean) => void>>;
@@ -246,6 +247,20 @@ describe("RotateKeyDialog", () => {
     });
     expect(mockToast.error).toHaveBeenCalledWith("rotateKeyOutcomeUnknown", { duration: Infinity });
     expect(mockToast.success).not.toHaveBeenCalled();
+    expect(screen.queryByText("rotateKeyFailed")).toBeNull();
+  });
+
+  // Refused before any route ran: nothing changed, so no locked-vault notice.
+  it("shows the changed-session message, not an unknown outcome, when the rotation is refused for a changed session", async () => {
+    mockRotateKey.mockRejectedValue(new SessionChangedError());
+    render(<RotateKeyDialog open={true} onOpenChange={onOpenChange} />);
+    fireEvent.change(screen.getByLabelText("rotateKeyPassphrase"), {
+      target: { value: "mypass" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "rotateKeyButton" }));
+
+    expect(await screen.findByText("sessionChanged")).toBeInTheDocument();
+    expect(mockToast.error).not.toHaveBeenCalled();
     expect(screen.queryByText("rotateKeyFailed")).toBeNull();
   });
 

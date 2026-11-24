@@ -1,7 +1,9 @@
 import { clientLogWarn, CLIENT_LOG_EVENT, opaque } from "@/lib/logger/client";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { getLocaleFromPathname, stripLocalePrefix } from "@/i18n/locale-utils";
 import { PASSKEY_PAGE_PATH } from "@/lib/constants/auth/page-path";
+import { EXPECTED_USER_HEADER } from "@/lib/constants/auth/expected-user";
 
 export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || "";
 
@@ -119,14 +121,7 @@ async function reactToPasskeyRequired(res: Response): Promise<void> {
     );
     if (!inScope) return;
 
-    const body: unknown = await res.clone().json();
-    if (
-      typeof body !== "object" ||
-      body === null ||
-      (body as { error?: unknown }).error !== API_ERROR.PASSKEY_REQUIRED
-    ) {
-      return;
-    }
+    if ((await readApiErrorBody(res.clone()))?.error !== API_ERROR.PASSKEY_REQUIRED) return;
 
     passkeyRedirectLatched = true;
     const locale = getLocaleFromPathname(currentAppPath());
@@ -136,21 +131,92 @@ async function reactToPasskeyRequired(res: Response): Promise<void> {
   }
 }
 
+// ─── Expected-user binding ─────────────────────────────────────
+// The session cookie is shared by every tab, so a page rendered for user A
+// sends B's cookie once B signs in elsewhere, and its timers and in-flight
+// flows (holding A's keys) would act as B. fetchApi names the user this page
+// acts for; the proxy (src/lib/proxy/expected-user-gate.ts) refuses a request
+// whose cookie is not that user's session with 409 SESSION_CHANGED.
+//
+// Set by ExpectedUserSync from useSession. Unset until the page first knows
+// its user: no request before that can carry anything bound to a user. It is
+// never cleared — a page that saw its session end still holds what it held,
+// and must not be served under the next cookie.
+
+let expectedUserId: string | null = null;
+let sessionChangedReloadLatched = false;
+
+/** Called by ExpectedUserSync whenever the page's authenticated user is known. */
+export function setExpectedUser(userId: string): void {
+  expectedUserId = userId;
+}
+
+/** @internal Test-only — unsets the expected user and the reload latch. */
+export function _resetExpectedUserForTests(): void {
+  expectedUserId = null;
+  sessionChangedReloadLatched = false;
+}
+
+/**
+ * Thrown by fetchApi when the proxy refused the request because the session
+ * is no longer the page's user. Never a business refusal: a caller must not
+ * read it as a wrong passphrase, a denied action, or a missing record.
+ */
+export class SessionChangedError extends Error {
+  constructor() {
+    super("The session changed since this page was loaded");
+    this.name = "SessionChangedError";
+  }
+}
+
+function withExpectedUser(url: string, init: RequestInit | undefined): RequestInit | undefined {
+  if (expectedUserId === null) return init;
+  // Same-origin only: the header names a user, and a cross-origin target is
+  // none of the proxy's business.
+  if (new URL(url, window.location.origin).origin !== window.location.origin) return init;
+  const headers = new Headers(init?.headers);
+  headers.set(EXPECTED_USER_HEADER, expectedUserId);
+  return { ...init, headers };
+}
+
+async function isSessionChanged(res: Response): Promise<boolean> {
+  if (res.status !== 409) return false;
+  try {
+    return (await readApiErrorBody(res.clone()))?.error === API_ERROR.SESSION_CHANGED;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Fetch wrapper that automatically prepends basePath.
  * Client-side only — do NOT use inside server-side route handlers.
  *
+ * Once the page knows its user, every same-origin request names it (see the
+ * binding above). A 409 SESSION_CHANGED rejects with SessionChangedError —
+ * so no caller can mistake it for its own business refusal, and a multi-step
+ * flow stops at the first refused step — and reloads the page once, rebuilding
+ * it for whoever the session now belongs to.
+ *
  * A 403 PASSKEY_REQUIRED on a dashboard or admin page additionally reloads the
  * tab onto the passkey page (see the reaction above). The response is returned
- * unchanged either way.
+ * unchanged.
  */
 export function fetchApi(path: string, init?: RequestInit): Promise<Response> {
   if (typeof window === "undefined") {
     throw new Error("fetchApi is client-only. Use absolute URLs on the server.");
   }
   const url = withBasePath(path);
-  const pending = init !== undefined ? fetch(url, init) : fetch(url);
+  const boundInit = withExpectedUser(url, init);
+  const pending = boundInit !== undefined ? fetch(url, boundInit) : fetch(url);
   return pending.then(async (res) => {
+    if (await isSessionChanged(res)) {
+      if (!sessionChangedReloadLatched) {
+        sessionChangedReloadLatched = true;
+        hardNavigate(currentAppPath());
+      }
+      throw new SessionChangedError();
+    }
     await reactToPasskeyRequired(res);
     return res;
   });

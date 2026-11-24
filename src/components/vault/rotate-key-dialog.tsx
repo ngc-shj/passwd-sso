@@ -12,6 +12,7 @@ import {
   type RotationEffects,
 } from "@/lib/vault/vault-context";
 import { apiErrorToI18nKey, API_ERROR } from "@/lib/http/api-error-codes";
+import { SessionChangedError } from "@/lib/url-helpers";
 import { MS_PER_SECOND } from "@/lib/constants/time";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { Button } from "@/components/ui/button";
@@ -119,6 +120,12 @@ export function RotateKeyDialog({ open, onOpenChange }: RotateKeyDialogProps) {
       showEffectBanners(result);
       handleOpenChange(false);
     } catch (err: unknown) {
+      // Refused before any route ran (the page is reloading for the session
+      // that replaced this one): nothing changed.
+      if (err instanceof SessionChangedError) {
+        setError(tApi("sessionChanged"));
+        return;
+      }
       if (err instanceof VaultChangeOutcomeUnknownError) {
         // The vault is now locked, which unmounts this dialog: a persistent
         // toast is the only place the user still sees what happened.

@@ -21,9 +21,10 @@ import {
   createTeamKeyEscrow,
   deriveTeamEncryptionKey,
 } from "@/lib/crypto/crypto-team";
-import { fetchApi } from "@/lib/url-helpers";
+import { fetchApi, SessionChangedError } from "@/lib/url-helpers";
 import { apiPath } from "@/lib/constants";
 import { useTeamVault } from "@/lib/team/team-vault-core";
+import { useVault } from "@/lib/vault/vault-context";
 import { readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { PROXY_PRE_ROUTE_REFUSALS } from "@/lib/vault/pre-commit-refusals";
@@ -153,6 +154,7 @@ export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: Tea
   const t = useTranslations("Teams");
   const tApi = useTranslations("ApiErrors");
   const { resolveTeamKey, invalidateTeamKey } = useTeamVault();
+  const { getLockEpoch, lockedSince } = useVault();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [phase, setPhase] = useState<RotatePhase>("idle");
@@ -212,6 +214,9 @@ export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: Tea
   };
 
   const handleRotate = async () => {
+    // The new key is distributed from the current one this vault unwrapped: a
+    // lock (or a session end or user switch) since the start sends nothing.
+    const lockEpoch = getLockEpoch();
     setLoading(true);
     setPhase("fetching");
     setReport(null);
@@ -297,6 +302,10 @@ export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: Tea
       newTeamKeyBytes.fill(0);
 
       // 5. POST rotation to server
+      if (lockedSince(lockEpoch)) {
+        toast.error(t("rotateKeyVaultRequired"));
+        return;
+      }
       setPhase("submitting");
 
       let res: Response;
@@ -312,7 +321,13 @@ export function TeamRotateKeyButton({ teamId, onSuccess, disabled = false }: Tea
             memberKeys,
           }),
         });
-      } catch {
+      } catch (e) {
+        // Refused by the proxy before the route ran: nothing was rotated. The
+        // page is reloading for the session that replaced this one.
+        if (e instanceof SessionChangedError) {
+          toast.error(tApi("sessionChanged"));
+          return;
+        }
         onOutcomeUnknown();
         return;
       }

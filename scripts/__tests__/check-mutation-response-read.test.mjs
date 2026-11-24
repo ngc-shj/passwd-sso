@@ -38,10 +38,25 @@ afterEach(() => {
   while (dirs.length > 0) rmSync(dirs.pop(), { recursive: true, force: true });
 });
 
+// Every fixture tree is resolved as the repository is: a tsconfig.json mapping
+// `@/` to src/, and the packages its rows load installed under node_modules.
+const TREE = {
+  "tsconfig.json": JSON.stringify({ compilerOptions: { module: "esnext", moduleResolution: "bundler", allowJs: true, jsx: "react-jsx", paths: { "@/*": ["./src/*"] } } }),
+  ...Object.fromEntries(
+    ["some-package", "hash-wasm", "@scope/pkg"].flatMap((pkg) => [
+      [`node_modules/${pkg}/package.json`, JSON.stringify({ name: pkg, types: "index.d.ts" })],
+      [`node_modules/${pkg}/index.d.ts`, "export declare function send(path: string): Promise<Response>;\n"],
+    ]),
+  ),
+  "node_modules/next/package.json": JSON.stringify({ name: "next" }),
+  "node_modules/next/headers.d.ts": "export declare function headers(): Headers;\n",
+};
+
 function run(files, env = {}) {
   const root = mkdtempSync(join(tmpdir(), "mutation-response-read-"));
   dirs.push(root);
-  for (const [rel, content] of Object.entries(files)) {
+  for (const [rel, content] of Object.entries({ ...TREE, ...files })) {
+    if (content === null) continue;
     const abs = join(root, rel);
     mkdirSync(dirname(abs), { recursive: true });
     writeFileSync(abs, content, "utf8");
@@ -583,8 +598,15 @@ describe("check-mutation-response-read", () => {
     ["an object key and a type key spelled fetchApi", { [A]: "export interface D { fetchApi: () => void }\nexport const d: D = { fetchApi: () => undefined };\n" }],
     ["a type-only renamed import", { [A]: 'import type { fetchApi as F } from "@/lib/url-helpers";\nexport type G = typeof F;\n' }],
     ["a named import of another binding from its module", { [A]: 'import { withBasePath } from "@/lib/url-helpers";\nexport const p = withBasePath("/x");\n' }],
-    ["a dynamic import whose template head rules it out", { "src/i18n/m.ts": "export async function g(m: string) {\n  return import(`../../messages/${m}.json`);\n}\n" }],
     ["a dynamic import of a const package name", { [A]: 'export async function g() {\n  const name = "hash-wasm";\n  return import(name);\n}\n' }],
+    // R8: specifiers that resolve to another scanned module or a package.
+    ["a namespace import of a sibling module whose name extends its module's", { [A]: 'import * as X from "@/lib/url-helpers-x";\nexport const g = (k: string) => (X as Record<string, unknown>)[k];\n', "src/lib/url-helpers-x.ts": "export const y = 1;\n" }],
+    ["a namespace import of a module under a directory of its module's name", { [A]: 'import * as X from "@/lib/urls/x";\nexport const r = X;\n', "src/lib/urls/x.ts": "export const y = 1;\n" }],
+    ["a namespace import of a directory index by a trailing slash", { [A]: 'import * as X from "@/lib/urls/";\nexport const r = X;\n', "src/lib/urls/index.ts": "export const y = 1;\n" }],
+    ["a namespace import of another module by a relative path", { [A]: 'import * as X from "../lib/other";\nexport const r = X;\n', "src/lib/other.ts": "export const y = 1;\n" }],
+    ["a namespace import of a scoped package", { [A]: 'import * as X from "@scope/pkg";\nexport const r = X;\n' }],
+    ["an export * of a scoped package", { "src/lib/index.ts": 'export * from "@scope/pkg";\n' }],
+    ["an import = require() of a package", { [A]: 'import X = require("some-package");\nexport const r = X;\n' }],
   ])("allows %s", (_label, files) => {
     const r = run({ "src/lib/url-helpers.ts": URL_HELPERS + "export const withBasePath = (p: string) => p;\n", ...files });
     expect(r.stderr).toBe("");
@@ -826,6 +848,8 @@ describe("check-mutation-response-read", () => {
   ])("allows a mutation read in a src/lib server module importing %s", (_label, header) => {
     const r = run({
       "src/components/ok.tsx": "export const ok = 1;\n",
+      // A marker by specifier is the module it resolves to, so the singleton is there.
+      "src/lib/prisma.ts": 'import "server-only";\nexport const prisma = {};\nexport default prisma;\n',
       "src/lib/vault/x.ts": libModule(header, POST_READ),
     });
     expect(r.code).toBe(0);
@@ -878,5 +902,84 @@ describe("check-mutation-response-read", () => {
     const r = run({ "src/components/a.ts": "export const ok = 1;\n" }, { CI: "true", MUTATION_RESPONSE_READ_FIXTURE_MODE: "" });
     expect(r.code).toBe(1);
     expect(r.stderr).toContain("MUTATION_RESPONSE_READ_ROOT must not be set in CI");
+  });
+});
+
+// R8: a specifier is decided by where it resolves, not by its text. Each of
+// these spellings resolves to src/lib/url-helpers.ts (TypeScript and the
+// bundler normalise it), and each passed the string rule on HEAD.
+describe("check-mutation-response-read: fetchApi's module by any spelling (R8)", () => {
+  const URL_HELPERS_R8 = "export function fetchApi(path: string, init?: RequestInit): Promise<Response> {\n  return fetch(path, init);\n}\n";
+  const A = "src/components/a.tsx";
+  const SPELLINGS = [
+    "@/lib/../lib/url-helpers",
+    "@/lib//url-helpers",
+    "@/./lib/url-helpers",
+    "@/lib/./url-helpers",
+    "@/components/../lib/url-helpers",
+    "../lib/../lib/url-helpers",
+    "../lib//url-helpers",
+  ];
+  const FORMS = [
+    ["a namespace import with a computed key", (s) => `import * as U from "${s}";\nexport const g = (k: string) => (U as Record<string, (p: string, i: RequestInit) => unknown>)[k]("/x", { method: "POST" });\n`, 1, "namespace import of its module"],
+    ["a default import", (s) => `import U from "${s}";\nexport const r = U;\n`, 1, "default import of its module"],
+    ["an export *", (s) => `export * from "${s}";\n`, 1, "export * of its module"],
+    ["an export * as", (s) => `export * as U from "${s}";\n`, 1, "export * of its module"],
+    ["an import()", (s) => `export async function g() {\n  return import("${s}");\n}\n`, 2, "import() that may load its module"],
+    ["a require()", (s) => `declare const require: (m: string) => unknown;\nexport const u = require("${s}");\n`, 2, "require() that may load its module"],
+    ["an import = require()", (s) => `import U = require("${s}");\nexport const r = U;\n`, 1, "import = require() that may load its module"],
+    ["a const string import()", (s) => `const m = "${s}";\nexport const g = () => import(m);\n`, 2, "import() that may load its module"],
+  ];
+  const ROWS = FORMS.flatMap(([form, code, line, why]) => SPELLINGS.map((spec) => [`${form} of ${spec}`, code(spec), line, why]));
+
+  it.each(ROWS)("refuses %s", (_label, content, line, why) => {
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS_R8, [A]: content });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`${A}:${line}  fetchApi used as a value (${why})`);
+  });
+
+  it.each([
+    ["an alias template head", "`@/lib/./${m}`"],
+    ["a template head with .. in it", "`@/lib/../lib/url-${m}`"],
+    ["a relative template head with a literal tail", "`../../messages/${m}.json`"],
+    ["a bare package template head", "`some-package/${m}`"],
+  ])("refuses an import() of %s", (_label, template) => {
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS_R8, [A]: `export async function g(m: string) {\n  return import(${template});\n}\n` });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`${A}:2  fetchApi used as a value (import() that may load its module)`);
+  });
+
+  it.each([
+    ["an unresolvable specifier", 'import * as U from "@/lib/nope";\nexport const r = U;\n', {}, "namespace import of its module"],
+    ["a module this gate does not scan", 'import * as U from "@/app/api/r/route";\nexport const r = U;\n', { "src/app/api/r/route.ts": 'export * from "@/lib/url-helpers";\n' }, "namespace import of its module"],
+    ["a module a .js sibling shadows", 'import * as U from "@/lib/shadow";\nexport const r = U;\n', { "src/lib/shadow.ts": "export const y = 1;\n", "src/lib/shadow.js": 'export * from "./url-helpers";\n' }, "namespace import of its module"],
+    ["require.context", 'declare const require: { context(d: string, r: boolean): unknown };\nexport const c = require.context("../lib", true);\n', {}, "require.context() that may load its module"],
+  ])("refuses %s", (_label, content, extra, why) => {
+    const r = run({ "src/lib/url-helpers.ts": URL_HELPERS_R8, ...extra, [A]: content });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain(`${A}:${content.startsWith("declare") ? 2 : 1}  fetchApi used as a value (${why})`);
+  });
+
+  it("does not take an unresolvable Prisma specifier as a server marker", () => {
+    const r = run({
+      "src/lib/vault/x.ts": 'import { prisma } from "@/lib/prisma";\ndeclare function fetchApi(path: string, init?: RequestInit): Promise<Response>;\nexport async function h() {\n  const res = await fetchApi("/x", { method: "POST" });\n  return res.json();\n}\n',
+    });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("src/lib/vault/x.ts:5");
+  });
+
+  it("takes a Prisma specifier spelled through .. as a server marker", () => {
+    const r = run({
+      "src/components/ok.tsx": "export const ok = 1;\n",
+      "src/lib/prisma.ts": 'import "server-only";\nexport const prisma = {};\n',
+      "src/lib/vault/x.ts": 'import { prisma } from "@/lib/vault/../prisma";\ndeclare function fetchApi(path: string, init?: RequestInit): Promise<Response>;\nexport async function h() {\n  const res = await fetchApi("/x", { method: "POST" });\n  return res.json();\n}\n',
+    });
+    expect(r.code).toBe(0);
+  });
+
+  it("refuses a tree with no tsconfig.json", () => {
+    const r = run({ "tsconfig.json": null, [A]: "export const a = 1;\n" });
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain("no tsconfig.json");
   });
 });

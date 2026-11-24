@@ -7,6 +7,7 @@ vi.mock("@/i18n/navigation", () => ({
 import { formatLockedUntil, resolveUnlockError } from "./vault-lock-screen";
 import { VaultUnlockError, VAULT_UNLOCK_INTERRUPTED } from "@/lib/vault/vault-context";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { SessionChangedError } from "@/lib/url-helpers";
 
 /**
  * Minimal t() mock that mirrors next-intl interpolation.
@@ -94,8 +95,16 @@ describe("resolveUnlockError", () => {
     rateLimited: "rate-limited",
     unavailable: "unavailable",
     interrupted: "interrupted",
+    sessionChanged: "session-changed",
     fallback: "fallback",
   };
+
+  it("reports a changed session, not a wrong passphrase or the fallback, for SessionChangedError", () => {
+    expect(resolveUnlockError(new SessionChangedError(), msgs)).toEqual({
+      kind: "message",
+      message: "session-changed",
+    });
+  });
 
   it("reports an expired session for UNAUTHORIZED", () => {
     expect(resolveUnlockError(new VaultUnlockError(API_ERROR.UNAUTHORIZED), msgs)).toEqual({

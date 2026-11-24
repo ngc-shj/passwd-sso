@@ -23,6 +23,8 @@ import { randomBytes } from "node:crypto";
 
 export const SCRATCH_DB_PREFIX = "passwd_it_";
 export const SCRATCH_DB_MARKER = "passwd-sso integration scratch database";
+/** application_name of the connection a run holds to its own scratch database. */
+export const SCRATCH_DB_KEEPER = "passwd-sso-integration-keeper";
 
 const NAME_PATTERN = new RegExp(`^${SCRATCH_DB_PREFIX}\\d{14}_\\d+_[0-9a-f]{8}$`);
 const MARKER_PATTERN = new RegExp(
@@ -74,6 +76,27 @@ export function scratchDatabaseRefusal(name, comment) {
 }
 
 /**
+ * The key holding the scratch marker in the Redis logical database a run
+ * claims (scripts/run-integration-tests.mjs). Here rather than there
+ * because setup.ts checks it and loads only this module.
+ */
+export const REDIS_CLAIM_KEY = "passwd-sso:integration-scratch";
+
+/**
+ * Why the harness must not use the Redis database it is connected to, or null
+ * when the database carries a scratch claim. `claim` is the claim key's value.
+ */
+export function scratchRedisRefusal(claim, { sentinel = false } = {}) {
+  if (sentinel) {
+    return "REDIS_SENTINEL is true: the Sentinel client ignores REDIS_URL's database index, so the suite would share the live keyspace";
+  }
+  if (!parseScratchMarker(claim)) {
+    return `the Redis database REDIS_URL selects does not carry the scratch claim (${REDIS_CLAIM_KEY}); it may be the live instance's`;
+  }
+  return null;
+}
+
+/**
  * Every DATABASE_URL / *_DATABASE_URL in env, pointed at `database` on the
  * same host, port and credentials. Generic over the key rather than a list,
  * so a role URL added to the harness later cannot keep naming the dev
@@ -101,10 +124,16 @@ export function scratchDatabaseEnv(env, database) {
 /**
  * The scratch databases a dead run on this host left behind: owned by the
  * role the runner connects as, marked, created here by a pid that no longer
- * exists, and with no connection. A database of a live run (here or on
- * another host sharing the cluster) is never chosen, nor one another role
- * owns whatever its name and comment say. Each comes with the comment it was
- * chosen by, for dropScratchDatabase to require.
+ * exists, and with no connection. A database another role owns is never
+ * chosen, whatever its name and comment say. Each comes with the comment it
+ * was chosen by, for dropScratchDatabase to require.
+ *
+ * The pid alone cannot tell a live run from a dead one: a run in another PID
+ * namespace with the same hostname (a container sharing the host's UTS
+ * namespace) has a pid this process cannot see. What does is the connection
+ * count: a run holds a keeper connection (SCRATCH_DB_KEEPER) to its database
+ * from before COMMENT sets the marker until just before its own drop, so a
+ * marked database of a live run always has one, between steps included.
  *
  * @param {{ name: string, owner: string, comment: string | null, connections: number }[]} rows
  * @param {{ role: string, host: string, isAlive: (pid: number) => boolean }} self

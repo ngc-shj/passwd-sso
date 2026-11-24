@@ -669,11 +669,115 @@ const body = {
     ["a block comment naming the constant", OTHER, `/* INITIAL_VAULT_KEY_VERSION is set only by vault setup */\nexport const x = 1;\n`],
     ["a string naming the constant outside a member read", OTHER, `export const s = "INITIAL_VAULT_KEY_VERSION";\n`],
     ["the index namespace read by member names", OTHER, `import * as C from "@/lib/constants";\nexport const s = C.VAULT_STATUS;\ntype T = typeof C;\n`],
-    ["a dynamic import whose template head rules it out", "src/i18n/messages.ts", "export const m = (p: string) => import(`../../messages/${p}.json`);\n"],
     ["a dynamic import of a const package name", "src/lib/crypto/crypto-client.ts", `export async function f() {\n  const moduleName = "hash-wasm";\n  return import(/* webpackIgnore: true */ moduleName);\n}\n`],
     ["a require of a package", "src/lib/key-provider/p.ts", `export const m = require("node:module");\n`],
+    // R8: specifiers that resolve to another scanned module or a package.
+    ["a namespace import of a module outside constants/", OTHER, `import * as X from "@/lib/url-helpers";\nexport const v = X;\n`],
+    ["a namespace import of a sibling module under constants/", OTHER, `import * as X from "@/lib/constants/vault/../team/invitation";\nexport const v = X;\n`],
+    ["a namespace import of another module by a relative path", OTHER, `import * as X from "../url-helpers";\nexport const v = X;\n`],
+    ["a namespace import of a scoped package", OTHER, `import * as X from "@prisma/client";\nexport const v = X;\n`],
+    ["an import = require() of a package", OTHER, `import X = require("node:module");\nexport const v = X;\n`],
   ])("allows %s", (_label, rel, content) => {
     expect(checkKeyVersionHardcode([{ rel, content }])).toEqual([]);
+  });
+
+  // R8: a specifier is decided by where it resolves. Each spelling below
+  // resolves to src/lib/constants/index.ts or src/lib/constants/vault/vault.ts,
+  // and each passed the string rule on HEAD.
+  const INDEX_SPELLINGS = [
+    "@/lib/../lib/constants",
+    "@/lib//constants",
+    "@/./lib/constants",
+    "@/lib/./constants",
+    "@/components/../lib/constants",
+    "@/lib/constants/",
+    "../constants/",
+    "../constants/index.ts",
+  ];
+  const DEFINITION_SPELLINGS = ["@/lib/constants/vault/../vault/vault", "@/lib/constants//vault/vault", "../constants/./vault/vault"];
+  const INDEX_NS = "reachable through namespace C of src/lib/constants used other than as C.<name>";
+  const LOADER = (l) => `reachable through an ${l} that may load its module`;
+  const R8_FORMS = [
+    ["a computed key on its namespace", (s) => `import * as C from "${s}";\nconst k = "INITIAL_VAULT_KEY_VERSION";\nexport const v = C[k as keyof typeof C];\n`, 3, INDEX_NS, "index"],
+    ["a namespace import", (s) => `import * as C from "${s}";\nexport const v = C.VAULT_STATUS;\n`, 1, "reachable through a namespace import of its definition module", "definition"],
+    ["a default import", (s) => `import C from "${s}";\nexport const v = C;\n`, 1, null, "both"],
+    ["an export *", (s) => `export * from "${s}";\n`, 1, "re-exported by export *", "both"],
+    ["an import()", (s) => `export const m = () => import("${s}");\n`, 1, LOADER("import()"), "both"],
+    ["a require()", (s) => `export const m = require("${s}");\n`, 1, LOADER("require()"), "both"],
+    ["an import = require()", (s) => `import C = require("${s}");\nexport const v = C;\n`, 1, LOADER("import = require()"), "both"],
+    ["a const string import()", (s) => `const n = "${s}";\nexport const m = () => import(n);\n`, 2, LOADER("import()"), "both"],
+  ];
+  const R8_ROWS = R8_FORMS.flatMap(([form, code, line, what, applies]) => {
+    const specs = applies === "index" ? INDEX_SPELLINGS : applies === "definition" ? DEFINITION_SPELLINGS : [...INDEX_SPELLINGS, ...DEFINITION_SPELLINGS];
+    return specs.map((spec) => {
+      const isDefinition = DEFINITION_SPELLINGS.includes(spec);
+      const w = what ?? (isDefinition ? "reachable through a default import of its definition module" : "reachable through a default import of src/lib/constants");
+      return [`${form} of ${spec}`, code(spec), w, line];
+    });
+  });
+
+  it.each(R8_ROWS)("flags %s (R8)", (_label, content, what, line) => {
+    const errors = checkKeyVersionHardcode([{ rel: OTHER, content }]);
+    expect(errors.some((e) => e.startsWith(at(what, OTHER, line)))).toBe(true);
+  });
+
+  it.each([
+    ["an alias template head", OTHER, "export const m = (p: string) => import(`@/lib/./${p}`);\n"],
+    ["a template head with .. in it", OTHER, "export const m = (p: string) => import(`@/lib/../lib/consta${p}`);\n"],
+    ["the messages template outside messages.ts", "src/i18n/other.ts", "export const m = (safe: string, ns: string) => import(`../../messages/${safe}/${ns}.json`);\n"],
+    ["another template in messages.ts", "src/i18n/messages.ts", "export const m = (p: string) => import(`../../messages/${p}.json`);\n"],
+    ["a bare package template head", OTHER, "export const m = (p: string) => import(`hash-wasm/${p}`);\n"],
+    ["require.context", OTHER, "export const c = require.context(\"../constants\", true);\n"],
+  ])("flags a loader of %s (R8)", (_label, rel, content) => {
+    const errors = checkKeyVersionHardcode([{ rel, content }]);
+    expect(errors.some((e) => e.startsWith(`Check E: INITIAL_VAULT_KEY_VERSION reachable through an `) && e.includes(` at ${rel}:1 `))).toBe(true);
+  });
+
+  // R8: Check E no longer picks its files by a regex over the text; each of
+  // these passed that prefilter on HEAD and so was never parsed.
+  const BACKSLASH = String.fromCharCode(92);
+  it.each([
+    ["a default import of the index", `import C from "@/lib/constants";\nexport const v = C;\n`, "reachable through a default import of src/lib/constants", 1],
+    ["a comment between import and *", `import /**/ * as C from "@/lib/constants/vault/vault";\nexport const v = C;\n`, "reachable through a namespace import of its definition module", 1],
+    ["an escaped spelling of the name", `import { INITIAL_VAULT_KEY_VERSION } from "@/lib/constants";\nexport const v = INITIAL_VAULT_KEY_VERSIO${BACKSLASH}u004e;\n`.replace("import { INITIAL_VAULT_KEY_VERSION }", `import { INITIAL_VAULT_KEY_VERSIO${BACKSLASH}u004e }`), "used", 2],
+  ])("flags %s (R8)", (_label, content, what, line) => {
+    const errors = checkKeyVersionHardcode([{ rel: OTHER, content }]);
+    expect(errors.some((e) => e.startsWith(at(what, OTHER, line)))).toBe(true);
+  });
+
+  it("flags an index re-export from a specifier that does not resolve to the definition module (R8)", () => {
+    const rel = "src/lib/constants/index.ts";
+    const errors = checkKeyVersionHardcode([{ rel, content: `export { INITIAL_VAULT_KEY_VERSION } from "./vault/nope";\n` }]);
+    expect(errors.some((e) => e.startsWith(at("exported", rel, 1)))).toBe(true);
+  });
+
+  it("allows an index re-export from the definition module spelled through .. (R8)", () => {
+    const rel = "src/lib/constants/index.ts";
+    expect(checkKeyVersionHardcode([{ rel, content: `export { INITIAL_VAULT_KEY_VERSION } from "./vault/../vault/vault";\n` }])).toEqual([]);
+  });
+
+  // A repo file outside the structural scan (../sentry.server.config) is pulled
+  // into Check E's scan rather than left undecided.
+  it("allows a load of a repo file outside the structural scan, which it then scans (R8)", () => {
+    const rel = "src/instrumentation.ts";
+    expect(checkKeyVersionHardcode([{ rel, content: `export const m = () => import("../sentry.server.config");\n` }])).toEqual([]);
+  });
+
+  const MESSAGES_LOADER = "  const mod = await import(`../../messages/${safe}/${ns}.json`);\n";
+  it("allows the messages loader template in messages.ts, twice", () => {
+    expect(checkKeyVersionHardcode([{ rel: "src/i18n/messages.ts", content: MESSAGES_LOADER + MESSAGES_LOADER }])).toEqual([]);
+  });
+
+  it("refuses a stale messages loader entry: the template once", () => {
+    expect(checkKeyVersionHardcode([{ rel: "src/i18n/messages.ts", content: MESSAGES_LOADER }])).toEqual([
+      "Check E: src/i18n/messages.ts: template `../../messages/${safe}/${ns}.json` matched 1 time(s), expected 2 (stale template loader allowlist entry)",
+    ]);
+  });
+
+  it("refuses a stale messages loader entry: messages.ts absent from a whole scan", () => {
+    expect(checkKeyVersionHardcode([{ rel: OTHER, content: "export const x = 1;\n" }], { whole: true })).toEqual([
+      "Check E: src/i18n/messages.ts: template loader allowlist entry names a file that is not scanned (stale)",
+    ]);
   });
 
   it("does not flag a ternary expression like data.keyVersion : 1", () => {

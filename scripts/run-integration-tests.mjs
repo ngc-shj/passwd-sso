@@ -9,44 +9,68 @@
 // behind broke later runs. Now:
 //
 //   1. drop the scratch databases a dead run on this host left behind (owned
-//      by the role MIGRATION_DATABASE_URL names; see staleScratchDatabases);
+//      by the role MIGRATION_DATABASE_URL names, marked, and with no
+//      connection; see staleScratchDatabases);
 //   2. CREATE DATABASE <passwd_it_…> TEMPLATE template0 on the cluster
 //      MIGRATION_DATABASE_URL names (a superuser), empty: never a copy of the
-//      dev database, whose data is the problem. COMMENT ON DATABASE sets the
-//      marker setup.ts requires, with a nonce only this run holds
-//      (scripts/lib/integration-scratch-db.mjs);
-//   3. the per-database half of scripts/bootstrap-rds-roles.mjs
+//      dev database, whose data is the problem. A keeper connection
+//      (application_name passwd-sso-integration-keeper) is opened to it, then
+//      COMMENT ON DATABASE sets the marker setup.ts requires, with a nonce
+//      only this run holds (scripts/lib/integration-scratch-db.mjs). The
+//      keeper stays open until step 9, so the database of a live run always
+//      has a connection, and a sweep never takes it for a dead run's;
+//   3. with REDIS_URL set: flush the Redis logical databases dead runs on
+//      this host claimed, then claim one for this run — empty, no client
+//      selected on it, never the index REDIS_URL names — on a keeper
+//      connection that stays selected on it until step 9
+//      (the Redis section below); REDIS_SENTINEL=true is
+//      refused (the Sentinel client ignores the index);
+//   4. the per-database half of scripts/bootstrap-rds-roles.mjs
 //      (applyPrivilegeSequence: passwd_app's CONNECT/schema/table grants and
 //      default privileges, the worker roles' schema privileges), BEFORE the
 //      migrations — where initdb and the RDS bootstrap put it — so the
 //      migrations' own grants and revokes land on top, as in dev and
 //      production. Role creation and passwords are cluster-global and are not
 //      touched: the roles must already exist (dev: initdb; CI: the full
-//      bootstrap in the step before this one);
-//   4. `prisma migrate deploy`, then `bootstrap-rds-roles.mjs --denied-only`
+//      bootstrap and one `prisma migrate deploy` of the job's default
+//      database, in the steps before this one);
+//   5. `prisma migrate deploy`, then `bootstrap-rds-roles.mjs --denied-only`
 //      (the must-never-be-granted policy, every target required);
-//   5. the cluster-global state of the existing passwd_* roles (attributes,
+//   6. the cluster-global state of the existing passwd_* roles (attributes,
 //      password, connection limit, memberships, cluster-wide settings) must
-//      be unchanged by 3–4. The migrations re-run their role statements on
+//      be unchanged by 4–5, and the snapshot taken before them must have
+//      found roles to compare. The migrations re-run their role statements on
 //      every new database; on a cluster that already ran them they are no-ops,
-//      and this check holds that rather than assuming it. CI, whose cluster is
-//      created for the job, sets INTEGRATION_ALLOW_CLUSTER_ROLE_CHANGES=1;
-//   6. `npm run db:check-drift` against the scratch database;
-//   7. vitest with vitest.integration.config.ts and the arguments given, with
+//      and this check holds that rather than assuming it;
+//   7. `npm run db:check-drift` against the scratch database;
+//   8. vitest with vitest.integration.config.ts and the arguments given, with
 //      DATABASE_URL, MIGRATION_DATABASE_URL and every *_DATABASE_URL in the
-//      environment pointed at the scratch database;
-//   8. drop it (WITH (FORCE), which terminates its connections) and confirm
-//      it is gone — only if step 2's CREATE succeeded, and only while the
-//      database is still owned by this role and carries this run's exact
-//      marker (dropScratchDatabase). Anything else is reported, not dropped.
+//      environment pointed at the scratch database and REDIS_URL at the
+//      claimed logical database; a keeper that ended before this point or
+//      during it fails the run;
+//   9. FLUSHDB the claimed Redis database if it still carries this run's
+//      claim, close the keepers, then drop the scratch database (WITH (FORCE),
+//      which terminates its connections) and confirm it is gone — only if
+//      step 2's CREATE succeeded, and only while the database is still owned
+//      by this role and carries this run's exact marker
+//      (dropScratchDatabase). Anything else is reported, not dropped; a
+//      CREATE whose reply was lost, leaving a database of that name present,
+//      is reported too.
 //
-// Step 8 runs however the run ends. Once it starts, INT/TERM/HUP are ignored
+// What is isolated per run: the Postgres database (every table, sequence and
+// per-database grant) and the Redis keyspace of one logical database. What is
+// not: Postgres roles and their cluster-wide state (shared, checked in step
+// 6), the Redis server's memory and eviction, and any service a test reaches
+// by its own URL (the S3 stand-in, Jackson).
+//
+// Step 9 runs however the run ends. Once it starts, INT/TERM/HUP are ignored
 // (the handlers stay installed, so they cannot kill the process mid-drop); a
 // signal before that is forwarded to the running child (a second one kills
-// it) and the run goes straight to step 8. A drop that fails, or a database
-// still present after it, prints INTEGRATION_CLEANUP_INCOMPLETE and exits
-// nonzero even when every test passed. SIGKILL is irreducible: step 1 of the
-// next run on this host removes what it left.
+// it) and the run goes straight to step 9. A drop that fails, a database
+// still present after it, or a Redis database that could not be flushed
+// prints INTEGRATION_CLEANUP_INCOMPLETE and exits nonzero even when every
+// test passed. SIGKILL is irreducible: steps 1 and 3 of the next run on this
+// host remove what it left (its keepers die with it).
 //
 // Exit: vitest's status; 128+n after signal n; 1 for a setup or cleanup
 // failure.
@@ -57,12 +81,17 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { config } from "dotenv";
 import pg from "pg";
+import Redis from "ioredis";
 import { applyPrivilegeSequence, loadDeniedPolicy } from "./bootstrap-rds-roles.mjs";
 import {
+  REDIS_CLAIM_KEY,
+  SCRATCH_DB_KEEPER,
   dropScratchDatabase,
+  parseScratchMarker,
   scratchDatabaseEnv,
   scratchDatabaseName,
   scratchMarker,
+  scratchRedisRefusal,
   staleScratchDatabases,
 } from "./lib/integration-scratch-db.mjs";
 
@@ -143,7 +172,7 @@ export async function runWithScratchDatabase({ main, drop, name = "the scratch d
   }
   if (!dropped) {
     say(
-      `INTEGRATION_CLEANUP_INCOMPLETE ${name} was not dropped; check its owner and comment, and drop it by hand (DROP DATABASE … WITH (FORCE), as the superuser) only if this run created it`,
+      `INTEGRATION_CLEANUP_INCOMPLETE ${name} or this run's Redis database was not removed (the lines above say which); check the database's owner and comment and drop it by hand (DROP DATABASE … WITH (FORCE), as the superuser) only if this run created it`,
     );
     return status !== 0 ? status : 1;
   }
@@ -185,36 +214,268 @@ const ROLE_STATE_SQL = `
    ORDER BY a.rolname`;
 
 /**
+ * One line per problem with the cluster-global role state around preparing
+ * the scratch database, or [] when it is unchanged. An empty `before` is a
+ * problem in itself: a snapshot that examined no role proves nothing
+ * unchanged (a cluster whose roles are missing or renamed would pass).
+ */
+export function roleStateProblems(before, after) {
+  if (before.length === 0) {
+    return ["the role snapshot found no passwd_* role on this cluster, so it cannot show them unchanged"];
+  }
+  return roleStateChanges(before, after);
+}
+
+// SQLSTATE duplicate_database: CREATE DATABASE failed because the name was
+// taken, so nothing was created. Any other failure (the reply lost to a reset
+// connection among them) leaves open whether it committed.
+const DUPLICATE_DATABASE = "42P04";
+
+/**
  * The scratch database's create and drop. drop() removes only what create()
  * made: nothing when CREATE did not succeed (a database of that name that
  * already existed is someone else's), and otherwise only through
  * dropScratchDatabase, expecting the marker once COMMENT succeeded and no
  * comment before that.
  *
+ * A CREATE whose outcome is unknown (an error other than duplicate_database)
+ * is checked at drop time: a database of that name then present may be this
+ * run's, but nothing proves it, so it is reported (drop() returns false, the
+ * caller prints INTEGRATION_CLEANUP_INCOMPLETE naming it), never dropped.
+ *
+ * Between CREATE and COMMENT, openKeeper() opens the keeper connection to the
+ * new database (see staleScratchDatabases): the database is never marked
+ * without a connection, so another run's sweep cannot take it for a dead
+ * run's. drop() closes it just before the drop; keeperLost() says whether it
+ * ended before that.
+ *
  * @param {{
  *   name: string,
  *   marker: string,
  *   connect: <T>(fn: (c: { query: Function, escapeLiteral: (s: string) => string }) => Promise<T>) => Promise<T>,
+ *   openKeeper: () => Promise<{ close: () => Promise<void>, lost: () => boolean }>,
  *   log?: (msg: string) => void,
  * }} opts
  */
-export function scratchDatabaseLifecycle({ name, marker, connect, log: say = log }) {
+export function scratchDatabaseLifecycle({ name, marker, connect, openKeeper, log: say = log }) {
   let created = false;
+  let outcomeUnknown = false;
   let comment = null;
+  let keeper = null;
   return {
-    create: () =>
-      connect(async (c) => {
-        await c.query(`CREATE DATABASE "${name}" TEMPLATE template0`);
-        created = true;
-        await c.query(`COMMENT ON DATABASE "${name}" IS ${c.escapeLiteral(marker)}`);
-        comment = marker;
-      }),
+    create: async () => {
+      try {
+        await connect((c) => c.query(`CREATE DATABASE "${name}" TEMPLATE template0`));
+      } catch (e) {
+        if (e?.code !== DUPLICATE_DATABASE) outcomeUnknown = true;
+        throw e;
+      }
+      created = true;
+      keeper = await openKeeper();
+      await connect((c) => c.query(`COMMENT ON DATABASE "${name}" IS ${c.escapeLiteral(marker)}`));
+      comment = marker;
+    },
+    keeperLost: () => keeper?.lost() ?? false,
     drop: async () => {
+      if (keeper) {
+        await keeper.close();
+        keeper = null;
+      }
       if (!created) {
-        say(`${name} was not created by this run; nothing to drop`);
-        return true;
+        if (!outcomeUnknown) {
+          say(`${name} was not created by this run; nothing to drop`);
+          return true;
+        }
+        const { rowCount } = await connect((c) => c.query("SELECT 1 FROM pg_database WHERE datname = $1", [name]));
+        if (rowCount === 0) return true;
+        say(
+          `${name} exists although its CREATE DATABASE reported an error (the reply may have been lost after the commit); this run cannot prove it created it, so it is not dropping it`,
+        );
+        return false;
       }
       return connect((c) => dropScratchDatabase(c, name, comment));
+    },
+  };
+}
+
+// ---- Redis: the logical database a run claims ----
+//
+// The Redis half of an integration run's isolation: the logical database
+// (SELECT index) this runner claims for one run on the
+// server REDIS_URL names, points the suite's REDIS_URL at, and FLUSHDBs when
+// the run ends. The suite drives rate-limit buckets, session-cache entries and
+// tombstones (e.g. mcp-token-ip-rate-capacity's rl:mcp:token:ip:unknown) that
+// the live instance on the same Redis reads; on the instance's own database
+// the suite resets its limiters and inherits its state.
+//
+// Why a logical database, not a key prefix: a prefix isolates only the keys a
+// client prefixes. The app's client (src/lib/redis.ts) has none, the suite
+// opens its own ioredis clients from REDIS_URL, and every one of them, plus
+// any child process the suite spawns, would have to honour it; a client that
+// does not writes into the live keyspace. SELECT is part of the connection
+// URL, so every client built from REDIS_URL lands in the claimed database.
+// What a logical database does not isolate: memory, eviction, and server-wide
+// commands (FLUSHALL, CONFIG); no test issues the latter.
+//
+// Redis has no owner for a database, so the claim stands in for one: a
+// database is taken only if it is empty and no other client has it selected
+// (checked, then claimed by a script that sets the claim key only while
+// DBSIZE is 0 — atomic on the server), and it is flushed only by a script
+// that first compares the claim key with the run's own marker. The claiming
+// connection (the keeper) stays selected on the database until the release,
+// so a live run's database always has a client on it, and the sweep of a dead
+// run's database requires none (the same rule as the Postgres scratch
+// database's keeper).
+
+// Set the claim only on an empty database. KEYS[1]: claim key, ARGV[1]: marker.
+export const CLAIM_SCRIPT = `if redis.call('DBSIZE') == 0 then redis.call('SET', KEYS[1], ARGV[1]) return 1 end return 0`;
+// Flush only while the claim is still ARGV[1].
+export const RELEASE_SCRIPT = `if redis.call('GET', KEYS[1]) == ARGV[1] then redis.call('FLUSHDB') return 1 end return 0`;
+
+/** The logical database REDIS_URL selects (its path), 0 when it names none. */
+export function redisDatabaseIndex(url) {
+  const path = new URL(url).pathname.replace(/^\//, "");
+  if (path === "") return 0;
+  if (!/^\d+$/.test(path)) throw new Error("REDIS_URL's path is not a database index");
+  return Number(path);
+}
+
+/** `url` with its database index replaced by `index`. */
+export function redisUrlForIndex(url, index) {
+  const u = new URL(url);
+  u.pathname = `/${index}`;
+  return u.toString();
+}
+
+/** CLIENT LIST output as [{ id, db }]. */
+export function parseClientList(text) {
+  return text
+    .split("\n")
+    .filter((line) => line.trim() !== "")
+    .map((line) => {
+      const fields = Object.fromEntries(
+        line
+          .trim()
+          .split(" ")
+          .map((kv) => {
+            const i = kv.indexOf("=");
+            return [kv.slice(0, i), kv.slice(i + 1)];
+          }),
+      );
+      return { id: Number(fields.id), db: Number(fields.db) };
+    });
+}
+
+async function clientsOn(client, index, selfId) {
+  const list = parseClientList(String(await client.call("CLIENT", "LIST")));
+  return list.filter((c) => c.db === index && c.id !== selfId).length;
+}
+
+async function databaseCount(client) {
+  try {
+    const reply = await client.call("CONFIG", "GET", "databases");
+    const n = Number(Array.isArray(reply) ? reply[1] : NaN);
+    return Number.isInteger(n) && n > 0 ? n : 16;
+  } catch {
+    // CONFIG may be renamed or denied by ACL; 16 is the server default.
+    return 16;
+  }
+}
+
+/**
+ * Flush the databases dead runs on this host claimed: claim parses, created
+ * here by a pid that no longer exists, and no client has the database
+ * selected. Each flush re-checks the claim on the server.
+ *
+ * @param {{ call: (...args: unknown[]) => Promise<unknown> }} client the keeper
+ */
+export async function sweepStaleRedis(client, { devIndex, host, isAlive, log }) {
+  const selfId = Number(await client.call("CLIENT", "ID"));
+  const count = await databaseCount(client);
+  for (let index = 0; index < count; index++) {
+    if (index === devIndex) continue;
+    await client.call("SELECT", index);
+    const claim = await client.call("GET", REDIS_CLAIM_KEY);
+    const marker = parseScratchMarker(claim);
+    if (!marker || marker.host !== host || isAlive(marker.pid)) continue;
+    if ((await clientsOn(client, index, selfId)) > 0) continue;
+    if (Number(await client.call("EVAL", RELEASE_SCRIPT, 1, REDIS_CLAIM_KEY, claim)) === 1) {
+      log(`flushed Redis database ${index}, claimed by a run on this host that no longer exists`);
+    }
+  }
+}
+
+/**
+ * Claim an empty Redis database no other client has selected, leaving
+ * `client` (the keeper) selected on it. Never the database `devIndex` names.
+ * Returns the index.
+ *
+ * @param {{ call: (...args: unknown[]) => Promise<unknown> }} client
+ */
+export async function claimScratchRedis(client, { devIndex, marker }) {
+  const selfId = Number(await client.call("CLIENT", "ID"));
+  const count = await databaseCount(client);
+  for (let index = 0; index < count; index++) {
+    if (index === devIndex) continue;
+    if ((await clientsOn(client, index, selfId)) > 0) continue;
+    await client.call("SELECT", index);
+    if (Number(await client.call("EVAL", CLAIM_SCRIPT, 1, REDIS_CLAIM_KEY, marker)) === 1) return index;
+  }
+  throw new Error(
+    `no Redis logical database is free for this run (every index but ${devIndex} is non-empty or has a client selected)`,
+  );
+}
+
+/**
+ * Flush the claimed database if the claim is still `marker`. Returns whether
+ * it was flushed.
+ */
+export async function releaseScratchRedis(client, marker) {
+  return Number(await client.call("EVAL", RELEASE_SCRIPT, 1, REDIS_CLAIM_KEY, marker)) === 1;
+}
+
+/**
+ * The Redis logical database this run claims (see above):
+ * claim() sweeps dead runs' claims, claims a free database on the keeper and
+ * returns REDIS_URL pointed at it; release() flushes it if the claim is still
+ * this run's, then closes the keeper. Without a REDIS_URL both do nothing.
+ *
+ * @param {{
+ *   url: string | undefined,
+ *   sentinel: boolean,
+ *   marker: string,
+ *   openKeeper: (url: string) => Promise<{ call: (...args: unknown[]) => Promise<unknown>, close: () => Promise<void>, lost: () => boolean }>,
+ *   host?: string,
+ *   isAlive?: (pid: number) => boolean,
+ *   log?: (msg: string) => void,
+ * }} opts
+ */
+export function scratchRedisLifecycle({ url, sentinel, marker, openKeeper, host = hostname(), isAlive: alive = isAlive, log: say = log }) {
+  let keeper = null;
+  let index = null;
+  return {
+    claim: async () => {
+      if (!url) return undefined;
+      if (sentinel) throw new Error(scratchRedisRefusal(null, { sentinel }));
+      const devIndex = redisDatabaseIndex(url);
+      keeper = await openKeeper(redisUrlForIndex(url, devIndex));
+      await sweepStaleRedis(keeper, { devIndex, host, isAlive: alive, log: say });
+      index = await claimScratchRedis(keeper, { devIndex, marker });
+      say(`claimed Redis logical database ${index}`);
+      return redisUrlForIndex(url, index);
+    },
+    keeperLost: () => keeper?.lost() ?? false,
+    release: async () => {
+      if (!keeper) return true;
+      try {
+        if (index === null) return true;
+        if (await releaseScratchRedis(keeper, marker)) return true;
+        say(`Redis logical database ${index} no longer carries this run's claim; it was not flushed`);
+        return false;
+      } finally {
+        await keeper.close();
+        keeper = null;
+      }
     },
   };
 }
@@ -223,6 +484,52 @@ function urlFor(base, database) {
   const u = new URL(base);
   u.pathname = `/${database}`;
   return u.toString();
+}
+
+async function openPgKeeper(url) {
+  const client = new pg.Client({ connectionString: url, application_name: SCRATCH_DB_KEEPER });
+  let closing = false;
+  let lost = false;
+  const onGone = () => {
+    if (!closing) lost = true;
+  };
+  client.on("error", onGone);
+  client.on("end", onGone);
+  await client.connect();
+  return {
+    lost: () => lost,
+    close: async () => {
+      closing = true;
+      await client.end().catch(() => {});
+    },
+  };
+}
+
+async function openRedisKeeper(url) {
+  // No reconnect: a reconnected keeper would come back on another database
+  // without the run noticing it had left this one unattended.
+  const client = new Redis(url, {
+    connectionName: SCRATCH_DB_KEEPER,
+    lazyConnect: true,
+    retryStrategy: () => null,
+    maxRetriesPerRequest: 0,
+    enableOfflineQueue: false,
+  });
+  let closing = false;
+  let lost = false;
+  client.on("error", () => {});
+  client.on("end", () => {
+    if (!closing) lost = true;
+  });
+  await client.connect();
+  return {
+    call: (...args) => client.call(...args),
+    lost: () => lost,
+    close: async () => {
+      closing = true;
+      await client.quit().catch(() => client.disconnect());
+    },
+  };
 }
 
 async function withClient(url, fn) {
@@ -288,22 +595,48 @@ async function cli(argv) {
   const name = scratchDatabaseName();
   const scratchUrl = urlFor(superuserUrl, name);
   const connect = (fn) => withClient(maintenanceUrl, fn);
-  const scratch = scratchDatabaseLifecycle({
-    name,
-    marker: scratchMarker({ host: hostname(), pid: process.pid, createdAt: new Date() }),
-    connect,
+  const marker = scratchMarker({ host: hostname(), pid: process.pid, createdAt: new Date() });
+  const scratch = scratchDatabaseLifecycle({ name, marker, connect, openKeeper: () => openPgKeeper(scratchUrl) });
+  const redis = scratchRedisLifecycle({
+    url: process.env.REDIS_URL,
+    sentinel: process.env.REDIS_SENTINEL === "true",
+    marker,
+    openKeeper: openRedisKeeper,
   });
-  const env = { ...process.env, ...scratchDatabaseEnv(process.env, name) };
-  const allowRoleChanges = process.env.INTEGRATION_ALLOW_CLUSTER_ROLE_CHANGES === "1";
+  const keeperLost = () => {
+    if (scratch.keeperLost()) {
+      throw new Error(`the keeper connection to ${name} ended; another run's sweep may have taken the database for a dead run's`);
+    }
+    if (redis.keeperLost()) {
+      throw new Error("the keeper connection to the claimed Redis database ended; another run's sweep may have flushed it");
+    }
+  };
 
   return runWithScratchDatabase({
     name,
-    drop: scratch.drop,
+    drop: async () => {
+      // Both, whichever fails: a Redis claim left behind blocks no one but
+      // holds the suite's keys until the next run's sweep.
+      let redisReleased = false;
+      try {
+        redisReleased = await redis.release();
+      } catch (e) {
+        log(`releasing the Redis database failed: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      return (await scratch.drop()) && redisReleased;
+    },
     main: async ({ run, checkInterrupted }) => {
       await sweepStale(connect);
       checkInterrupted();
       log(`creating scratch database ${name}`);
       await scratch.create();
+      checkInterrupted();
+      const redisUrl = await redis.claim();
+      const env = {
+        ...process.env,
+        ...scratchDatabaseEnv(process.env, name),
+        ...(redisUrl ? { REDIS_URL: redisUrl } : {}),
+      };
       checkInterrupted();
       const rolesBefore = await withClient(scratchUrl, async (c) => (await c.query(ROLE_STATE_SQL)).rows);
       await withClient(scratchUrl, async (c) => {
@@ -322,21 +655,25 @@ async function cli(argv) {
         throw new Error("bootstrap-rds-roles.mjs --denied-only failed");
       }
       const rolesAfter = await withClient(scratchUrl, async (c) => (await c.query(ROLE_STATE_SQL)).rows);
-      const changed = roleStateChanges(rolesBefore, rolesAfter);
-      if (changed.length > 0 && !allowRoleChanges) {
+      const problems = roleStateProblems(rolesBefore, rolesAfter);
+      if (problems.length > 0) {
         throw new Error(
           [
-            "preparing the scratch database changed cluster-global state of existing roles:",
-            ...changed.map((c) => `  ${c}`),
-            "Roles are shared by every database on the cluster, the dev database included. A migration changed them;",
-            "find which, and make it converge to the state an already-migrated cluster has.",
+            "the cluster-global state of the existing roles could not be shown unchanged by preparing the scratch database:",
+            ...problems.map((c) => `  ${c}`),
+            "Roles are shared by every database on the cluster, the dev database included. The roles must exist before",
+            "the run (initdb locally; bootstrap-rds-roles.mjs, then one `prisma migrate deploy`, in CI), and a migration",
+            "that changes them must converge to the state an already-migrated cluster has.",
           ].join("\n"),
         );
       }
       if ((await run("npm", ["run", "--silent", "db:check-drift"], env)) !== 0) {
         throw new Error("schema.prisma does not match the migrated scratch database (npm run db:check-drift)");
       }
-      return run("npx", ["vitest", "run", "--config", "vitest.integration.config.ts", ...argv], env);
+      keeperLost();
+      const status = await run("npx", ["vitest", "run", "--config", "vitest.integration.config.ts", ...argv], env);
+      keeperLost();
+      return status;
     },
   });
 }

@@ -28,10 +28,12 @@ import {
   PASSPHRASE_CHANGE_COMMITTED_VAULT_LOCKED,
   PASSPHRASE_CHANGE_NOT_STARTED_VAULT_LOCKED,
   VAULT_UNLOCK_INTERRUPTED,
+  VAULT_SETUP_OUTCOME_UNKNOWN,
   VaultChangeOutcomeUnknownError,
   VaultChangedElsewhereError,
 } from "./vault-context";
 import { VAULT_STATUS } from "@/lib/constants";
+import { SessionChangedError } from "@/lib/url-helpers";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { stashPrf, clearPrf } from "@/lib/auth/prf-handoff";
 import {
@@ -421,6 +423,89 @@ describe("VaultProvider — setup error path", () => {
   }, 30_000);
 });
 
+// F7-3: the setup route answers 201 once committed and nothing else after it.
+// A rejected fetch or a 5xx that is not a pre-route refusal may follow the
+// commit, so the vault may exist with the passphrase just entered.
+describe("VaultProvider — setup whose outcome is unknown", () => {
+  /**
+   * Run setup where the setup POST commits on the server (when `commits`) and
+   * then gets `response`. Counts the vault status requests sent after the POST.
+   */
+  async function setupAnswered(response: MockFetchResponse | Error, commits: boolean) {
+    const { fetchMock } = makeFetchEnv(null);
+    const baseHandler = fetchMock.getMockImplementation();
+    if (!baseHandler) throw new Error("fetch env has no base handler");
+    const counts = { posted: false, statusAfterPost: 0 };
+    globalThis.fetch = (async (url: string, init?: RequestInit) => {
+      if (url === "/api/vault/setup") {
+        counts.posted = true;
+        if (commits) await baseHandler(url, init);
+        if (response instanceof Error) throw response;
+        return response;
+      }
+      if (url === "/api/vault/status" && counts.posted) counts.statusAfterPost += 1;
+      return baseHandler(url, init);
+    }) as unknown as typeof fetch;
+
+    const { result } = renderHook(() => useVault(), { wrapper });
+    await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.SETUP_REQUIRED));
+    let caught: unknown;
+    await act(async () => {
+      try {
+        await result.current.setup(PASSPHRASE);
+      } catch (e) {
+        caught = e;
+      }
+    });
+    return { result, caught, counts };
+  }
+
+  it.each([
+    ["a POST rejected in transit", new TypeError("Failed to fetch")],
+    ["a 502 whose body is not JSON", { ok: false, status: 502, json: unreadableBody }],
+    ["a 500 INTERNAL_ERROR", { ok: false, status: 500, json: async () => ({ error: API_ERROR.INTERNAL_ERROR }) }],
+  ] as const)(
+    "reports %s as an unknown outcome and leaves the committed vault LOCKED for an unlock",
+    async (_kind, response) => {
+      const { result, caught, counts } = await setupAnswered(response, true);
+
+      expect((caught as VaultUnlockError).code).toBe(VAULT_SETUP_OUTCOME_UNKNOWN);
+      await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.LOCKED));
+      expect(counts.statusAfterPost).toBeGreaterThan(0);
+      expect(result.current.getSecretKey()).toBeNull();
+    },
+    30_000,
+  );
+
+  it("rethrows SessionChangedError without asking the status again: the proxy refused the POST before the route ran", async () => {
+    const { result, caught, counts } = await setupAnswered(new SessionChangedError(), false);
+
+    expect(caught).toBeInstanceOf(SessionChangedError);
+    expect(counts.statusAfterPost).toBe(0);
+    expect(result.current.status).toBe(VAULT_STATUS.SETUP_REQUIRED);
+  }, 30_000);
+
+  it.each([
+    ["429 RATE_LIMIT_EXCEEDED", 429, API_ERROR.RATE_LIMIT_EXCEEDED],
+    ["400 VALIDATION_ERROR", 400, API_ERROR.VALIDATION_ERROR],
+    ["503 SERVICE_UNAVAILABLE", 503, API_ERROR.SERVICE_UNAVAILABLE],
+  ] as const)(
+    "reports a %s refusal as a failed setup without asking the status again",
+    async (_kind, status, error) => {
+      const { result, caught, counts } = await setupAnswered(
+        { ok: false, status, json: async () => ({ error }) },
+        false,
+      );
+
+      expect(caught).not.toBeInstanceOf(VaultUnlockError);
+      expect((caught as Error).message).toBe(error);
+      expect(counts.statusAfterPost).toBe(0);
+      expect(result.current.status).toBe(VAULT_STATUS.SETUP_REQUIRED);
+    },
+    30_000,
+  );
+});
+
 describe("VaultProvider — setup zeroizes its local key material", () => {
   /**
    * Pass-through spies (crypto stays real) capturing the secret key and the
@@ -492,7 +577,7 @@ describe("VaultProvider — setup zeroizes its local key material", () => {
   it("zeroizes the secret key and ECDH private key when the setup POST rejects in transit", async () => {
     const { result, captured, caught } = await setupWith(new TypeError("Failed to fetch"));
 
-    expect(caught).toBeInstanceOf(TypeError);
+    expect((caught as VaultUnlockError).code).toBe(VAULT_SETUP_OUTCOME_UNKNOWN);
     expect(result.current.encryptionKey).toBeNull();
     expect(allZero(captured.secretKey)).toBe(true);
     expect(allZero(captured.ecdhPrivBytes)).toBe(true);
@@ -687,6 +772,19 @@ describe("VaultProvider — changePassphrase response handling", () => {
 
     expect(caught).toBeInstanceOf(VaultChangeOutcomeUnknownError);
     expectLocked(result);
+  }, 60_000);
+
+  // The proxy refused the POST before the route ran: nothing changed, so the
+  // vault stays unlocked on the key it holds and the outcome is not unknown.
+  it("rethrows SessionChangedError and keeps the vault unlocked when the POST is refused for a changed session", async () => {
+    const { result } = await setUpWithChangeResponse(new SessionChangedError());
+    const saltBefore = hex(result.current.getAccountSalt());
+
+    const caught = await changeCatching(result);
+
+    expect(caught).toBeInstanceOf(SessionChangedError);
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expect(hex(result.current.getAccountSalt())).toBe(saltBefore);
   }, 60_000);
 
   it("stops accepting the old passphrase and unlocks with the new one after a committed change whose response was lost", async () => {
@@ -1802,6 +1900,16 @@ describe("VaultProvider — rotateKey response handling (C11)", () => {
     expectLocked(result);
   }, 60_000);
 
+  it("rethrows SessionChangedError and keeps the vault unlocked when the rotate POST is refused for a changed session", async () => {
+    const { result } = await setUpWithRotateResponse(new SessionChangedError());
+
+    const { caught } = await rotate(result);
+
+    expect(caught).toBeInstanceOf(SessionChangedError);
+    expect(result.current.status).toBe(VAULT_STATUS.UNLOCKED);
+    expect(result.current.getKeyVersion()).toBe(1);
+  }, 60_000);
+
   it("zeroizes the rotation's new secret key when the rotate POST rejects in transit", async () => {
     const { result } = await setUpWithRotateResponse(new TypeError("Failed to fetch"));
     const { captured, restore } = captureNewSecretKey();
@@ -2553,13 +2661,13 @@ describe("VaultProvider — setup and changePassphrase with an unreadable body (
     expect(await verifyKey(key, store.vault.verificationArtifact)).toBe(true);
   }, 30_000);
 
-  it("setup throws 'Setup failed' when the error body is unreadable", async () => {
+  it("setup throws 'Setup failed' when a 4xx error body is unreadable", async () => {
     globalThis.fetch = vi.fn(async (url: string) => {
       if (url === "/api/vault/status") {
         return { ok: true, json: async () => ({ setupRequired: true }) };
       }
       if (url === "/api/vault/setup") {
-        return { ok: false, status: 502, json: unreadableBody };
+        return { ok: false, status: 413, json: unreadableBody };
       }
       return { ok: false, status: 404, json: async () => ({}) };
     }) as unknown as typeof fetch;
@@ -3588,6 +3696,57 @@ describe("VaultProvider — session changes and vault status races", () => {
     return { ...hook, finish };
   }
 
+  // ── S7-7: a user switch out of SETUP_REQUIRED ──────────────────
+
+  /**
+   * A provider whose user-1 server holds no vault, settled in SETUP_REQUIRED,
+   * with every status (re-)render recorded and the next status request held.
+   */
+  async function settledInSetupRequired() {
+    const { fetchMock } = makeFetchEnv(null);
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    const seen: string[] = [];
+    const { result, rerender } = renderHook(() => {
+      const vault = useVault();
+      seen.push(vault.status);
+      return vault;
+    }, { wrapper });
+    await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.SETUP_REQUIRED));
+    const ctl = interceptStatus();
+    const hold = { reached: deferred(), gate: deferred(), setupRequired: false };
+    ctl.hold = hold;
+    seen.length = 0;
+    return { result, rerender, seen, hold };
+  }
+
+  it("does not render the previous user's setup wizard after a switch while the new user's status is pending", async () => {
+    const { result, rerender, seen, hold } = await settledInSetupRequired();
+
+    await sessionBecomes(rerender, sessionOf("user-2"));
+    await act(async () => {
+      await hold.reached.promise;
+    });
+
+    expect(result.current.status).toBe(VAULT_STATUS.LOADING);
+    expect(seen).not.toContain(VAULT_STATUS.SETUP_REQUIRED);
+    hold.gate.resolve();
+    await waitFor(() => expect(result.current.status).toBe(VAULT_STATUS.LOCKED));
+  }, 30_000);
+
+  it("keeps SETUP_REQUIRED through a same-user session refetch", async () => {
+    const { result, rerender, seen, hold } = await settledInSetupRequired();
+    hold.setupRequired = true;
+
+    await sessionBecomes(rerender, sessionOf("user-1"));
+    await act(async () => {
+      await hold.reached.promise;
+    });
+
+    expect(result.current.status).toBe(VAULT_STATUS.SETUP_REQUIRED);
+    expect(seen).not.toContain(VAULT_STATUS.LOADING);
+    hold.gate.resolve();
+  }, 30_000);
+
   // ── S6-1: a user switch ─────────────────────────────────────────
 
   it("drops the key material, leaves UNLOCKED and moves the lock epoch when the session switches to another user", async () => {
@@ -4392,6 +4551,140 @@ describe("VaultProvider — session changes and vault status races", () => {
     expect((settledWith.caught as VaultUnlockError).code).toBe(VAULT_UNLOCK_INTERRUPTED);
     expect(requests).not.toContain("POST /api/vault/unlock");
   }, 60_000);
+
+  // SessionChangedError: the proxy refused the request because the cookie no
+  // longer belongs to the page's user. No attempt reached a route, so it is
+  // never a wrong passphrase (false); any other transport failure still is.
+  it.each(Object.keys(UNLOCKS) as (keyof typeof UNLOCKS)[])(
+    "%s rethrows SessionChangedError when its unlock POST is refused for a changed session",
+    async (path) => {
+      const { result, prfData } = await setUpThenLock(() => {
+        throw new SessionChangedError();
+      });
+      stashPrf({ prfOutput: new Uint8Array(PRF_BYTES), prfData });
+
+      let settledWith: { ok?: boolean; caught?: unknown } = {};
+      await act(async () => {
+        settledWith = await UNLOCKS[path](result.current).then(
+          (ok) => ({ ok }),
+          (caught: unknown) => ({ caught }),
+        );
+      });
+
+      expect(settledWith.caught).toBeInstanceOf(SessionChangedError);
+      expect(result.current.getSecretKey()).toBeNull();
+    },
+    60_000,
+  );
+
+  it.each(Object.keys(UNLOCKS) as (keyof typeof UNLOCKS)[])(
+    "%s still returns false when its unlock POST rejects in transit",
+    async (path) => {
+      const { result, prfData } = await setUpThenLock(() => {
+        throw new TypeError("Failed to fetch");
+      });
+      stashPrf({ prfOutput: new Uint8Array(PRF_BYTES), prfData });
+
+      let settledWith: { ok?: boolean; caught?: unknown } = {};
+      await act(async () => {
+        settledWith = await UNLOCKS[path](result.current).then(
+          (ok) => ({ ok }),
+          (caught: unknown) => ({ caught }),
+        );
+      });
+
+      expect(settledWith).toEqual({ ok: false });
+    },
+    60_000,
+  );
+
+  it.each([
+    ["a wrong passphrase", "a wrong passphrase entirely", false],
+    ["an artifact that does not verify", PASSPHRASE, true],
+  ] as const)(
+    "unlock rethrows SessionChangedError when the failed-attempt report for %s is refused for a changed session",
+    async (_kind, passphrase, artifactFails) => {
+      const { result } = await setUpThenLock(() => {
+        throw new SessionChangedError();
+      });
+      if (artifactFails) vi.spyOn(cryptoClient, "verifyKey").mockResolvedValue(false);
+
+      let settledWith: { ok?: boolean; caught?: unknown } = {};
+      await act(async () => {
+        settledWith = await result.current.unlock(passphrase).then(
+          (ok) => ({ ok }),
+          (caught: unknown) => ({ caught }),
+        );
+      });
+
+      expect(settledWith.caught).toBeInstanceOf(SessionChangedError);
+    },
+    60_000,
+  );
+
+  it("unlock still reports a wrong passphrase when the failed-attempt report rejects in transit", async () => {
+    const { result } = await setUpThenLock(() => {
+      throw new TypeError("Failed to fetch");
+    });
+
+    let ok: boolean | undefined;
+    await act(async () => {
+      ok = await result.current.unlock("a wrong passphrase entirely");
+    });
+
+    expect(ok).toBe(false);
+  }, 60_000);
+
+  // A same-user page hide during the derivation is no move: the attempt was
+  // made under this user's session and counts toward their lockout.
+  it.each([
+    ["a wrong passphrase is derived", "deriveWrappingKey", "a wrong passphrase entirely"],
+    ["the verification artifact is checked", "verifyKey", PASSPHRASE],
+  ] as const)(
+    "unlock still reports the failed attempt when the page is hidden, same user, while %s",
+    async (_while, held, passphrase) => {
+      const unlockPosts: string[] = [];
+      const { result } = await setUpThenLock((authHash) => {
+        unlockPosts.push(authHash);
+      });
+      const reached = deferred();
+      const gate = deferred();
+      if (held === "verifyKey") {
+        vi.spyOn(cryptoClient, "verifyKey").mockImplementation(async () => {
+          reached.resolve();
+          await gate.promise;
+          return false;
+        });
+      } else {
+        const hold = holdNext(cryptoClient, "deriveWrappingKey");
+        void hold.reached.promise.then(() => reached.resolve());
+        void gate.promise.then(() => hold.gate.resolve());
+      }
+      let settled!: Promise<{ ok?: boolean; caught?: unknown }>;
+      act(() => {
+        settled = result.current.unlock(passphrase).then(
+          (ok) => ({ ok }),
+          (caught: unknown) => ({ caught }),
+        );
+      });
+      await act(async () => {
+        await reached.promise;
+      });
+      act(() => {
+        window.dispatchEvent(new Event("pagehide"));
+      });
+
+      gate.resolve();
+      let settledWith: { ok?: boolean; caught?: unknown } = {};
+      await act(async () => {
+        settledWith = await settled;
+      });
+
+      expect(settledWith).toEqual({ ok: false });
+      expect(unlockPosts).toEqual(["0".repeat(64)]);
+    },
+    60_000,
+  );
 
   // Another user signed in while the change was in flight and unlocked their
   // own vault: the change's unknown outcome is not theirs to lock.

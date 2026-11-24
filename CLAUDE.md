@@ -57,25 +57,43 @@ npm run worker:audit-chain-verify      # Run the audit-chain verify worker (AUDI
 npm run test:integration       # Run real-DB integration tests on a scratch database created and dropped per run (requires running Postgres; `-- <vitest args>` filters)
 ```
 
-**Integration tests run only on a scratch database.** These tests write and
-delete rows and drive worker functions (`processWebhookDeliveryBatch`, the outbox
-drain, the reapers) whose claims are `FOR UPDATE SKIP LOCKED` over the whole
-table, so on a shared database a live worker races them and rows a crashed run
-left behind break later runs. `npm run test:integration`
-(`scripts/run-integration-tests.mjs`) therefore creates an empty database
-(`passwd_it_<stamp>_<pid>_<hex>`) on the cluster `MIGRATION_DATABASE_URL` names,
-marks it with `COMMENT ON DATABASE`, applies the per-database half of
-`bootstrap-rds-roles.mjs`, `prisma migrate deploy`, `--denied-only` and
-`db:check-drift`, runs the suite with every `*_DATABASE_URL` pointed at it, and
-drops it however the run ends (a failed drop prints
-`INTEGRATION_CLEANUP_INCOMPLETE` and exits nonzero; a SIGKILLed run's leftover is
-dropped by the next run on the same host). `src/__tests__/db-integration/setup.ts`
-refuses any database without the name and the marker, so a bare
+**Integration tests run only on a scratch database and a claimed Redis database.**
+These tests write and delete rows and drive worker functions
+(`processWebhookDeliveryBatch`, the outbox drain, the reapers) whose claims are
+`FOR UPDATE SKIP LOCKED` over the whole table, and they drive Redis rate-limit
+buckets and session-cache entries (e.g. `rl:mcp:token:ip:unknown`) the live
+instance reads; on shared stores a live worker races them, the live instance's
+limiters are reset, and state a crashed run left behind breaks later runs.
+`npm run test:integration` (`scripts/run-integration-tests.mjs`) therefore:
+
+- creates an empty database (`passwd_it_<stamp>_<pid>_<hex>`) on the cluster
+  `MIGRATION_DATABASE_URL` names, holds a keeper connection to it
+  (`passwd-sso-integration-keeper`) for the whole run, marks it with
+  `COMMENT ON DATABASE`, applies the per-database half of
+  `bootstrap-rds-roles.mjs`, `prisma migrate deploy`, `--denied-only` and
+  `db:check-drift`, and points every `*_DATABASE_URL` at it;
+- with `REDIS_URL` set, claims an empty Redis logical database no client has
+  selected (never the index `REDIS_URL` names; `REDIS_SENTINEL=true` is refused)
+  by setting a claim key on it atomically, and points `REDIS_URL` at it;
+- afterwards FLUSHDBs the Redis database if it still carries this run's claim and
+  drops the scratch database, however the run ends. A failed drop or flush, or a
+  database present after a CREATE whose reply was lost, prints
+  `INTEGRATION_CLEANUP_INCOMPLETE` and exits nonzero. A SIGKILLed run's leftovers
+  (marked or claimed, with no connection left) are removed by the next run on
+  the same host.
+
+Isolated per run: the Postgres database and one Redis keyspace. Not isolated:
+Postgres roles (cluster-wide; they must already exist — initdb locally — and the
+runner fails if a migration changed an existing role's cluster-wide state, or if
+it found no role to compare), the Redis server's memory and eviction, and the
+services tests reach by their own URL (MinIO, Jackson).
+`src/__tests__/db-integration/setup.ts` refuses any database without the name
+and the marker, and any Redis database without the claim, so a bare
 `vitest --config vitest.integration.config.ts` against the dev database fails
-fast. The compose workers keep running: nothing points them at the scratch
-database. Roles are cluster-wide and must already exist (initdb locally); the
-runner never changes them and fails if a migration changed an existing role's
-cluster-wide state. CI uses the same runner on its per-job cluster.
+fast (pinned by `harness-scratch-refusal.integration.test.ts` and a CI step). The
+compose workers keep running: nothing points them at the scratch database. CI
+uses the same runner, after bootstrapping the roles and migrating its default
+database once, so its cluster is in the already-migrated state a developer's is.
 
 Docker (dev): `npm run docker:up` (wraps `docker compose -f docker-compose.yml -f docker-compose.override.yml up`). Stop with `npm run docker:down`.
 
@@ -127,6 +145,7 @@ route handlers own application-layer concerns.
 - `cors-gate.ts` — Bearer-bypass route detection + preflight wiring.
 - `csrf-gate.ts` — baseline CSRF (Origin) for cookie-bearing mutating requests. **Request-attribute-based, NOT path-classification-based** — fires whenever cookie + mutating method, regardless of route classification. This is what closes the "did this route call assertOrigin?" gap structurally.
 - `security-headers.ts` — CSP / HSTS / X-Frame-Options application.
+- `expected-user-gate.ts` — expected-user binding. `fetchApi` names the page's user in `x-passwd-expected-user` once `ExpectedUserSync` (in `src/components/providers/session-provider.tsx`) has it from `useSession`; the gate refuses, before any route and for every method, a cookie-bearing request carrying that header unless the cookie resolves to that user's session (409 `SESSION_CHANGED`; `fetchApi` rejects it with `SessionChangedError` and reloads the page). Requests without the header or without a session cookie (Bearer, extension, CLI, SCIM) are not affected.
 
 **SSoT principle**: routes do NOT call `assertOrigin` for baseline CSRF — the proxy CSRF gate handles it for any cookie-bearing mutating request. Routes only call `assertOrigin` (or stricter variants) when they receive cookieless requests outside the proxy gate's threat model.
 

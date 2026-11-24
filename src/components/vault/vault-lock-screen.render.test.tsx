@@ -4,6 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { SESSION_STORAGE_KEY } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { SessionChangedError } from "@/lib/url-helpers";
 import "@testing-library/jest-dom/vitest";
 
 // ── Hoisted mocks ──────────────────────────────────────────
@@ -60,7 +61,8 @@ vi.mock("@/lib/auth/prf-handoff", () => ({
   hasPrf: mockHasPrf,
 }));
 
-vi.mock("@/lib/url-helpers", () => ({
+vi.mock("@/lib/url-helpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/url-helpers")>()),
   fetchApi: mockFetchApi,
 }));
 
@@ -212,6 +214,17 @@ describe("VaultLockScreen passphrase unlock", () => {
 
     expect(await screen.findByText("wrongPassphrase")).toBeInTheDocument();
     expect(passphraseInput().value).toBe("");
+  });
+
+  it("shows the changed-session message, not the wrong-passphrase error, when unlock is refused for a changed session", async () => {
+    mockUnlock.mockRejectedValue(new SessionChangedError());
+    render(<VaultLockScreen />);
+
+    submitPassphrase("my passphrase");
+
+    expect(await screen.findByText("sessionChanged")).toBeInTheDocument();
+    expect(screen.queryByText("wrongPassphrase")).toBeNull();
+    expect(screen.queryByText("unlockError")).toBeNull();
   });
 
   it("clears the shown error when the user types again", async () => {

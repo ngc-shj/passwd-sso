@@ -87,7 +87,8 @@ vi.mock("@/lib/constants", () => ({
   LOCAL_STORAGE_KEY: { RECOVERY_KEY_BANNER_DISMISSED: "psso:recovery-key-banner-dismissed" },
 }));
 
-vi.mock("@/lib/url-helpers", () => ({
+vi.mock("@/lib/url-helpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/url-helpers")>()),
   fetchApi: mockFetchApi,
 }));
 

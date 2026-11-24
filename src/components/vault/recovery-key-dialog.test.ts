@@ -38,7 +38,8 @@ vi.mock("@/lib/constants", () => ({
   API_PATH: { VAULT_RECOVERY_KEY_GENERATE: "/api/vault/recovery-key/generate" },
 }));
 // fetchApi has a `typeof window` guard — bypass it so node-env tests work
-vi.mock("@/lib/url-helpers", () => ({
+vi.mock("@/lib/url-helpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/url-helpers")>()),
   fetchApi: (path: string, init?: RequestInit) =>
     init !== undefined ? fetch(path, init) : fetch(path),
   withBasePath: (p: string) => p,
@@ -56,6 +57,7 @@ vi.mock("sonner", () => ({
 }));
 
 import { generateRecoveryKeyFlow } from "./recovery-key-dialog";
+import { SessionChangedError } from "@/lib/url-helpers";
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -185,6 +187,17 @@ describe("generateRecoveryKeyFlow", () => {
     const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
 
     expect(result).toEqual({ ok: false, outcomeUnknown: true });
+    expect(allZero(secretKey)).toBe(true);
+    expect(allZero(recoveryKey)).toBe(true);
+  });
+
+  // The proxy refused the POST before the route ran: nothing was stored.
+  it("reports SESSION_CHANGED as a refusal, not an unknown outcome, when the POST is refused for a changed session", async () => {
+    mockFetch.mockRejectedValue(new SessionChangedError());
+
+    const result = await generateRecoveryKeyFlow("pass", secretKey, accountSalt, notLocked);
+
+    expect(result).toEqual({ ok: false, errorCode: "SESSION_CHANGED" });
     expect(allZero(secretKey)).toBe(true);
     expect(allZero(recoveryKey)).toBe(true);
   });

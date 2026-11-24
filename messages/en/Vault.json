@@ -10,6 +10,7 @@
   "setupWarning": "If you forget your passphrase, your saved passwords cannot be recovered. Please store it in a safe place.",
   "setupButton": "Set Up Vault",
   "setupError": "Setup failed. Please try again.",
+  "setupOutcomeUnknown": "We couldn't confirm whether vault setup finished. It may have completed: if the unlock screen appears, unlock with the passphrase you just entered.",
   "locked": "Vault is Locked",
   "lockedDescription": "Enter your passphrase to unlock.",
   "enterPassphrase": "Enter passphrase",

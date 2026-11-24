@@ -6,9 +6,10 @@ import {
   isBearerBypassRoute,
   isBearerBypassPath,
 } from "./cors-gate";
-import { getSessionInfo, hasSessionCookie } from "./auth-gate";
+import { getSessionInfo, hasSessionCookie, type SessionInfo } from "./auth-gate";
 import { classifyRoute, ROUTE_POLICY_KIND } from "./route-policy";
 import { shouldEnforceCsrf, assertSessionCsrf } from "./csrf-gate";
+import { assertExpectedUser } from "./expected-user-gate";
 import { extractClientIp } from "../auth/policy/ip-access";
 import { checkAccessRestrictionWithAudit } from "../auth/policy/access-restriction";
 import { errorResponse } from "@/lib/http/api-response";
@@ -50,6 +51,18 @@ export async function handleApiAuth(request: NextRequest) {
     });
   }
 
+  // One session read per request, shared by the expected-user gate and the
+  // session gate.
+  let sessionRead: Promise<SessionInfo> | undefined;
+  const readSession = () => (sessionRead ??= getSessionInfo(request));
+
+  // Expected-user gate: before every route, whatever its classification. A
+  // page that names its user is never served under another user's cookie.
+  const cookieHeader = request.headers.get("cookie") ?? "";
+  const cookiePresent = hasSessionCookie(cookieHeader);
+  const expectedUserRefusal = await assertExpectedUser(request, cookiePresent, readSession);
+  if (expectedUserRefusal) return applyCorsHeaders(request, expectedUserRefusal);
+
   // Non-CSRF early returns. ALL paths outside the cookie-CSRF threat
   // model MUST short-circuit BEFORE the CSRF gate fires.
   if (policy.kind === ROUTE_POLICY_KIND.PUBLIC_SHARE) {
@@ -83,8 +96,6 @@ export async function handleApiAuth(request: NextRequest) {
   // mutating method, regardless of route classification. This closes
   // pre1 (a mutating route without its own Origin check) and the R3
   // baseline gap structurally.
-  const cookieHeader = request.headers.get("cookie") ?? "";
-  const cookiePresent = hasSessionCookie(cookieHeader);
   if (shouldEnforceCsrf(request, cookiePresent)) {
     const csrfError = assertSessionCsrf(request);
     if (csrfError) return applyCorsHeaders(request, csrfError);
@@ -133,7 +144,7 @@ export async function handleApiAuth(request: NextRequest) {
     (isSessionRequired || cookiePresent) &&
     !isSessionGateTierA(request.method, pathname)
   ) {
-    const refusal = await gateSession(request, pathname, isSessionRequired);
+    const refusal = await gateSession(request, pathname, isSessionRequired, readSession);
     if (refusal) return applyCorsHeaders(request, refusal);
   }
 
@@ -153,9 +164,10 @@ async function gateSession(
   request: NextRequest,
   pathname: string,
   isSessionRequired: boolean,
+  readSession: () => Promise<SessionInfo>,
 ): Promise<NextResponse | null> {
   const { method } = request;
-  const session = await getSessionInfo(request);
+  const session = await readSession();
   if (!session.valid) {
     if (isSessionRequired) return noStoreError(API_ERROR.UNAUTHORIZED);
     // API_DEFAULT: keyed on whether the route reads the session, not on why

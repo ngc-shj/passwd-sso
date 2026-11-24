@@ -717,3 +717,101 @@ The user relayed two Medium findings from an external security review of the rou
   - The six `if (lockedSince(epoch)) throw installRefusedError()` guards in the unlock paths are now one `refuseIfLockedSince`.
   - The `getSessionUserId` wrapper over a ref was removed.
 - **Not taken.** `installKeyMaterial` keeps its inline epoch comparison, so its dependency list stays minimal.
+
+---
+
+# Review round 7
+
+Scope: `git diff 577dc810b..e456582b5`, covering review(6) and review(7). All round-6 and X7 fixes were re-verified as resolved, apart from the class sweep and the gate mechanism noted below. R43 found no widening in the session-switch predicate, the setup checks, the scratch refusal or the runner's drop verification.
+
+## Findings
+
+- **F7-1 / S7-2 [Major, escalated] Emergency-access auto-confirm can escrow user A's vault secret key into user B's grants.**
+  - **Mechanism.** Two reviewers found this independently. `confirmPendingEmergencyGrants` and `EmergencyAccessProvider.run()` hold a copy of A's secret key across the pending-confirmations GET and each confirm POST, with no session check in between. Once the cookie has moved to B, which happens when B signs in in another tab and A's tab is refocused, the list holds B's grants. The confirm route admits them, because it is zero-knowledge and cannot inspect the ciphertext.
+  - **Wrong residual note.** The X7 residual note ("client code cannot close that window") was wrong. Every request can be bound to the user the client expects.
+- **T7-1 / F7-2 / S7-1 [Major] `module-specifier` compares `@/` specifiers without normalising them.**
+  - **Mechanism.** All three reviewers found this. Spellings such as `@/lib/../lib/url-helpers`, `@/lib//url-helpers` and `@/lib/constants/` resolve to the target but are judged "cannot name".
+  - **Executed.** A namespace import with a computed key, and an `import()` with such a spelling, both pass the C11 gate and Check E. This is the first escape against the refusal mechanism.
+- **S7-3 / T7-4 [Minor]** The wrong-passphrase failure report is gated on any lock, so a same-user page hide during derivation suppresses it.
+- **F7-3 [Minor]** A setup POST that fails in transport has an unknown outcome, but it is reported as a plain setup failure with no status re-ask.
+- **F7-4 [Minor]**
+  - A recovery reset that fails in transport after the server committed it is reported as an unknown error, and a retry then conflicts.
+  - Team key distribution and team rotation do not stop when the vault is locked, and a switched cookie misattributes them.
+- **S7-4 [Minor]** The stale sweep decides liveness by host and pid. A live run in another PID namespace with the same hostname looks dead, so the sweep can drop it.
+- **S7-5 [Minor]** A CREATE that committed but lost its reply leaks an unmarked database without any report.
+- **S7-6 [Minor]** Integration runs still share the dev Redis with the live instance. The isolation claim covers Postgres only.
+- **S7-7 [Minor]** A user switch while the vault is SETUP_REQUIRED shows the next user the previous user's setup wizard until their status arrives.
+- **T7-2 [Minor]** `audit-outbox-retention-purge` asserts a copy of the purge SQL, not the production functions. The copy lacks the deliveries `NOT EXISTS`.
+- **T7-3 [Minor]** CI disables the runner's role-state refusal, so the refusal never runs in CI.
+- **T7-5 [Minor]** The wiring of `setup.ts`'s scratch refusal has no automated pin.
+
+## Process note — the binding is structural, and the specifier decision moves to resolution
+
+- **F7-1 is a member of the X7 class** that the vault-context sweep missed. It also exposed that the class's residual was not irreducible. The fix binds every web-app request to the user the UI acts for: the client sends an expected-user header, and the proxy refuses a mismatch. The per-member checks become defence in depth.
+- **The specifier comparison moves from string rules to module resolution,** using the compiler's own `resolveModuleName` and failing closed when a specifier cannot be resolved. This is the same escalation rule as round 6, applied one level down.
+
+## Resolution Status (round 7)
+
+All findings were valid and are resolved. Red-proof ledgers live in the session scratchpad (`r8-bind/`, `r8-vault/`, `r8-runner/`, `r8-spec/`). Every mutant listed there turns at least one pin red, and the unmutated copy is green.
+
+### F7-1 / S7-2 — resolved structurally
+- **Expected-user binding.**
+  - **Client.** `fetchApi` names the page's user in `x-passwd-expected-user`, and only on same-origin URLs. `ExpectedUserSync` (session-provider) sets it from `useSession`. It follows a switch in a passive effect, which runs after VaultProvider's layout effect has dropped A's keys. It never clears on sign-out, so a flow that still holds A's material cannot send unbound requests.
+  - **Proxy.** `src/lib/proxy/expected-user-gate.ts` runs before every route classification and for every method. It refuses a cookie-bearing request with the header unless the cookie resolves to that user's valid session. An unreadable or ended session is refused too.
+  - **Refusal.** The gate answers 409 `SESSION_CHANGED`. `fetchApi` rejects that answer with `SessionChangedError` and reloads the page.
+  - **Cookieless callers.** Bearer, extension, CLI and SCIM requests send no cookie, so the gate does not apply to them.
+- **Defence in depth.**
+  - `pending-confirmations` returns `ownerId`. The client confirms only its own grants, and the confirm route requires `ownerId === session.user.id`.
+  - Team key distribution checks the epoch before each confirm-key POST.
+  - Team rotate refuses before the POST when the epoch has moved.
+- **Every key-material flow treats `SessionChangedError` as a definite "nothing written".** It is never reported as a wrong passphrase, `false`, an unknown outcome or a failed-attempt report. The flows are unlock (×3), the failure reports, setup, change, rotate, recovery generate, recovery reset and verify, and team create. The remaining fetch catches in components and hooks were reviewed and are not affected: they show generic messages or skip a failed decrypt.
+- **The round-6 residual ("client code cannot close that window") is withdrawn.**
+
+### T7-1 / F7-2 / S7-1 — resolved by resolution, not text
+- **Resolution.** `scripts/checks/lib/module-specifier.mjs` decides a specifier with `ts.resolveModuleName`, using the nearest tsconfig. These cases may name any target:
+  - an unresolvable specifier;
+  - a path outside the repository;
+  - a `.d.ts` file;
+  - a file a same-stem sibling may shadow;
+  - a file the gate does not scan.
+- **Templates.** A template with a substitution is refused unless the gate's allowlist names it, with a reason and an exact count. The tree has one such entry, the locale message loader.
+- **Loaders.** The gate now also covers `import = require()` and `require.context()`.
+- **Check E.** It reads the compiler nodes itself instead of relying on a text prefilter. Unscanned files that a specifier reaches are added to the scan.
+- **Proof.** HEAD fails 131 new tests. 16 library mutants and 3 gate mutants are killed. Both gates still pass on the tree, in 6.3 s and 1.4 s.
+
+### Minors
+- **S7-3 / T7-4.**
+  - **Change.** The failure report is now suppressed only when the session has moved (`sessionMovedFrom`), not on any lock.
+  - **Pins.** A same-user pagehide still reports, at both report sites.
+- **F7-3.**
+  - **Change.** A transport rejection, or a 5xx that is not a known refusal, is now treated as unknown. Setup re-asks the vault status and throws `VAULT_SETUP_OUTCOME_UNKNOWN`. The wizard tells the user to unlock with the passphrase they just typed.
+  - **Route enumeration.** The route's only post-commit response is 201.
+- **F7-4.**
+  - **Recovery.** A transport failure, or a 5xx outside the refusal set, now shows `resetOutcomeUnknown`. A later `VAULT_WRAP_CONFLICT` then shows `resetCompletedEarlier`.
+  - **Correction to the finding.** A retry made after the commit does not conflict. Only a retry that races the lost request does.
+  - **Team distribution and rotate.** Both are bound to the epoch, as described under F7-1.
+- **S7-4.** A keeper connection is held from CREATE until just before the run's own drop, so a live run's database is never connectionless. The sweep still skips any database with connections. Verified live: 13 adversarial sweeps against a real run left it intact.
+- **S7-5.**
+  - **Change.** A CREATE error other than 42P04 now leaves the outcome unknown. At cleanup, a database that exists is reported as `INTEGRATION_CLEANUP_INCOMPLETE` and is never dropped.
+- **S7-6.** Each run claims its own Redis logical database.
+  - **Selection.** The runner never takes the index `REDIS_URL` names, and only takes a database no client has selected.
+  - **Claim.** An atomic script claims the database only while it is empty. The claim connection is held for the whole run.
+  - **Release.** A compare-then-FLUSHDB clears the database only if the claim is still this run's.
+  - **Sentinel.** Sentinel mode is refused.
+  - **setup.ts.** It refuses an unclaimed Redis database.
+- **S7-7.** A switch out of SETUP_REQUIRED now goes to LOADING until the new user's status arrives. A same-user refetch is unaffected.
+- **T7-2.** The test now calls the production `purgeSentAgedInTx` and `purgeFailedAgedInTx`. A mutant without the `webhook_deliveries` `NOT EXISTS` fails it.
+- **T7-3.**
+  - **Change.** CI migrates the cluster's default database once, and `INTEGRATION_ALLOW_CLUSTER_ROLE_CHANGES` is removed. An empty role snapshot is refused.
+  - **CI simulation.** Without the migrate step, CI refuses on `rolconnlimit`.
+- **T7-5.** `harness-scratch-refusal.integration.test.ts` runs the harness against a non-scratch database, an unmarked scratch-named database and an unclaimed Redis database, and expects each run to be refused. A CI step does the same on `passwd_test`.
+
+### Simplify pass (round 7 fixes)
+- **Accepted.**
+  - `fetchApi`'s two body peeks (SESSION_CHANGED, PASSKEY_REQUIRED) now go through `readApiErrorBody(res.clone())`.
+  - Setup and recovery share `is5xxPreRouteRefusal`.
+    - **Drift it closes.** Recovery hard-coded SERVICE_UNAVAILABLE. A 5xx code later added to `PROXY_PRE_ROUTE_REFUSALS` would therefore have been read there as an unknown outcome.
+    - **Behaviour today.** Unchanged: SERVICE_UNAVAILABLE is the only 5xx in the set.
+  - The loader-node walk is shared by both gates as `module-specifier.loaderNodes`, with its own pin.
+  - The Redis keeper reuses `SCRATCH_DB_KEEPER`.
+- **Not taken.** A `rethrowSessionChanged` helper and a shared "sessionChanged" UI handler. Each site's comment differs, and four sites do not justify the abstraction.

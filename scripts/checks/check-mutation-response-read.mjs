@@ -52,8 +52,9 @@
  * mutating when its returned call is. A local helper resolves through the
  * file's own binding (lib/scope-bindings). An imported one (named, aliased,
  * default, or a member of a namespace import) resolves through its import
- * specifier — `@/…` or relative, following `export { … } from`, an export
- * clause, and `export default <name>` — to the declaring module, since two
+ * specifier — by TypeScript's module resolution with the tree's tsconfig
+ * (lib/module-specifier), following `export { … } from`, an export clause, and
+ * `export default <name>` — to the declaring module, since two
  * modules may export same-named helpers with different verdicts. When the
  * specifier does not resolve to a scanned module, every exported helper of
  * that name could be the one called, and the most conservative verdict wins.
@@ -73,11 +74,17 @@
  * refused: a renamed import, any re-export, an alias (`const f = fetchApi`,
  * a default, `||=`, a ternary), `.bind`/`.call`/`.apply`, an argument, an
  * object property, `x.fetchApi`, `x["fetchApi"]`, destructuring it off an
- * object, and — for its module, src/lib/url-helpers — a namespace or default
- * import, `export *`, and an `import()`/`require()` that may load it (a
- * non-literal specifier may, unless a template's literal head or a `const`
- * string rules the module out). A stale allowlist entry (site or receiver
- * gone) is refused too.
+ * object, and — for its module, src/lib/url-helpers.ts — a namespace or
+ * default import, `export *`, and an `import()` / `require()` /
+ * `import x = require()` / `require.context()` that may load it. Whether a
+ * specifier may load it is decided by resolution, not its text
+ * (lib/module-specifier): `@/lib/../lib/url-helpers` and `@/lib//url-helpers`
+ * resolve to it; a specifier that does not resolve, resolves outside the
+ * repository, to a declaration file, to a file a same-stem sibling may shadow,
+ * or to a source file this gate does not scan (src/app/api, src/i18n, …) may
+ * load it; so may a non-`const` argument and any template with a substitution
+ * (none is allowlisted: the tree has none in the scan roots). A stale
+ * allowlist entry (site or receiver gone) is refused too.
  *
  * The error path is covered too: every body read of such a response is denied,
  * since `readApiErrorBody` reads through `parseJsonBodyOnce` as well.
@@ -136,10 +143,10 @@
  * MUTATION_RESPONSE_READ_ROOT overrides the scan root (self-test fixtures only).
  */
 import { SyntaxKind } from "ts-morph";
-import { dirname, join, posix } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_SOURCE_EXTENSIONS as SOURCE_EXTENSIONS, createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
-import { loadArgumentMayName, moduleLoaderOf, specifierMayName } from "./lib/module-specifier.mjs";
+import { createAstProject, sourceFilesFrom } from "./lib/ast-project.mjs";
+import { createModuleResolver, loadArgumentMayName, loaderArgument, loaderNodes } from "./lib/module-specifier.mjs";
 import {
   FN_KINDS,
   bindingIndex,
@@ -168,15 +175,16 @@ if (
 
 const DENY_ROOTS = ["src/components", "src/hooks", "src/app", "src/lib"];
 const EXCLUDED_PREFIX = "src/app/api/";
-const SERVER_MARKER_MODULES = new Set(["server-only", "next/headers", "@/lib/prisma"]);
+const SERVER_MARKER_PACKAGES = new Set(["server-only", "next/headers"]);
+const SERVER_MARKER_FILE = "src/lib/prisma.ts";
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 const FUNCTION_LIKE = new Set([...FN_KINDS, SyntaxKind.FunctionDeclaration]);
 
 /**
- * True when `sf` value-imports a module a client bundle cannot contain. A
- * relative specifier counts when it names src/lib/prisma, as `@/lib/prisma` does.
+ * True when `sf` value-imports a module a client bundle cannot contain: a
+ * marker package by its name, or any specifier that resolves to src/lib/prisma.
  */
-function isServerModule(sf, rel) {
+function isServerModule(sf, rel, resolver) {
   return sf.getImportDeclarations().some((decl) => {
     if (decl.isTypeOnly()) return false;
     // A side-effect import (`import "server-only"`) binds nothing and still runs
@@ -188,18 +196,21 @@ function isServerModule(sf, rel) {
       decl.getNamedImports().some((n) => !n.isTypeOnly());
     if (!valueBinding) return false;
     const spec = decl.getModuleSpecifierValue();
-    if (SERVER_MARKER_MODULES.has(spec)) return true;
-    if (!spec.startsWith(".")) return false;
-    return posix.join(posix.dirname(rel), spec) === "src/lib/prisma";
+    return SERVER_MARKER_PACKAGES.has(spec) || resolver.names(spec, rel, [SERVER_MARKER_FILE]);
   });
 }
 
 let files;
+let resolver;
 try {
   const project = createAstProject();
-  files = [...sourceFilesFrom(project, DENY_ROOTS, ROOT)]
-    .filter(({ rel }) => !rel.startsWith(EXCLUDED_PREFIX))
-    .map((f) => ({ ...f, deny: !(f.rel.startsWith("src/lib/") && isServerModule(f.sf, f.rel)) }));
+  const scanned = [...sourceFilesFrom(project, DENY_ROOTS, ROOT)].filter(({ rel }) => !rel.startsWith(EXCLUDED_PREFIX));
+  const scannedRels = new Set(scanned.map(({ rel }) => rel));
+  // A specifier is decided by where it resolves (lib/module-specifier); a file
+  // outside the scan could re-export fetchApi's module unchecked, so a
+  // specifier resolving to one is undecided.
+  resolver = createModuleResolver({ root: ROOT, isScanned: (rel) => scannedRels.has(rel) });
+  files = scanned.map((f) => ({ ...f, deny: !(f.rel.startsWith("src/lib/") && isServerModule(f.sf, f.rel, resolver)) }));
 } catch (err) {
   console.error(`${NAME}: ${err.message}`);
   process.exit(1);
@@ -316,7 +327,7 @@ const isStringLiteral = (e) =>
   e?.getKind() === SyntaxKind.StringLiteral || e?.getKind() === SyntaxKind.NoSubstitutionTemplateLiteral;
 
 const FETCH_API = "fetchApi";
-const FETCH_API_MODULE = "src/lib/url-helpers";
+const FETCH_API_MODULE = "src/lib/url-helpers.ts";
 
 /**
  * Where fetchApi is handed to code that takes its fetcher as a dependency.
@@ -499,17 +510,18 @@ for (const { rel, sf } of files) {
   // The defining module only by named import: a namespace or default import, an
   // `export *` and a dynamic load would hand out a member under any key.
   for (const decl of sf.getImportDeclarations()) {
-    if (decl.isTypeOnly() || !specifierMayName(decl.getModuleSpecifierValue(), rel, FETCH_API_MODULE)) continue;
+    if (decl.isTypeOnly() || !resolver.mayName(decl.getModuleSpecifierValue(), rel, [FETCH_API_MODULE])) continue;
     if (decl.getNamespaceImport()) refuse(decl, "namespace import of its module");
     if (decl.getDefaultImport()) refuse(decl, "default import of its module");
   }
   for (const decl of sf.getExportDeclarations()) {
     const spec = decl.getModuleSpecifierValue();
-    if (spec && !decl.isTypeOnly() && !decl.hasNamedExports() && specifierMayName(spec, rel, FETCH_API_MODULE)) refuse(decl, "export * of its module");
+    if (spec && !decl.isTypeOnly() && !decl.hasNamedExports() && resolver.mayName(spec, rel, [FETCH_API_MODULE])) refuse(decl, "export * of its module");
   }
-  for (const call of sf.getDescendantsOfKind(SyntaxKind.CallExpression)) {
-    const loader = moduleLoaderOf(call);
-    if (loader && loadArgumentMayName(call.getArguments()[0], rel, [FETCH_API_MODULE], bindingsOf(sf))) refuse(call, `${loader} that may load its module`);
+  // No template loader is allowlisted here: the tree's one (src/i18n/messages.ts)
+  // is outside this gate's scan roots.
+  for (const { node, loader } of loaderNodes(sf)) {
+    if (loadArgumentMayName(loaderArgument(node), rel, [FETCH_API_MODULE], bindingsOf(sf), resolver)) refuse(node, `${loader} that may load its module`);
   }
 }
 for (const entry of FETCH_API_INJECTIONS) {
@@ -522,14 +534,9 @@ for (const entry of FETCH_API_INJECTIONS) {
   }
 }
 
-/** The scanned file an import specifier names (`@/…` or relative), or null. */
+/** The scanned file an import specifier resolves to, or null. */
 function moduleFile(spec, fromRel) {
-  let base;
-  if (spec.startsWith("@/")) base = `src/${spec.slice(2)}`;
-  else if (spec.startsWith(".")) base = posix.join(posix.dirname(fromRel), spec);
-  else return null;
-  const tries = [base, ...SOURCE_EXTENSIONS.map((x) => base + x), ...SOURCE_EXTENSIONS.map((x) => `${base}/index${x}`)];
-  const rel = tries.find((t) => fileByRel.has(t));
+  const rel = resolver.fileOf(spec, fromRel);
   return rel ? fileByRel.get(rel) : null;
 }
 

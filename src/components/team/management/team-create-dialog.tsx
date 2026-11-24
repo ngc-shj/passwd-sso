@@ -80,6 +80,7 @@ export function TeamCreateDialog({ trigger, onCreated }: TeamCreateDialogProps) 
         rateLimited: tVault("rateLimited"),
         unavailable: tVault("retryLater"),
         interrupted: tVault("unlockInterrupted"),
+        sessionChanged: tApi("sessionChanged"),
         fallback: tVault("unlockError"),
       });
       if (resolved.kind === "sessionExpired") {

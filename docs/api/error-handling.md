@@ -139,7 +139,7 @@ the broad class; the `error` code is the specific reason.
 | 401 | No identity — caller did not authenticate, or session/token is invalid/expired | `UNAUTHORIZED`, `INVALID_SESSION`, `API_KEY_INVALID`, all `MOBILE_*` |
 | 403 | Identity OK, permission insufficient — role, scope, tenancy, recency, or origin restriction denies access | `FORBIDDEN`, `FORBIDDEN_INSUFFICIENT_ROLE`, `ACCESS_DENIED`, `SESSION_STEP_UP_REQUIRED`, `*_SCOPE_INSUFFICIENT`, `OWNER_ONLY`, `ONLY_OWN_ENTRIES`, `NOT_AUTHORIZED_FOR_GRANT`, `ACCOUNT_LOCKED` |
 | 404 | Resource does not exist in this caller's scope | `NOT_FOUND`, `USER_NOT_FOUND`, `TEAM_NOT_FOUND`, `*_NOT_FOUND` family |
-| 409 | Request conflicts with current resource state | `CONFLICT`, `VAULT_ALREADY_SETUP`, `*_ALREADY_EXISTS`, `*_ALREADY_REVOKED`, `ALREADY_A_MEMBER`, `SLUG_ALREADY_TAKEN`, `TEAM_BUSY` (team-row lock wait ran out; carries `Retry-After`) |
+| 409 | Request conflicts with current resource state | `CONFLICT`, `VAULT_ALREADY_SETUP`, `*_ALREADY_EXISTS`, `*_ALREADY_REVOKED`, `ALREADY_A_MEMBER`, `SLUG_ALREADY_TAKEN`, `TEAM_BUSY` (team-row lock wait ran out; carries `Retry-After`), `SESSION_CHANGED` (see below) |
 | 410 | Endpoint deprecated and removed | (deprecated route stubs) |
 | 413 | Body exceeds size limit | `PAYLOAD_TOO_LARGE`, `FILE_TOO_LARGE`, `SEND_FILE_TOO_LARGE` |
 | 422 | Semantic validation of well-formed input failed (rare), OR a deliberately distinct-from-401 failure signal (see below) | `AUTH_HASH_MISMATCH`, `MCP_CLIENT_LIMIT_EXCEEDED` |
@@ -217,6 +217,28 @@ reasons:
 
 **Clients receiving `SESSION_STEP_UP_REQUIRED` MUST dispatch on the `error`
 code, NOT the HTTP status — the code is the stable contract.**
+
+#### SESSION_CHANGED → 409
+
+The proxy's expected-user gate (`src/lib/proxy/expected-user-gate.ts`)
+returns it before any route runs: the request named, in
+`x-passwd-expected-user`, the user its page was rendered for, and the session
+cookie the browser sent is not that user's session (another user signed in in
+another tab, or the session ended). `POST /api/emergency-access/[id]/confirm`
+also returns it, before the grant changes, when the body's `ownerId` is not
+the session user. Either way nothing was written.
+
+**409, not 401**: the cookie may well be a valid session — just another
+user's — and 401 is wired in clients to "sign in again" and, on
+`/api/vault/unlock`, to a refused passphrase. **Not 403**: nothing about the
+cookie's user is denied. The conflict is between the page's state and the
+session's.
+
+Clients MUST NOT read it as a business refusal (a wrong passphrase, a denied
+action, a missing record). `fetchApi` (`src/lib/url-helpers.ts`) does not
+return the response: it rejects with `SessionChangedError` — so a multi-step
+flow stops at the first refused step — and reloads the page once, rebuilding
+it for whoever the session now belongs to.
 
 #### ACCOUNT_LOCKED → 403
 

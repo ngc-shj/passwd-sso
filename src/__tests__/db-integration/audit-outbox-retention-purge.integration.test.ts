@@ -1,7 +1,22 @@
+/**
+ * The audit-outbox retention purge, through the production branches the worker
+ * runs (purgeSentAgedInTx / purgeFailedAgedInTx), never a copy of their SQL: a
+ * copy keeps passing when production gains or loses a predicate.
+ *
+ * Both branches are global (not tenant-scoped, by design), so they run inside a
+ * holding transaction that always rolls back, as in
+ * audit-outbox-sweep-caps.integration.test.ts: other tenants' committed aged
+ * rows are first moved out of the predicates (AMBIENT), so the counts returned
+ * are this test's rows only, and the rollback undoes every write.
+ */
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from "vitest";
 import { randomUUID } from "node:crypto";
+import { Prisma } from "@prisma/client";
 import { createTestContext, setBypassRlsGucs, type TestContext } from "./helpers";
 import { AUDIT_OUTBOX, AUDIT_SCOPE, AUDIT_ACTION, ACTOR_TYPE } from "@/lib/constants/audit/audit";
+import { purgeSentAgedInTx, purgeFailedAgedInTx } from "@/workers/audit-outbox-worker";
+
+type PrismaTx = Prisma.TransactionClient;
 
 describe("audit-outbox retention purge", () => {
   let ctx: TestContext;
@@ -31,30 +46,85 @@ describe("audit-outbox retention purge", () => {
       actorType: ACTOR_TYPE.HUMAN,
     });
 
-  it("purges old SENT and FAILED rows but preserves active and recent rows", async () => {
-    const retentionHours = AUDIT_OUTBOX.RETENTION_HOURS;
-    const failedRetentionDays = AUDIT_OUTBOX.FAILED_RETENTION_DAYS;
+  const ROLLBACK = Symbol("rollback");
+  async function runInRolledBackTx(body: (tx: PrismaTx) => Promise<void>): Promise<void> {
+    try {
+      await ctx.su.prisma.$transaction(async (tx) => {
+        await setBypassRlsGucs(tx);
+        await body(tx);
+        throw ROLLBACK;
+      });
+    } catch (err) {
+      if (err !== ROLLBACK) throw err;
+    }
+  }
 
-    const oldSentId = randomUUID();
-    const oldFailedId = randomUUID();
-    const recentFailedId = randomUUID();
-    const pendingId = randomUUID();
-    const processingId = randomUUID();
+  const AMBIENT = [
+    `UPDATE audit_outbox SET sent_at = now() WHERE status = 'SENT' AND sent_at < now()`,
+    `UPDATE audit_outbox SET created_at = now() WHERE status = 'FAILED' AND created_at < now()`,
+  ];
 
-    await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
+  async function insertSentAged(tx: PrismaTx): Promise<string> {
+    const id = randomUUID();
+    await tx.$executeRawUnsafe(
+      `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at, sent_at)
+       VALUES ($1::uuid, $2::uuid, $3::jsonb, 'SENT', 1, 8, now() - interval '48 hours', now(),
+               now() - make_interval(hours => $4) - interval '1 hour')`,
+      id,
+      tenantId,
+      makePayload(),
+      AUDIT_OUTBOX.RETENTION_HOURS,
+    );
+    return id;
+  }
 
-      // Old SENT row — should be purged
-      await tx.$executeRawUnsafe(
-        `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at, sent_at)
-         VALUES ($1::uuid, $2::uuid, $3::jsonb, 'SENT', 1, 8, now() - interval '48 hours', now(), now() - make_interval(hours => $4) - interval '1 hour')`,
-        oldSentId,
-        tenantId,
-        makePayload(),
-        retentionHours,
-      );
+  async function insertAuditDelivery(tx: PrismaTx, outboxId: string, status: "PENDING" | "PROCESSING"): Promise<void> {
+    const targetId = randomUUID();
+    await tx.$executeRawUnsafe(
+      `INSERT INTO audit_delivery_targets (
+        id, tenant_id, kind, config_encrypted, config_iv, config_auth_tag,
+        master_key_version, is_active, created_at
+      ) VALUES ($1::uuid, $2::uuid, 'WEBHOOK'::"AuditDeliveryTargetKind", 'test_enc', 'test_iv', 'test_tag', 1, true, now())`,
+      targetId,
+      tenantId,
+    );
+    await tx.$executeRawUnsafe(
+      `INSERT INTO audit_deliveries (id, outbox_id, target_id, tenant_id, status, next_retry_at, created_at)
+       VALUES (gen_random_uuid(), $1::uuid, $2::uuid, $3::uuid, $4::"AuditDeliveryStatus", now(), now())`,
+      outboxId,
+      targetId,
+      tenantId,
+      status,
+    );
+  }
 
-      // Old FAILED row — should be purged
+  async function insertWebhookDelivery(tx: PrismaTx, outboxId: string, status: "PENDING" | "PROCESSING"): Promise<void> {
+    await tx.$executeRawUnsafe(
+      `INSERT INTO webhook_deliveries (id, outbox_id, tenant_id, scope, team_id, action, status, next_retry_at, created_at)
+       VALUES (gen_random_uuid(), $1::uuid, $2::uuid, 'TENANT', NULL, $3, $4::"AuditDeliveryStatus", now(), now())`,
+      outboxId,
+      tenantId,
+      AUDIT_ACTION.ENTRY_CREATE,
+      status,
+    );
+  }
+
+  it("purges aged SENT and FAILED rows, keeping active, recent, and still-delivering rows", async () => {
+    await runInRolledBackTx(async (tx) => {
+      for (const statement of AMBIENT) await tx.$executeRawUnsafe(statement);
+
+      const oldSentId = await insertSentAged(tx);
+      // Aged SENT rows a delivery still needs: each NOT EXISTS keeps one.
+      const auditPendingId = await insertSentAged(tx);
+      await insertAuditDelivery(tx, auditPendingId, "PENDING");
+      const auditProcessingId = await insertSentAged(tx);
+      await insertAuditDelivery(tx, auditProcessingId, "PROCESSING");
+      const webhookPendingId = await insertSentAged(tx);
+      await insertWebhookDelivery(tx, webhookPendingId, "PENDING");
+      const webhookProcessingId = await insertSentAged(tx);
+      await insertWebhookDelivery(tx, webhookProcessingId, "PROCESSING");
+
+      const oldFailedId = randomUUID();
       await tx.$executeRawUnsafe(
         `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at)
          VALUES ($1::uuid, $2::uuid, $3::jsonb, 'FAILED', 8, 8,
@@ -62,10 +132,9 @@ describe("audit-outbox retention purge", () => {
         oldFailedId,
         tenantId,
         makePayload(),
-        failedRetentionDays,
+        AUDIT_OUTBOX.FAILED_RETENTION_DAYS,
       );
-
-      // Recent FAILED row — should NOT be purged
+      const recentFailedId = randomUUID();
       await tx.$executeRawUnsafe(
         `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at)
          VALUES ($1::uuid, $2::uuid, $3::jsonb, 'FAILED', 8, 8, now() - interval '1 day', now())`,
@@ -73,8 +142,7 @@ describe("audit-outbox retention purge", () => {
         tenantId,
         makePayload(),
       );
-
-      // PENDING row — should NOT be purged regardless of age
+      const pendingId = randomUUID();
       await tx.$executeRawUnsafe(
         `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at)
          VALUES ($1::uuid, $2::uuid, $3::jsonb, 'PENDING', 0, 8, now() - interval '365 days', now())`,
@@ -82,8 +150,7 @@ describe("audit-outbox retention purge", () => {
         tenantId,
         makePayload(),
       );
-
-      // PROCESSING row — should NOT be purged regardless of age
+      const processingId = randomUUID();
       await tx.$executeRawUnsafe(
         `INSERT INTO audit_outbox (id, tenant_id, payload, status, attempt_count, max_attempts, created_at, next_retry_at, processing_started_at)
          VALUES ($1::uuid, $2::uuid, $3::jsonb, 'PROCESSING', 1, 8, now() - interval '365 days', now(), now())`,
@@ -91,53 +158,19 @@ describe("audit-outbox retention purge", () => {
         tenantId,
         makePayload(),
       );
-    });
 
-    // Run the purge query (same pattern as purgeRetention in the worker),
-    // confined to this tenant: the worker's is table-wide, and the count
-    // asserted below would take in every other tenant's aged rows.
-    const result = await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
-      const rows = await tx.$queryRawUnsafe<{ purged: bigint }[]>(
-        `WITH deleted AS (
-          DELETE FROM audit_outbox
-          WHERE tenant_id = $3::uuid
-            AND ((
-            status = 'SENT'
-            AND sent_at < now() - make_interval(hours => $1)
-            AND NOT EXISTS (
-              SELECT 1 FROM "audit_deliveries"
-              WHERE "audit_deliveries"."outbox_id" = "audit_outbox"."id"
-                AND "audit_deliveries"."status" IN ('PENDING', 'PROCESSING')
-            )
-          )
-             OR (status = 'FAILED' AND created_at < now() - make_interval(days => $2)))
-          RETURNING id
-        )
-        SELECT COUNT(*) AS purged FROM deleted`,
-        retentionHours,
-        failedRetentionDays,
+      expect(await purgeSentAgedInTx(tx)).toBe(1);
+      expect(await purgeFailedAgedInTx(tx)).toBe(1);
+
+      const remaining = await tx.$queryRawUnsafe<{ id: string }[]>(
+        `SELECT id::text AS id FROM audit_outbox WHERE tenant_id = $1::uuid`,
         tenantId,
       );
-      return Number(rows[0]?.purged ?? 0);
-    });
-
-    expect(result).toBe(2); // oldSentId + oldFailedId
-
-    // Verify remaining rows
-    const remaining = await ctx.su.prisma.$transaction(async (tx) => {
-      await setBypassRlsGucs(tx);
-      return tx.$queryRawUnsafe<{ id: string; status: string }[]>(
-        `SELECT id, status::text FROM audit_outbox WHERE tenant_id = $1::uuid ORDER BY created_at`,
-        tenantId,
+      expect(remaining.map((r) => r.id).sort()).toEqual(
+        [auditPendingId, auditProcessingId, webhookPendingId, webhookProcessingId, recentFailedId, pendingId, processingId].sort(),
       );
+      expect(remaining.map((r) => r.id)).not.toContain(oldSentId);
+      expect(remaining.map((r) => r.id)).not.toContain(oldFailedId);
     });
-
-    const remainingIds = remaining.map((r) => r.id);
-    expect(remainingIds).toContain(recentFailedId);
-    expect(remainingIds).toContain(pendingId);
-    expect(remainingIds).toContain(processingId);
-    expect(remainingIds).not.toContain(oldSentId);
-    expect(remainingIds).not.toContain(oldFailedId);
   });
 });

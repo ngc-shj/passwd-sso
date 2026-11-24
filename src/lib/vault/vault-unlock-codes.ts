@@ -9,3 +9,13 @@
  * was interrupted and nothing is reported for lockout tracking.
  */
 export const VAULT_UNLOCK_INTERRUPTED = "VAULT_UNLOCK_INTERRUPTED";
+
+/**
+ * `VaultUnlockError` code for a setup whose POST got no answer the client can
+ * read as a refusal (a rejected fetch, or a 5xx that is not a pre-route
+ * refusal): the vault may have been created with the passphrase just entered.
+ * The provider has asked the vault status again; the caller says the setup may
+ * have completed and to unlock with that passphrase. A retry with another
+ * passphrase would hit VAULT_ALREADY_SETUP with the first one in effect.
+ */
+export const VAULT_SETUP_OUTCOME_UNKNOWN = "VAULT_SETUP_OUTCOME_UNKNOWN";

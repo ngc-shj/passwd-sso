@@ -24,6 +24,7 @@ vi.mock("@/lib/url-helpers", async (importOriginal) => ({
 }));
 
 import { useRecoveryFlow } from "./use-recovery-flow";
+import { SessionChangedError } from "@/lib/url-helpers";
 
 // Test-only key material.
 const RECOVERY_KEY = new Uint8Array(32).fill(9);
@@ -143,13 +144,13 @@ describe("useRecoveryFlow", () => {
     expect(mockHardNavigate).toHaveBeenCalledWith("/en/dashboard");
   }, 15_000);
 
-  it("shows the unknown error for a reset refusal without a code", async () => {
+  it("shows the unknown error for a 4xx reset refusal without a code", async () => {
     const { result } = await verified();
     act(() => {
       result.current.setNewPassphrase(PASSPHRASE);
       result.current.setConfirmPassphrase(PASSPHRASE);
     });
-    mockFetchApi.mockResolvedValueOnce(new Response("", { status: 500 }));
+    mockFetchApi.mockResolvedValueOnce(new Response("", { status: 400 }));
 
     await act(() => result.current.handleReset(ev()));
 
@@ -187,6 +188,87 @@ describe("useRecoveryFlow", () => {
 
     expect(mockHardNavigate).toHaveBeenCalledWith("/en/dashboard");
   }, 15_000);
+
+  // F7-4: the route answers 200 or SESSION_INVALIDATE_FAILED once the reset
+  // committed; every refusal before that is a 4xx or SERVICE_UNAVAILABLE.
+  describe("a reset whose outcome is unknown", () => {
+    async function readyToReset() {
+      const hook = await verified();
+      act(() => {
+        hook.result.current.setNewPassphrase(PASSPHRASE);
+        hook.result.current.setConfirmPassphrase(PASSPHRASE);
+      });
+      return hook;
+    }
+
+    it.each([
+      ["a POST rejected in transit", () => mockFetchApi.mockRejectedValueOnce(new TypeError("Failed to fetch"))],
+      ["a 500 whose body is not JSON", () => mockFetchApi.mockResolvedValueOnce(new Response("", { status: 500 }))],
+      ["a 502 proxy page", () => mockFetchApi.mockResolvedValueOnce(new Response("<html>Bad Gateway</html>", { status: 502 }))],
+      ["a 500 INTERNAL_ERROR", () => mockFetchApi.mockResolvedValueOnce(json({ error: "INTERNAL_ERROR" }, 500))],
+    ])("says the reset may have completed on %s", async (_kind, answer) => {
+      const { result } = await readyToReset();
+      answer();
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.error).toBe("resetOutcomeUnknown");
+      expect(result.current.step).toBe("new-passphrase");
+      expect(mockHardNavigate).not.toHaveBeenCalled();
+    }, 15_000);
+
+    it.each([
+      ["400 VALIDATION_ERROR", json({ error: "VALIDATION_ERROR" }, 400)],
+      ["429 RATE_LIMIT_EXCEEDED", json({ error: "RATE_LIMIT_EXCEEDED" }, 429)],
+      ["503 SERVICE_UNAVAILABLE", json({ error: "SERVICE_UNAVAILABLE" }, 503)],
+      ["409 VAULT_WRAP_CONFLICT", json({ error: "VAULT_WRAP_CONFLICT" }, 409)],
+    ])("reports a %s refusal as a refusal", async (_kind, response) => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockResolvedValueOnce(response);
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.error).not.toBe("resetOutcomeUnknown");
+      expect(result.current.error).not.toBe("resetCompletedEarlier");
+      expect(result.current.error).not.toBe("");
+    }, 15_000);
+
+    // Refused by the proxy before the route ran: nothing was written, so the
+    // reset is not "may have completed", and a later conflict is not ours.
+    it("says the session changed, not that the reset may have completed, when the reset is refused for a changed session", async () => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockRejectedValueOnce(new SessionChangedError());
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.error).toBe("sessionChanged");
+      mockFetchApi.mockResolvedValueOnce(json({ error: "VAULT_WRAP_CONFLICT" }, 409));
+      await act(() => result.current.handleReset(ev()));
+      expect(result.current.error).not.toBe("resetCompletedEarlier");
+    }, 15_000);
+
+    it("says the session changed when verification is refused for a changed session", async () => {
+      mockFetchApi.mockRejectedValueOnce(new SessionChangedError());
+      const { result } = renderHook(() => useRecoveryFlow());
+      const formatted = await formatRecoveryKey(RECOVERY_KEY);
+      act(() => result.current.setRecoveryKeyInput(formatted));
+
+      await act(() => result.current.handleVerify(ev()));
+
+      expect(result.current.error).toBe("sessionChanged");
+    });
+
+    it("says an earlier attempt reset the vault when a retry after an unknown outcome hits VAULT_WRAP_CONFLICT", async () => {
+      const { result } = await readyToReset();
+      mockFetchApi.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+      await act(() => result.current.handleReset(ev()));
+      mockFetchApi.mockResolvedValueOnce(json({ error: "VAULT_WRAP_CONFLICT" }, 409));
+
+      await act(() => result.current.handleReset(ev()));
+
+      expect(result.current.error).toBe("resetCompletedEarlier");
+      expect(mockHardNavigate).not.toHaveBeenCalled();
+    }, 15_000);
+  });
 
   describe("recovery-key buffer wiping", () => {
     afterEach(() => {
@@ -292,7 +374,7 @@ describe("useRecoveryFlow", () => {
 
     it("keeps the new passphrase and its confirmation when the reset is refused", async () => {
       const { result } = await readyToReset();
-      mockFetchApi.mockResolvedValueOnce(new Response("", { status: 500 }));
+      mockFetchApi.mockResolvedValueOnce(new Response("", { status: 400 }));
 
       await act(() => result.current.handleReset(ev()));
 

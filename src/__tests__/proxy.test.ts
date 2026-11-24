@@ -1160,6 +1160,120 @@ describe("proxy — CSRF gate", () => {
 // src/lib/proxy/api-route-passkey-gate.test.ts; these pin the wiring.
 // =============================================================================
 
+describe("proxy — expected-user gate", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>;
+  let cookieSeq = 0;
+  // A fresh token per request: the session cache is mocked out, but distinct
+  // tokens keep each request's session read independent.
+  const cookie = () => `authjs.session-token=e0e0-${String(++cookieSeq).padStart(4, "0")}`;
+
+  function request(
+    path: string,
+    method: string,
+    headers: Record<string, string>,
+  ): NextRequest {
+    return new NextRequest(`${APP_ORIGIN}${path}`, {
+      method,
+      headers: { origin: APP_ORIGIN, ...headers },
+    } as ConstructorParameters<typeof NextRequest>[1]);
+  }
+
+  // The proxy passes a request on with NextResponse.next(), which marks the
+  // response; a refusal is a response of its own and the route never runs.
+  const reachedRoute = (res: Response) => res.headers.get("x-middleware-next") === "1";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.stubEnv("APP_URL", APP_ORIGIN);
+    fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation(
+      dispatchFetch(sessionRoute(sessionResponseBody("user-b"))),
+    );
+    mockResolveUserTenantId.mockResolvedValue("tenant1");
+    mockCheckAccessWithAudit.mockResolvedValue({ allowed: true });
+  });
+
+  afterEach(() => {
+    fetchSpy.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  describe.each(["GET", "POST", "PUT", "PATCH", "DELETE"])("%s", (method) => {
+    it.each([
+      ["a session-required route", "/api/emergency-access/grant-1/confirm"],
+      ["an api-default route", "/api/vault/unlock/data"],
+      ["a route the proxy otherwise passes before its session gate", "/api/v1/passwords"],
+    ])("refuses a cookie of another user than the header names on %s, before the route", async (_label, path) => {
+      const res = await proxy(
+        request(path, method, { Cookie: cookie(), "x-passwd-expected-user": "user-a" }),
+        dummyOptions,
+      );
+      expect(res.status).toBe(409);
+      expect((await res.json()).error).toBe("SESSION_CHANGED");
+      expect(res.headers.get("Cache-Control")).toBe("no-store");
+      expect(reachedRoute(res)).toBe(false);
+    });
+
+    it("passes a cookie of the user the header names on to the route", async () => {
+      const res = await proxy(
+        request("/api/vault/unlock/data", method, { Cookie: cookie(), "x-passwd-expected-user": "user-b" }),
+        dummyOptions,
+      );
+      expect(res.status).toBe(200);
+      expect(reachedRoute(res)).toBe(true);
+    });
+  });
+
+  it("passes a cookie-bearing request without the header (the page does not know its user yet)", async () => {
+    const res = await proxy(request("/api/vault/unlock/data", "POST", { Cookie: cookie() }), dummyOptions);
+    expect(res.status).toBe(200);
+    expect(reachedRoute(res)).toBe(true);
+  });
+
+  it("refuses when the cookie no longer resolves to a session (signed out, expired)", async () => {
+    fetchSpy.mockImplementation(dispatchFetch(sessionRoute({})));
+    const res = await proxy(
+      request("/api/vault/unlock/data", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-a" }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("SESSION_CHANGED");
+  });
+
+  it("reads the session once for a request both gates decide on", async () => {
+    await proxy(
+      request("/api/emergency-access/grant-1/confirm", "POST", { Cookie: cookie(), "x-passwd-expected-user": "user-b" }),
+      dummyOptions,
+    );
+    expect(fetchCallsTo(fetchSpy, "/api/auth/session")).toHaveLength(1);
+  });
+
+  // A cookieless Bearer caller authenticates as its token's principal; no
+  // cookie swap can change who that is, so the header has nothing to bind.
+  it("ignores the header on a cookieless Bearer request", async () => {
+    const res = await proxy(
+      request("/api/passwords", "GET", { Authorization: "Bearer tok123", "x-passwd-expected-user": "user-a" }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(200);
+    expect(reachedRoute(res)).toBe(true);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // With a cookie beside it, a Bearer request is served as the cookie's
+  // session (authOrToken prefers it), so the binding applies.
+  it("refuses a Bearer request whose accompanying cookie is another user's", async () => {
+    const res = await proxy(
+      request("/api/passwords", "GET", {
+        Authorization: "Bearer tok123",
+        Cookie: cookie(),
+        "x-passwd-expected-user": "user-a",
+      }),
+      dummyOptions,
+    );
+    expect(res.status).toBe(409);
+  });
+});
+
 describe("proxy — session passkey gate", () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 

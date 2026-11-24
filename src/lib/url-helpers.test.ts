@@ -646,3 +646,124 @@ describe("currentAppPath", () => {
     expect(currentAppPath()).toBe("/en/admin");
   });
 });
+
+// ─── fetchApi expected-user binding ──────────────────────────
+
+describe("fetchApi expected-user binding", () => {
+  const ORIGIN = "https://app.example.com";
+  let location: { origin: string; pathname: string; search: string; href: string };
+  let originalLocation: Location;
+
+  const headerOf = (spy: ReturnType<typeof vi.spyOn>, call = 0): string | null => {
+    const init = spy.mock.calls[call][1] as RequestInit | undefined;
+    return new Headers(init?.headers).get("x-passwd-expected-user");
+  };
+
+  async function loadHelpers() {
+    const mod = await import("@/lib/url-helpers");
+    mod._resetExpectedUserForTests();
+    return mod;
+  }
+
+  beforeEach(() => {
+    vi.resetModules();
+    vi.unstubAllEnvs();
+    originalLocation = window.location;
+    location = { origin: ORIGIN, pathname: "/ja/dashboard", search: "", href: `${ORIGIN}/ja/dashboard` };
+    Object.defineProperty(window, "location", { value: location, writable: true, configurable: true });
+  });
+
+  afterEach(() => {
+    Object.defineProperty(window, "location", { value: originalLocation, writable: true, configurable: true });
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it("sends no header before the page knows its user", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
+    const { fetchApi } = await loadHelpers();
+
+    await fetchApi("/api/vault/status");
+
+    expect(spy).toHaveBeenCalledWith("/api/vault/status");
+  });
+
+  it("names the expected user on a read and on a mutation, keeping the caller's headers", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response());
+    const { fetchApi, setExpectedUser } = await loadHelpers();
+    setExpectedUser("user-a");
+
+    await fetchApi("/api/vault/status");
+    await fetchApi("/api/passwords", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+
+    expect(headerOf(spy, 0)).toBe("user-a");
+    expect(headerOf(spy, 1)).toBe("user-a");
+    const init = spy.mock.calls[1][1] as RequestInit;
+    expect(new Headers(init.headers).get("content-type")).toBe("application/json");
+    expect(init.method).toBe("POST");
+    expect(init.body).toBe("{}");
+  });
+
+  it("names the latest user it was given", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response());
+    const { fetchApi, setExpectedUser } = await loadHelpers();
+    setExpectedUser("user-a");
+    setExpectedUser("user-b");
+
+    await fetchApi("/api/vault/status");
+
+    expect(headerOf(spy)).toBe("user-b");
+  });
+
+  it("does not send the header to another origin", async () => {
+    const spy = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response());
+    const { fetchApi, setExpectedUser } = await loadHelpers();
+    setExpectedUser("user-a");
+
+    await fetchApi("//evil.example/api");
+
+    expect(spy).toHaveBeenCalledWith("//evil.example/api");
+  });
+
+  describe("on 409 SESSION_CHANGED", () => {
+    const sessionChanged = () =>
+      new Response(JSON.stringify({ error: "SESSION_CHANGED" }), { status: 409 });
+
+    // A vault unlock reads a non-OK unlock-data response as a refused
+    // passphrase, and a generic mutation as its own refusal: neither may see it.
+    it.each([
+      ["a vault unlock read", "/api/vault/unlock/data", undefined],
+      ["a generic mutation", "/api/passwords", { method: "POST", body: "{}" }],
+    ])("rejects %s with SessionChangedError and reloads the page once", async (_label, path, init) => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(async () => sessionChanged());
+      const { fetchApi, setExpectedUser, SessionChangedError } = await loadHelpers();
+      setExpectedUser("user-a");
+      location.href = "before";
+
+      await expect(fetchApi(path, init)).rejects.toBeInstanceOf(SessionChangedError);
+      expect(location.href).toBe(`${ORIGIN}/ja/dashboard`);
+
+      location.href = "unchanged";
+      await expect(fetchApi(path, init)).rejects.toBeInstanceOf(SessionChangedError);
+      expect(location.href).toBe("unchanged");
+    });
+
+    it("returns a route's own 409 to the caller untouched", async () => {
+      vi.spyOn(globalThis, "fetch").mockImplementation(
+        async () => new Response(JSON.stringify({ error: "CONFLICT" }), { status: 409 }),
+      );
+      const { fetchApi } = await loadHelpers();
+      location.href = "before";
+
+      const res = await fetchApi("/api/passwords", { method: "POST" });
+
+      expect(res.status).toBe(409);
+      expect(location.href).toBe("before");
+      expect((await res.json()).error).toBe("CONFLICT");
+    });
+  });
+});

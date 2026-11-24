@@ -61,8 +61,9 @@ vi.mock("@/lib/validations", () => ({
 }));
 
 import { VaultSetupWizard } from "./vault-setup-wizard";
-import { VaultUnlockError, VAULT_UNLOCK_INTERRUPTED } from "@/lib/vault/vault-context";
+import { VaultUnlockError, VAULT_UNLOCK_INTERRUPTED, VAULT_SETUP_OUTCOME_UNKNOWN } from "@/lib/vault/vault-context";
 import { API_ERROR } from "@/lib/http/api-error-codes";
+import { SessionChangedError } from "@/lib/url-helpers";
 
 // ── Tests ───────────────────────────────────────────────────
 
@@ -225,6 +226,34 @@ describe("VaultSetupWizard form behavior", () => {
 
     expect(await screen.findByText("setupError")).toBeInTheDocument();
     expect(screen.queryByText("sessionExpired")).toBeNull();
+  });
+
+  // The vault may now exist with the passphrase just entered: a retry with
+  // another one would leave this one in effect.
+  it("says the setup may have completed, not that it failed, when its outcome is unknown", async () => {
+    mockSetup.mockRejectedValue(new VaultUnlockError(VAULT_SETUP_OUTCOME_UNKNOWN));
+    render(<VaultSetupWizard />);
+    typeInto("passphrase", VALID_PASSPHRASE);
+    typeInto("confirmPassphrase", VALID_PASSPHRASE);
+
+    fireEvent.click(screen.getByText("setupButton"));
+
+    expect(await screen.findByText("setupOutcomeUnknown")).toBeInTheDocument();
+    expect(screen.queryByText("setupError")).toBeNull();
+    expect(screen.getByText("setupButton")).not.toBeDisabled();
+  });
+
+  it("says the session changed, not that setup failed, when setup is refused for a changed session", async () => {
+    mockSetup.mockRejectedValue(new SessionChangedError());
+    render(<VaultSetupWizard />);
+    typeInto("passphrase", VALID_PASSPHRASE);
+    typeInto("confirmPassphrase", VALID_PASSPHRASE);
+
+    fireEvent.click(screen.getByText("setupButton"));
+
+    expect(await screen.findByText("sessionChanged")).toBeInTheDocument();
+    expect(screen.queryByText("setupError")).toBeNull();
+    expect(screen.queryByText("setupOutcomeUnknown")).toBeNull();
   });
 
   it("toggles the passphrase input between hidden and visible", () => {

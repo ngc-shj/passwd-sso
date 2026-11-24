@@ -10,7 +10,7 @@ import { MS_PER_MINUTE } from "@/lib/constants/time";
 import { preventIMESubmit } from "@/lib/ui/ime-guard";
 import { isWebAuthnSupported } from "@/lib/auth/webauthn/webauthn-client";
 import { hasPrf } from "@/lib/auth/prf-handoff";
-import { fetchApi } from "@/lib/url-helpers";
+import { fetchApi, SessionChangedError } from "@/lib/url-helpers";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -55,9 +55,13 @@ export function resolveUnlockError(
     rateLimited: string;
     unavailable: string;
     interrupted: string;
+    sessionChanged: string;
     fallback: string;
   },
 ): UnlockErrorResolution {
+  // The page's session now belongs to someone else and the page is reloading:
+  // the request was refused before any route ran, so no attempt was made.
+  if (err instanceof SessionChangedError) return { kind: "message", message: msgs.sessionChanged };
   if (!(err instanceof VaultUnlockError)) return { kind: "message", message: msgs.fallback };
   switch (err.code) {
     case API_ERROR.UNAUTHORIZED:
@@ -99,6 +103,7 @@ function consumeWebAuthnSignInFlag(): void {
 export function VaultLockScreen() {
   const t = useTranslations("Vault");
   const tw = useTranslations("WebAuthn");
+  const tApi = useTranslations("ApiErrors");
   const { unlock, unlockWithPasskey, unlockWithStoredPrf } = useVault();
 
   const [passphrase, setPassphrase] = useState("");
@@ -139,6 +144,7 @@ export function VaultLockScreen() {
         rateLimited: t("rateLimited"),
         unavailable: t("retryLater"),
         interrupted: t("unlockInterrupted"),
+        sessionChanged: tApi("sessionChanged"),
         fallback: t("unlockError"),
       });
       setPassphrase("");
@@ -153,9 +159,10 @@ export function VaultLockScreen() {
       rateLimited: t("rateLimited"),
       unavailable: tw("serviceUnavailable"),
       interrupted: t("unlockInterrupted"),
+      sessionChanged: tApi("sessionChanged"),
       fallback: tw("unlockError"),
     }),
-    [t, tw],
+    [t, tw, tApi],
   );
 
   const handlePasskeyUnlock = useCallback(async () => {

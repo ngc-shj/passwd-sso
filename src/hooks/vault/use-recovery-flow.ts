@@ -19,9 +19,10 @@ import {
 import { API_ERROR, apiErrorToI18nKey } from "@/lib/http/api-error-codes";
 import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
 import { API_PATH } from "@/lib/constants";
+import { is5xxPreRouteRefusal } from "@/lib/vault/pre-commit-refusals";
 import { PASSPHRASE_MIN_LENGTH } from "@/lib/validations";
 import { getStrength } from "@/components/vault/passphrase-strength";
-import { fetchApi, hardNavigate } from "@/lib/url-helpers";
+import { fetchApi, hardNavigate, SessionChangedError } from "@/lib/url-helpers";
 
 // "reset-invalidation-failed": the reset committed but the server could not
 // sign out other sessions (SESSION_INVALIDATE_FAILED); the user is told so
@@ -77,6 +78,10 @@ export function useRecoveryFlow() {
   // A ref, not state: the unmount cleanup must reach the live buffer to wipe it
   // when the user abandons the flow between verify and reset.
   const recoveryKeyRef = useRef<Uint8Array | null>(null);
+  // Set once a reset POST got no answer that tells whether it committed. That
+  // request may still commit on the server after a retry has read the old
+  // wrap, so the retry's VAULT_WRAP_CONFLICT means the earlier one won.
+  const resetOutcomeUnknownRef = useRef(false);
 
   useEffect(
     () => () => {
@@ -148,8 +153,8 @@ export function useRecoveryFlow() {
       // The parsed bytes now live in recoveryKeyRef; drop the typed string.
       setRecoveryKeyInput("");
       setStep("new-passphrase");
-    } catch {
-      setError(tApi("unknownError"));
+    } catch (err) {
+      setError(tApi(err instanceof SessionChangedError ? "sessionChanged" : "unknownError"));
     } finally {
       key?.fill(0);
       setLoading(false);
@@ -195,25 +200,40 @@ export function useRecoveryFlow() {
       // 4. Compute verifier hash for the step
       const verifierHash = await computeRecoveryVerifierHash(recoveryKeyBytes);
 
-      // 5. Send reset request
-      const res = await fetchApi(API_PATH.VAULT_RECOVERY_KEY_RECOVER, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          step: "reset",
-          verifierHash,
-          encryptedSecretKey: newWrapped.ciphertext,
-          secretKeyIv: newWrapped.iv,
-          secretKeyAuthTag: newWrapped.authTag,
-          accountSalt: hexEncode(newAccountSalt),
-          newVerifierHash,
-          recoveryEncryptedSecretKey: recoveryWrapped.encryptedSecretKey,
-          recoverySecretKeyIv: recoveryWrapped.iv,
-          recoverySecretKeyAuthTag: recoveryWrapped.authTag,
-          recoveryHkdfSalt: recoveryWrapped.hkdfSalt,
-          recoveryVerifierHash: recoveryWrapped.verifierHash,
-        }),
-      });
+      // 5. Send reset request. The route answers 200 or SESSION_INVALIDATE_FAILED
+      // once the reset committed; every refusal it sends before then is a 4xx
+      // or SERVICE_UNAVAILABLE. A rejected fetch, or any other 5xx (a proxy's
+      // 502/504 page, the 500 for an uncaught throw), may follow the commit.
+      let res: Response;
+      try {
+        res = await fetchApi(API_PATH.VAULT_RECOVERY_KEY_RECOVER, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            step: "reset",
+            verifierHash,
+            encryptedSecretKey: newWrapped.ciphertext,
+            secretKeyIv: newWrapped.iv,
+            secretKeyAuthTag: newWrapped.authTag,
+            accountSalt: hexEncode(newAccountSalt),
+            newVerifierHash,
+            recoveryEncryptedSecretKey: recoveryWrapped.encryptedSecretKey,
+            recoverySecretKeyIv: recoveryWrapped.iv,
+            recoverySecretKeyAuthTag: recoveryWrapped.authTag,
+            recoveryHkdfSalt: recoveryWrapped.hkdfSalt,
+            recoveryVerifierHash: recoveryWrapped.verifierHash,
+          }),
+        });
+      } catch (e) {
+        // Refused by the proxy before the route ran: nothing was written.
+        if (e instanceof SessionChangedError) {
+          setError(tApi("sessionChanged"));
+          return;
+        }
+        resetOutcomeUnknownRef.current = true;
+        setError(t("resetOutcomeUnknown"));
+        return;
+      }
 
       // SESSION_INVALIDATE_FAILED is returned after the reset committed, so
       // it is a success with a warning, not a retryable failure.
@@ -222,6 +242,13 @@ export function useRecoveryFlow() {
         const body = await readApiErrorBody(res);
         if (body?.error === API_ERROR.SESSION_INVALIDATE_FAILED) {
           invalidationFailed = true;
+        } else if (res.status >= 500 && !is5xxPreRouteRefusal(body?.error)) {
+          resetOutcomeUnknownRef.current = true;
+          setError(t("resetOutcomeUnknown"));
+          return;
+        } else if (body?.error === API_ERROR.VAULT_WRAP_CONFLICT && resetOutcomeUnknownRef.current) {
+          setError(t("resetCompletedEarlier"));
+          return;
         } else {
           if (body?.error) {
             setError(tApi(apiErrorToI18nKey(body.error)));

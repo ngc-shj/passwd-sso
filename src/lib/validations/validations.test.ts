@@ -997,6 +997,7 @@ describe("rejectEmergencyGrantSchema", () => {
 
 describe("confirmEmergencyGrantSchema", () => {
   const valid = {
+    ownerId: "owner-1",
     ownerEphemeralPublicKey: "ownerEphPubKey",
     encryptedSecretKey: "encryptedSecKey",
     secretKeyIv: HEX_IV,

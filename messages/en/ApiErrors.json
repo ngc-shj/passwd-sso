@@ -145,6 +145,7 @@
   "passkeyReauthUnavailable": "This session can't be re-verified with a passkey. Sign in again to continue.",
   "passkeyReauthCredentialMismatch": "That passkey doesn't match the one used to sign in to this session. Use the same passkey, or sign in again.",
   "passkeyRequired": "This tenant requires a passkey. Register a passkey before continuing.",
+  "sessionChanged": "Your sign-in changed in another tab or window. Reload this page to continue.",
   "quotaExceeded": "Resource limit reached. Contact your administrator to raise the quota.",
   "forbiddenSelfApproval": "You cannot approve a request that you (or your service account) created. Another admin must approve it.",
   "forbiddenCrossTenant": "This action requires an administrator from the same tenant as the request.",

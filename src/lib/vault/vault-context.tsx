@@ -47,7 +47,7 @@ import { API_PATH, apiPath, VAULT_STATUS, ATTACHMENT_ENCRYPTION_MODE, INITIAL_VA
 import type { VaultStatus } from "@/lib/constants";
 import { API_ERROR } from "@/lib/http/api-error-codes";
 import { parseJsonBodyOnce, readApiErrorBody } from "@/lib/http/read-api-error-body";
-import { fetchApi } from "@/lib/url-helpers";
+import { fetchApi, SessionChangedError } from "@/lib/url-helpers";
 import { hexDecode, hexEncode } from "../crypto/crypto-utils";
 import { takePrf } from "@/lib/auth/prf-handoff";
 import { readPasskeyOptions, readPrfData } from "@/lib/auth/webauthn/passkey-response";
@@ -58,10 +58,10 @@ import {
 import { AutoLockProvider } from "./auto-lock-context";
 import { EmergencyAccessProvider, confirmPendingEmergencyGrants } from "../emergency-access/emergency-access-context";
 import { MS_PER_SECOND } from "@/lib/constants/time";
-import { PRE_ROUTE_AND_PRE_TX_REFUSALS } from "./pre-commit-refusals";
-import { VAULT_UNLOCK_INTERRUPTED } from "./vault-unlock-codes";
+import { PRE_ROUTE_AND_PRE_TX_REFUSALS, is5xxPreRouteRefusal } from "./pre-commit-refusals";
+import { VAULT_SETUP_OUTCOME_UNKNOWN, VAULT_UNLOCK_INTERRUPTED } from "./vault-unlock-codes";
 
-export { VAULT_UNLOCK_INTERRUPTED };
+export { VAULT_SETUP_OUTCOME_UNKNOWN, VAULT_UNLOCK_INTERRUPTED };
 
 /** Error thrown by `unlock()` when the server rejects the request with a specific error code. */
 export class VaultUnlockError extends Error {
@@ -352,6 +352,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   }
   // Nor does a switched user's: next-auth's setSession(B) goes authenticated →
   // authenticated, and A's vault must not render unlocked under B's cookie.
+  // Nor A's setup wizard: A's "no vault" verdict says nothing about B's, so
+  // the vault waits in LOADING for B's status check to decide.
   // A switch is a change between two defined ids, so the last defined id is
   // kept: undefined → id (the first id, or a refetch briefly carrying none) is
   // not a switch, and a same-user refetch carries the same id.
@@ -361,6 +363,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     if (prevSessionUserId !== undefined && vaultStatus === VAULT_STATUS.UNLOCKED) {
       setVaultStatus(VAULT_STATUS.LOCKED);
       setEncryptionKey(null);
+    } else if (prevSessionUserId !== undefined && vaultStatus === VAULT_STATUS.SETUP_REQUIRED) {
+      setVaultStatus(VAULT_STATUS.LOADING);
     }
   }
   // A passkey-gated session never fetches the vault status (see the status
@@ -515,6 +519,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Whether the session ended, or switched away from `userId` (the last
+  // defined session user id when a flow started), since. A switch needs both
+  // ids defined, as for the session-change drop, so an id that only arrived
+  // since (undefined → defined) is not a move. A same-user page hide, unmount
+  // or lock is not a move either.
+  const sessionMovedFrom = useCallback((userId: string | undefined) => {
+    const switched = userId !== undefined && sessionUserIdRef.current !== userId;
+    return sessionStatusRef.current === "unauthenticated" || switched;
+  }, []);
+
   // An unlock step after an await: stop once the vault was locked since it
   // started, with the error installKeyMaterial's refusal would give.
   const refuseIfLockedSince = useCallback((epoch: number) => {
@@ -659,10 +673,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   // switch needs both ids defined, as for the session-change drop, so an id
   // that only arrived since (undefined → defined) still locks.
   const lockUnlessSessionMoved = useCallback((userId: string | undefined) => {
-    const switched = userId !== undefined && sessionUserIdRef.current !== userId;
-    if (sessionStatusRef.current === "unauthenticated" || switched) return;
+    if (sessionMovedFrom(userId)) return;
     lock();
-  }, [lock]);
+  }, [lock, sessionMovedFrom]);
 
   // ─── SecretKey cleanup on unmount / page unload ─────────────
   // A page hide is a lock: it drops the same material and queues LOCKED with
@@ -773,28 +786,48 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       // 9. Send to server — not when the vault was locked or the session
       // moved while preparing: the request would carry another user's cookie.
       refuseIfInterrupted();
-      const res = await fetchApi(API_PATH.VAULT_SETUP, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          encryptedSecretKey: wrappedKey.ciphertext,
-          secretKeyIv: wrappedKey.iv,
-          secretKeyAuthTag: wrappedKey.authTag,
-          accountSalt: hexEncode(accountSalt),
-          authHash,
-          verifierHash,
-          verificationArtifact: artifact,
-          ecdhPublicKey: ecdhPubJwk,
-          encryptedEcdhPrivateKey: hexEncode(ecdhEncrypted.ciphertext),
-          ecdhPrivateKeyIv: ecdhEncrypted.iv,
-          ecdhPrivateKeyAuthTag: ecdhEncrypted.authTag,
-        }),
-      });
+      // The route answers 201 once its write commits, and nothing else after
+      // it. A rejected fetch, or a 5xx that is not a pre-route refusal (a
+      // proxy's 502/504 page, the 500 for an uncaught throw), may follow that
+      // commit: the vault may now exist with this passphrase, so the status is
+      // asked again and decides, and the caller is told the outcome is unknown.
+      const outcomeUnknown = () => {
+        refuseIfInterrupted();
+        requestStatusCheck();
+        return new VaultUnlockError(VAULT_SETUP_OUTCOME_UNKNOWN);
+      };
+      let res: Response;
+      try {
+        res = await fetchApi(API_PATH.VAULT_SETUP, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            encryptedSecretKey: wrappedKey.ciphertext,
+            secretKeyIv: wrappedKey.iv,
+            secretKeyAuthTag: wrappedKey.authTag,
+            accountSalt: hexEncode(accountSalt),
+            authHash,
+            verifierHash,
+            verificationArtifact: artifact,
+            ecdhPublicKey: ecdhPubJwk,
+            encryptedEcdhPrivateKey: hexEncode(ecdhEncrypted.ciphertext),
+            ecdhPrivateKeyIv: ecdhEncrypted.iv,
+            ecdhPrivateKeyAuthTag: ecdhEncrypted.authTag,
+          }),
+        });
+      } catch (e) {
+        // Refused by the proxy before the route ran: nothing was written.
+        if (e instanceof SessionChangedError) throw e;
+        throw outcomeUnknown();
+      }
 
       if (!res.ok) {
         // A refused session needs a new sign-in, as for the unlock paths.
         if (res.status === 401) throw new VaultUnlockError(API_ERROR.UNAUTHORIZED);
         const err = await readApiErrorBody(res);
+        if (res.status >= 500 && !is5xxPreRouteRefusal(err?.error)) {
+          throw outcomeUnknown();
+        }
         // The vault exists (this setup's 201 was lost and it was retried, or
         // another tab set it up): leave it LOCKED for an unlock.
         if (err?.error === API_ERROR.VAULT_ALREADY_SETUP) {
@@ -809,9 +842,11 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       setupRequiredRef.current = false;
 
       // 10. Store secretKey, keyVersion, accountSalt, wrappedKey, ECDH keys, and
-      // encryption key in memory. Synchronous with the checks above, so the
-      // install cannot be refused here; the check below only keeps a refusal
-      // from passing as success.
+      // encryption key in memory. Not synchronous with the checks above:
+      // refuseIfStale is async, so even its fast path resumes here a microtask
+      // later. installKeyMaterial checks the lock epoch itself as it writes, so
+      // a lock in between is refused there, and the check below reports that
+      // refusal instead of passing it as success.
       const installed = installKeyMaterial(lockEpoch, {
         secretKey,
         keyVersion: INITIAL_VAULT_KEY_VERSION,
@@ -838,12 +873,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     // install: installKeyMaterial refuses, and the unlock throws
     // VAULT_UNLOCK_INTERRUPTED (UNAUTHORIZED once the session has ended).
     const lockEpoch = lockEpochRef.current;
+    const startUserId = sessionUserIdRef.current;
     // One finally zeroes the unwrapped key, the auth key bytes and the ECDH
     // private key on every exit — a refused or rejected unlock POST included;
     // the success path copied the keys into the refs.
     let secretKey: Uint8Array | null = null;
     let authKeyBytes: Uint8Array | null = null;
     let ecdhPrivateKeyBytes: Uint8Array | null = null;
+    const refuseIfSessionMoved = () => {
+      if (sessionMovedFrom(startUserId)) throw installRefusedError();
+    };
     try {
       // 1. Fetch encrypted secret key + verification artifact (session-protected)
       const dataRes = await fetchApi(API_PATH.VAULT_UNLOCK_DATA);
@@ -875,11 +914,13 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         );
       } catch {
         // Passphrase is wrong — notify server for lockout tracking. Not once
-        // the vault was locked or the session moved since the unlock started:
-        // under another user's cookie the failure would count against them.
+        // the session ended or switched since the unlock started: under
+        // another user's cookie the failure would count against them. A
+        // same-user page hide, unmount or lock still reports it: the attempt
+        // was made under this user's session, and the lockout must count it.
         // Network failures are swallowed (VaultUnlockError propagates for lockout UI).
-        refuseIfLockedSince(lockEpoch);
-        try { await notifyUnlockFailure(); } catch (e) { if (e instanceof VaultUnlockError) throw e; }
+        refuseIfSessionMoved();
+        try { await notifyUnlockFailure(); } catch (e) { if (e instanceof VaultUnlockError || e instanceof SessionChangedError) throw e; }
         return false;
       }
       secretKey = unwrapped;
@@ -889,8 +930,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
       if (vaultData.verificationArtifact) {
         const valid = await verifyKey(encKey, vaultData.verificationArtifact);
         if (!valid) {
-          refuseIfLockedSince(lockEpoch);
-          try { await notifyUnlockFailure(); } catch (e) { if (e instanceof VaultUnlockError) throw e; }
+          refuseIfSessionMoved();
+          try { await notifyUnlockFailure(); } catch (e) { if (e instanceof VaultUnlockError || e instanceof SessionChangedError) throw e; }
           return false;
         }
       }
@@ -959,14 +1000,16 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       return true;
     } catch (err) {
-      if (err instanceof VaultUnlockError) throw err;
+      // A session that changed since the page loaded is refused before any
+      // route runs: no attempt was made, so it is never a wrong passphrase.
+      if (err instanceof VaultUnlockError || err instanceof SessionChangedError) throw err;
       return false;
     } finally {
       secretKey?.fill(0);
       authKeyBytes?.fill(0);
       ecdhPrivateKeyBytes?.fill(0);
     }
-  }, [sessionUserId, installKeyMaterial, installRefusedError, refuseIfLockedSince]);
+  }, [sessionUserId, installKeyMaterial, installRefusedError, refuseIfLockedSince, sessionMovedFrom]);
 
   // ─── Unlock with Passkey (PRF) ───────────────────────────────
 
@@ -1119,7 +1162,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       return true;
     } catch (err) {
-      if (err instanceof VaultUnlockError) throw err;
+      // A session that changed since the page loaded is refused before any
+      // route runs: no attempt was made, so it is never a wrong passphrase.
+      if (err instanceof VaultUnlockError || err instanceof SessionChangedError) throw err;
       // User cancelled WebAuthn dialog — not an error
       if (err instanceof Error && err.message === "AUTHENTICATION_CANCELLED") {
         return false;
@@ -1243,7 +1288,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
 
       return true;
     } catch (err) {
-      if (err instanceof VaultUnlockError) throw err;
+      // A session that changed since the page loaded is refused before any
+      // route runs: no attempt was made, so it is never a wrong passphrase.
+      if (err instanceof VaultUnlockError || err instanceof SessionChangedError) throw err;
       return false;
     } finally {
       prfOutput.fill(0);
@@ -1325,7 +1372,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
             newVerifierHash,
           }),
         });
-      } catch {
+      } catch (e) {
+        // Refused by the proxy before the route ran: nothing was written.
+        if (e instanceof SessionChangedError) throw e;
         lockUnlessSessionMoved(sessionUserAtStart);
         throw new VaultChangeOutcomeUnknownError();
       }
@@ -1771,7 +1820,7 @@ export function VaultProvider({ children }: { children: ReactNode }) {
         sent = true;
         try {
           res = await fetchApi(API_PATH.VAULT_ROTATE_KEY, {
-            method: "POST",
+          method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               currentAuthHash,
@@ -1792,7 +1841,9 @@ export function VaultProvider({ children }: { children: ReactNode }) {
               legacyAttachmentsMigratedThisCycle: legacyAttachmentsMigrated,
             }),
           });
-        } catch {
+        } catch (e) {
+          // Refused by the proxy before the route ran: nothing was written.
+          if (e instanceof SessionChangedError) throw e;
           lockUnlessSessionMoved(sessionUserAtStart);
           throw new VaultChangeOutcomeUnknownError();
         }
@@ -1927,6 +1978,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
           <TeamVaultProvider
             getEcdhPrivateKeyBytes={getEcdhPrivateKeyBytes}
             getUserId={getUserId}
+            getLockEpoch={getLockEpoch}
+            lockedSince={lockedSince}
             vaultUnlocked={vaultStatus === VAULT_STATUS.UNLOCKED}
             pollingSuspended={passkeyGated}
           >

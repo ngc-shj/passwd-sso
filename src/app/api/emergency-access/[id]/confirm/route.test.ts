@@ -37,6 +37,7 @@ import { POST } from "./route";
 import { EA_STATUS } from "@/lib/constants";
 
 const validBody = {
+  ownerId: "owner-1",
   ownerEphemeralPublicKey: '{"kty":"EC","crv":"P-256","x":"abc","y":"def"}',
   encryptedSecretKey: "aabbccddeeff",
   secretKeyIv: "112233445566778899aabbcc",
@@ -107,6 +108,30 @@ describe("POST /api/emergency-access/[id]/confirm", () => {
     expect(res.status).toBe(404);
     const json = await res.json();
     expect(json.error).toBe("USER_NOT_FOUND");
+  });
+
+  // The escrow was built from another user's key (the client's cookie moved
+  // since it read its grants): the grant must not be armed with it.
+  it("refuses with 409 SESSION_CHANGED and leaves the grant unchanged when ownerId is not the session user", async () => {
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/emergency-access/grant-1/confirm", {
+        body: { ...validBody, ownerId: "someone-else" },
+      }),
+      createParams({ id: "grant-1" })
+    );
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe("SESSION_CHANGED");
+    expect(mockPrismaGrant.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 and leaves the grant unchanged when ownerId is missing", async () => {
+    const { ownerId: _ownerId, ...withoutOwner } = validBody;
+    const res = await POST(
+      createRequest("POST", "http://localhost/api/emergency-access/grant-1/confirm", { body: withoutOwner }),
+      createParams({ id: "grant-1" })
+    );
+    expect(res.status).toBe(400);
+    expect(mockPrismaGrant.updateMany).not.toHaveBeenCalled();
   });
 
   it("returns 400 for unsupported wrapVersion", async () => {

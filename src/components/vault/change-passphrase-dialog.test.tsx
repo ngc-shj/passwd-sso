@@ -84,6 +84,7 @@ vi.mock("@/components/ui/label", () => ({
 
 import { ChangePassphraseDialog } from "./change-passphrase-dialog";
 import { VaultChangedElsewhereError, VaultChangeOutcomeUnknownError } from "@/lib/vault/vault-context";
+import { SessionChangedError } from "@/lib/url-helpers";
 
 describe("ChangePassphraseDialog", () => {
   let onOpenChange: ReturnType<typeof vi.fn<(open: boolean) => void>>;
@@ -222,6 +223,19 @@ describe("ChangePassphraseDialog", () => {
     });
     expect(mockToast.error).toHaveBeenCalledWith("changePassphraseOutcomeUnknown", { duration: Infinity });
     expect(mockToast.success).not.toHaveBeenCalled();
+    expect(screen.queryByText("changePassphraseFailed")).toBeNull();
+  });
+
+  // Refused before any route ran: nothing changed, so no locked-vault notice.
+  it("shows the changed-session message, not an unknown outcome, when the change is refused for a changed session", async () => {
+    mockChangePassphrase.mockRejectedValue(new SessionChangedError());
+
+    render(<ChangePassphraseDialog open={true} onOpenChange={onOpenChange} />);
+    fillForm("oldpass", "longenoughpass", "longenoughpass");
+    fireEvent.click(screen.getByRole("button", { name: "changePassphraseButton" }));
+
+    expect(await screen.findByText("sessionChanged")).toBeInTheDocument();
+    expect(mockToast.error).not.toHaveBeenCalled();
     expect(screen.queryByText("changePassphraseFailed")).toBeNull();
   });
 

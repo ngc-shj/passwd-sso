@@ -30,7 +30,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Loader2, Copy, AlertTriangle } from "lucide-react";
-import { fetchApi } from "@/lib/url-helpers";
+import { fetchApi, SessionChangedError } from "@/lib/url-helpers";
 
 // ── Core logic (exported for testing) ───────────────────────────
 
@@ -112,7 +112,9 @@ export async function generateRecoveryKeyFlow(
           verifierHash: wrapped.verifierHash,
         }),
       });
-    } catch {
+    } catch (e) {
+      // Refused by the proxy before the route ran: nothing was stored.
+      if (e instanceof SessionChangedError) return { ok: false, errorCode: API_ERROR.SESSION_CHANGED };
       return { ok: false, outcomeUnknown: true };
     }
 

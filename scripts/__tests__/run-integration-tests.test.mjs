@@ -1,6 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { EventEmitter } from "node:events";
-import { roleStateChanges, runWithScratchDatabase, scratchDatabaseLifecycle, sweepStale } from "../run-integration-tests.mjs";
+import {
+  roleStateChanges,
+  roleStateProblems,
+  runWithScratchDatabase,
+  scratchDatabaseLifecycle,
+  scratchRedisLifecycle,
+  sweepStale,
+} from "../run-integration-tests.mjs";
+import { FakeRedis } from "./fake-redis.mjs";
 import { scratchDatabaseName, scratchMarker } from "../lib/integration-scratch-db.mjs";
 
 const NODE = process.execPath;
@@ -178,6 +186,25 @@ describe("roleStateChanges", () => {
   });
 });
 
+describe("roleStateProblems", () => {
+  const role = (rolname) => ({ rolname, rolcanlogin: true });
+
+  it("refuses a before-snapshot that found no role, even with nothing after", () => {
+    expect(roleStateProblems([], [])).toEqual([expect.stringMatching(/found no passwd_\* role/)]);
+    expect(roleStateProblems([], [role("passwd_app")])).toHaveLength(1);
+  });
+
+  it("is empty when the examined roles are unchanged", () => {
+    expect(roleStateProblems([role("passwd_app")], [role("passwd_app")])).toEqual([]);
+  });
+
+  it("reports the changed roles", () => {
+    expect(roleStateProblems([role("passwd_app")], [{ ...role("passwd_app"), rolcanlogin: false }])).toEqual([
+      "passwd_app: rolcanlogin",
+    ]);
+  });
+});
+
 /**
  * A fake cluster: databases by name with owner, comment and connection count;
  * every statement the runner sends is recorded. `self` is the role connected as.
@@ -191,8 +218,10 @@ function fakeCluster({ self = "passwd_user", dbs = {} } = {}) {
       statements.push(sql);
       let m;
       if ((m = /^CREATE DATABASE "([^"]+)" TEMPLATE template0$/.exec(sql))) {
-        if (databases.has(m[1])) throw new Error(`database "${m[1]}" already exists`);
+        if (client.failCreate) throw new Error("Connection terminated unexpectedly");
+        if (databases.has(m[1])) throw Object.assign(new Error(`database "${m[1]}" already exists`), { code: "42P04" });
         databases.set(m[1], { owner: self, comment: null, connections: 0 });
+        if (client.loseCreateReply) throw new Error("Connection terminated unexpectedly");
         return { rows: [], rowCount: null };
       }
       if ((m = /^COMMENT ON DATABASE "([^"]+)" IS '(.*)'$/s.exec(sql))) {
@@ -217,11 +246,33 @@ function fakeCluster({ self = "passwd_user", dbs = {} } = {}) {
       throw new Error(`unexpected statement: ${sql}`);
     },
   };
+  const events = [];
+  const _query = client.query;
+  client.query = async (sql, params) => {
+    if (sql.startsWith("COMMENT")) events.push("comment");
+    if (sql.startsWith("DROP")) events.push("drop");
+    return _query(sql, params);
+  };
   return {
     client,
     databases,
+    events,
     connect: (fn) => fn(client),
     drops: () => statements.filter((q) => q.startsWith("DROP")),
+    /** A keeper connection to `name`: counted while open, as pg_stat_activity would. */
+    openKeeper: (name) => async () => {
+      databases.get(name).connections += 1;
+      events.push("keeper-open");
+      let open = true;
+      return {
+        lost: () => false,
+        close: async () => {
+          if (open) databases.get(name).connections -= 1;
+          open = false;
+          events.push("keeper-close");
+        },
+      };
+    },
   };
 }
 
@@ -232,7 +283,7 @@ const MARKER = scratchMarker({ host: "devbox", pid: 4242, createdAt: NOW });
 describe("scratchDatabaseLifecycle", () => {
   it("drops the database a normal run created and marked", async () => {
     const c = fakeCluster();
-    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, log: () => {} });
+    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, openKeeper: c.openKeeper(NAME), log: () => {} });
     await scratch.create();
     expect(c.databases.get(NAME).comment).toBe(MARKER);
     await expect(scratch.drop()).resolves.toBe(true);
@@ -242,7 +293,7 @@ describe("scratchDatabaseLifecycle", () => {
   it("issues no DROP when CREATE failed because a database of that name already existed", async () => {
     const c = fakeCluster({ dbs: { [NAME]: { owner: "passwd_user", comment: null, connections: 0 } } });
     const logs = [];
-    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, log: (m) => logs.push(m) });
+    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, openKeeper: c.openKeeper(NAME), log: (m) => logs.push(m) });
     await expect(scratch.create()).rejects.toThrow(/already exists/);
     await expect(scratch.drop()).resolves.toBe(true);
     expect(c.drops()).toEqual([]);
@@ -253,7 +304,7 @@ describe("scratchDatabaseLifecycle", () => {
   it("drops a database it created whose COMMENT failed, expecting no comment", async () => {
     const c = fakeCluster();
     c.client.failComment = true;
-    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, log: () => {} });
+    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, openKeeper: c.openKeeper(NAME), log: () => {} });
     await expect(scratch.create()).rejects.toThrow(/connection reset/);
     await expect(scratch.drop()).resolves.toBe(true);
     expect(c.databases.has(NAME)).toBe(false);
@@ -261,7 +312,7 @@ describe("scratchDatabaseLifecycle", () => {
 
   it("refuses to drop when the database's comment was replaced after create", async () => {
     const c = fakeCluster();
-    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, log: () => {} });
+    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, openKeeper: c.openKeeper(NAME), log: () => {} });
     await scratch.create();
     c.databases.get(NAME).comment = scratchMarker({ host: "devbox", pid: 4242, createdAt: NOW });
     await expect(scratch.drop()).rejects.toThrow(/comment is not this run's marker/);
@@ -270,17 +321,62 @@ describe("scratchDatabaseLifecycle", () => {
 
   it("refuses to drop when the database's owner changed after create", async () => {
     const c = fakeCluster();
-    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, log: () => {} });
+    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, openKeeper: c.openKeeper(NAME), log: () => {} });
     await scratch.create();
     c.databases.get(NAME).owner = "mallory";
     await expect(scratch.drop()).rejects.toThrow(/owned by another role/);
     expect(c.drops()).toEqual([]);
   });
 
+  it("opens the keeper before COMMENT marks the database and closes it just before the drop", async () => {
+    const c = fakeCluster();
+    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, openKeeper: c.openKeeper(NAME), log: () => {} });
+    await scratch.create();
+    await scratch.drop();
+    expect(c.events).toEqual(["keeper-open", "comment", "keeper-close", "drop"]);
+  });
+
+  // S7-4: a live run whose pid the sweeping run cannot see (another PID
+  // namespace, same hostname) looks dead by host+pid; its keeper is what keeps
+  // its database out of the sweep, between steps included.
+  it("a live run's database survives another run's sweep that judges its pid dead", async () => {
+    const c = fakeCluster();
+    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, openKeeper: c.openKeeper(NAME), log: () => {} });
+    await scratch.create();
+    await sweepStale(c.connect, { host: "devbox", isAlive: () => false, log: () => {} });
+    expect(c.drops()).toEqual([]);
+    expect(c.databases.get(NAME).comment).toBe(MARKER);
+    await expect(scratch.drop()).resolves.toBe(true);
+    expect(c.databases.has(NAME)).toBe(false);
+  });
+
+  // S7-5: CREATE committed, its reply lost. Not provably this run's, so not
+  // dropped — but reported, not "nothing to drop".
+  it("reports, and does not drop, a database present after a CREATE whose reply was lost", async () => {
+    const c = fakeCluster();
+    c.client.loseCreateReply = true;
+    const { signals, logs, log } = harness();
+    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, openKeeper: c.openKeeper(NAME), log });
+    const status = await runWithScratchDatabase({ name: NAME, main: () => scratch.create().then(() => 0), drop: scratch.drop, signals, log });
+    expect(status).toBe(1);
+    expect(c.drops()).toEqual([]);
+    expect(c.databases.has(NAME)).toBe(true);
+    expect(logs.join("\n")).toContain(`INTEGRATION_CLEANUP_INCOMPLETE ${NAME}`);
+    expect(logs.join("\n")).not.toContain("nothing to drop");
+  });
+
+  it("reports nothing when a CREATE of unknown outcome left no database", async () => {
+    const c = fakeCluster();
+    c.client.failCreate = true;
+    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, openKeeper: c.openKeeper(NAME), log: () => {} });
+    await expect(scratch.create()).rejects.toThrow(/terminated/);
+    await expect(scratch.drop()).resolves.toBe(true);
+  });
+
   it("through runWithScratchDatabase: a CREATE failure exits 1 with no DROP and no cleanup-incomplete", async () => {
     const c = fakeCluster({ dbs: { [NAME]: { owner: "mallory", comment: MARKER, connections: 0 } } });
     const { signals, logs, log } = harness();
-    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, log });
+    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, openKeeper: c.openKeeper(NAME), log });
     const status = await runWithScratchDatabase({ name: NAME, main: () => scratch.create().then(() => 0), drop: scratch.drop, signals, log });
     expect(status).toBe(1);
     expect(c.drops()).toEqual([]);
@@ -290,7 +386,7 @@ describe("scratchDatabaseLifecycle", () => {
   it("through runWithScratchDatabase: a refused drop reports cleanup-incomplete naming the database and exits nonzero", async () => {
     const c = fakeCluster();
     const { signals, logs, log } = harness();
-    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, log });
+    const scratch = scratchDatabaseLifecycle({ name: NAME, marker: MARKER, connect: c.connect, openKeeper: c.openKeeper(NAME), log });
     const status = await runWithScratchDatabase({
       name: NAME,
       main: async () => {
@@ -319,6 +415,13 @@ describe("sweepStale", () => {
     expect(c.databases.has(deadName)).toBe(false);
   });
 
+  it("leaves a dead-pid database that has a connection", async () => {
+    const c = fakeCluster({ dbs: { [deadName]: { owner: "passwd_user", comment: deadMarker, connections: 1 } } });
+    await sweepStale(c.connect, opts);
+    expect(c.drops()).toEqual([]);
+    expect(c.databases.has(deadName)).toBe(true);
+  });
+
   it("leaves a forged marker on a database another role owns", async () => {
     const c = fakeCluster({ dbs: { [deadName]: { owner: "mallory", comment: deadMarker, connections: 0 } } });
     await sweepStale(c.connect, opts);
@@ -335,5 +438,62 @@ describe("sweepStale", () => {
     await sweepStale(c.connect, { ...opts, log: (m) => logs.push(m) });
     expect(c.drops()).toEqual([]);
     expect(logs.join("\n")).toMatch(/WARNING: refusing to drop/);
+  });
+});
+
+describe("scratchRedisLifecycle", () => {
+  const URL_ = "redis://:pw@localhost:6379";
+  const deadMarker = scratchMarker({ host: "devbox", pid: 100, createdAt: NOW });
+  const lifecycle = (server, extra = {}) =>
+    scratchRedisLifecycle({
+      url: URL_,
+      sentinel: false,
+      marker: MARKER,
+      openKeeper: async () => server.connect(),
+      host: "devbox",
+      isAlive: () => false,
+      log: () => {},
+      ...extra,
+    });
+
+  it("does nothing without a REDIS_URL", async () => {
+    const r = scratchRedisLifecycle({ url: undefined, sentinel: false, marker: MARKER, openKeeper: async () => {
+      throw new Error("must not connect");
+    } });
+    await expect(r.claim()).resolves.toBeUndefined();
+    await expect(r.release()).resolves.toBe(true);
+  });
+
+  it("refuses Sentinel mode", async () => {
+    await expect(lifecycle(new FakeRedis(), { sentinel: true }).claim()).rejects.toThrow(/REDIS_SENTINEL/);
+  });
+
+  it("claims a database other than the one REDIS_URL names, points REDIS_URL at it, and flushes it on release", async () => {
+    const server = new FakeRedis();
+    const r = lifecycle(server);
+    const url = await r.claim();
+    expect(url).toBe("redis://:pw@localhost:6379/1");
+    server.db(1).set("rl:mcp:token:ip:unknown", "5");
+    await expect(r.release()).resolves.toBe(true);
+    expect(server.db(1).size).toBe(0);
+    expect(server.clients.size).toBe(0);
+  });
+
+  it("does not flush, and reports, when the claim was replaced", async () => {
+    const server = new FakeRedis();
+    const r = lifecycle(server);
+    await r.claim();
+    server.db(1).set("passwd-sso:integration-scratch", deadMarker);
+    await expect(r.release()).resolves.toBe(false);
+    expect(server.db(1).size).toBe(1);
+  });
+
+  it("sweeps a dead run's claimed database with no client before claiming", async () => {
+    const server = new FakeRedis();
+    server.db(1).set("passwd-sso:integration-scratch", deadMarker);
+    server.db(1).set("rl:x", "1");
+    const r = lifecycle(server);
+    expect(await r.claim()).toBe("redis://:pw@localhost:6379/1");
+    expect(server.db(1).get("passwd-sso:integration-scratch")).toBe(MARKER);
   });
 });

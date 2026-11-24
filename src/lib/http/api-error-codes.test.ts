@@ -175,7 +175,8 @@ describe("API_ERROR structural invariants", () => {
     // 206 = 205 + TEAM_KEY_RECIPIENT_CHANGED (team-key-recipient-binding C4).
     // 207 = 206 + VAULT_WRAP_CONFLICT (close-coverage-and-clipboard-gaps
     // review round 2, S-R2-2: compare-and-swap loss on a vault rewrap).
-    expect(Object.keys(API_ERROR).length).toBe(207);
+    // 208 = 207 + SESSION_CHANGED (proxy expected-user gate).
+    expect(Object.keys(API_ERROR).length).toBe(208);
   });
 });
 
