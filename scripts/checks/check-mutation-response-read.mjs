@@ -8,8 +8,8 @@
  * A client mutation whose server-side write has committed (`res.ok`) was
  * reported as failed, or skipped its completion, because `await res.json()`
  * sat in the same `try` as the request and threw. For an endpoint that mints a
- * once-shown secret (API key, SCIM/SA/operator/JIT token, invite or share
- * link) the secret was lost and the user was told nothing had been created.
+ * once-shown secret (an API key; a SCIM, service-account, operator or JIT
+ * token; an invite or share link) the secret was lost and the user was told nothing had been created.
  * `parseJsonBodyOnce` never rejects (an unreadable body is `null`), so a site
  * that uses it cannot fail that way.
  *
