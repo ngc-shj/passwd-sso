@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.2](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.5.1...passwd-sso-v0.5.2) (2026-11-26)
+
+
+### Bug Fixes
+
+* measure every production file, bind web requests to the page's user, and close the defects the coverage work exposed ([#1087](https://github.com/ngc-shj/passwd-sso/issues/1087)) ([a90d094](https://github.com/ngc-shj/passwd-sso/commit/a90d094e067a4a6d9be282996ed3e27ff21fad81))
+
 ## [0.5.1](https://github.com/ngc-shj/passwd-sso/compare/passwd-sso-v0.5.0...passwd-sso-v0.5.1) (2026-11-21)
 
 
